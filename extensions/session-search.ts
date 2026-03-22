@@ -146,37 +146,15 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
 }
 
 function buildSearchParams(params: SessionSearchToolParams): SearchSessionsParams {
-  const searchParams: SearchSessionsParams = {};
-
-  if (params.query) {
-    searchParams.query = params.query;
-  }
-
-  if (params.files?.touched?.length) {
-    searchParams.touched = params.files.touched;
-  }
-
-  if (params.repo) {
-    searchParams.repo = params.repo;
-  }
-
-  if (params.cwd) {
-    searchParams.cwd = params.cwd;
-  }
-
-  if (params.time?.after) {
-    searchParams.after = params.time.after;
-  }
-
-  if (params.time?.before) {
-    searchParams.before = params.time.before;
-  }
-
-  if (typeof params.limit === "number") {
-    searchParams.limit = params.limit;
-  }
-
-  return searchParams;
+  return {
+    query: params.query,
+    touched: params.files?.touched,
+    repo: params.repo,
+    cwd: params.cwd,
+    after: params.time?.after,
+    before: params.time?.before,
+    limit: params.limit,
+  };
 }
 
 interface SearchResultTextStyles {

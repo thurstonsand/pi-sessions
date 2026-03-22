@@ -28,25 +28,18 @@ export async function rebuildSessionIndex(options?: ReindexOptions): Promise<Rei
   const tempIndexPath = createTempIndexPath(finalIndexPath);
   const sessionFiles = (await SessionManager.listAll()).map((session) => session.path);
 
-  let db: SessionIndexDatabase | undefined;
+  const db = openIndexDatabase(tempIndexPath, { create: true });
+  let sessionCount: number;
+  let chunkCount: number;
   try {
-    db = openIndexDatabase(tempIndexPath, { create: true });
     initializeSchema(db);
-    const { sessionCount, chunkCount } = indexSessionFiles(db, sessionFiles);
+    ({ sessionCount, chunkCount } = indexSessionFiles(db, sessionFiles));
+  } finally {
     db.close();
-    db = undefined;
-
-    renameSync(tempIndexPath, finalIndexPath);
-
-    return {
-      sessionCount,
-      chunkCount,
-      indexPath: finalIndexPath,
-    };
-  } catch (error) {
-    db?.close();
-    throw error;
   }
+
+  renameSync(tempIndexPath, finalIndexPath);
+  return { sessionCount, chunkCount, indexPath: finalIndexPath };
 }
 
 function indexSessionFiles(

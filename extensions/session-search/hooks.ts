@@ -84,13 +84,9 @@ export function createSessionHookController(options?: {
       return syncAttachedSession(indexPath, state, "session_start");
     },
     async handleSessionSwitch(previousSessionFile, sessionFile, cwd) {
-      const previousSynced = await syncSessionFile(
-        indexPath,
-        previousSessionFile,
-        "session_switch",
-      );
+      const previousSynced = syncSessionFile(indexPath, previousSessionFile, "session_switch");
       attachSession(state, sessionFile, cwd);
-      const currentSynced = await syncAttachedSession(indexPath, state, "session_switch");
+      const currentSynced = syncAttachedSession(indexPath, state, "session_switch");
       return previousSynced || currentSynced;
     },
     handleToolCall(event, sessionFile, cwd) {
@@ -117,7 +113,7 @@ export function createSessionHookController(options?: {
     },
     async handleTurnEnd(sessionFile, cwd) {
       attachSession(state, sessionFile, cwd);
-      const synced = await syncAttachedSession(indexPath, state, "turn_end");
+      const synced = syncAttachedSession(indexPath, state, "turn_end");
       clearTurnState(state);
       return synced;
     },
@@ -131,7 +127,7 @@ export function createSessionHookController(options?: {
     },
     async handleSessionShutdown(sessionFile, cwd) {
       attachSession(state, sessionFile, cwd);
-      const synced = await syncAttachedSession(indexPath, state, "session_shutdown");
+      const synced = syncAttachedSession(indexPath, state, "session_shutdown");
       clearTurnState(state);
       state.currentSessionFile = undefined;
       state.currentCwd = undefined;

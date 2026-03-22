@@ -92,15 +92,10 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         timestamp: Date.now(),
       };
 
-      const completionOptions: { apiKey: string; signal?: AbortSignal } = { apiKey };
-      if (signal) {
-        completionOptions.signal = signal;
-      }
-
       const response = await complete(
         ctx.model,
         { systemPrompt: SESSION_ASK_SYSTEM_PROMPT, messages: [userMessage] },
-        completionOptions,
+        signal ? { apiKey, signal } : { apiKey },
       );
 
       if (response.stopReason === "aborted") {

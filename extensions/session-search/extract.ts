@@ -818,9 +818,7 @@ function truncateText(text: string, limit: number): string {
 }
 
 function fullText(text: string): string {
-  const cleaned = String(text ?? "")
-    .replace(/\s+/g, " ")
-    .trim();
+  const cleaned = text.replace(/\s+/g, " ").trim();
   return cleaned || "(no text)";
 }
 

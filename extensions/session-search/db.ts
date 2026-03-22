@@ -280,21 +280,24 @@ export function getMetadata(db: SessionIndexDatabase, key: string): string | und
   return row?.value;
 }
 
-export function insertSession(
-  db: SessionIndexDatabase,
+function sessionRowBindings(
   row: SessionRow,
   indexSource: string,
-): void {
-  const indexedAt = new Date().toISOString();
-  db.prepare(
-    `
-      INSERT INTO sessions(
-        session_id, session_path, session_name, cwd, repo_roots_json,
-        created_ts, modified_ts, message_count, entry_count,
-        index_version, indexed_at_ts, index_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `,
-  ).run(
+): [
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  string,
+  number,
+  number,
+  number,
+  string,
+  string,
+] {
+  return [
     row.sessionId,
     row.sessionPath,
     row.sessionName,
@@ -305,9 +308,59 @@ export function insertSession(
     row.messageCount,
     row.entryCount,
     INDEX_SCHEMA_VERSION,
-    indexedAt,
+    new Date().toISOString(),
     indexSource,
-  );
+  ];
+}
+
+export function insertSession(
+  db: SessionIndexDatabase,
+  row: SessionRow,
+  indexSource: string,
+): void {
+  db.prepare(
+    `
+      INSERT INTO sessions(
+        session_id, session_path, session_name, cwd, repo_roots_json,
+        created_ts, modified_ts, message_count, entry_count,
+        index_version, indexed_at_ts, index_source
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `,
+  ).run(...sessionRowBindings(row, indexSource));
+}
+
+export function upsertSession(
+  db: SessionIndexDatabase,
+  row: SessionRow,
+  indexSource: string,
+): void {
+  db.prepare(
+    `
+      INSERT INTO sessions(
+        session_id, session_path, session_name, cwd, repo_roots_json,
+        created_ts, modified_ts, message_count, entry_count,
+        index_version, indexed_at_ts, index_source
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(session_id) DO UPDATE SET
+        session_path = excluded.session_path,
+        session_name = excluded.session_name,
+        cwd = excluded.cwd,
+        repo_roots_json = excluded.repo_roots_json,
+        created_ts = excluded.created_ts,
+        modified_ts = excluded.modified_ts,
+        message_count = excluded.message_count,
+        entry_count = excluded.entry_count,
+        index_version = excluded.index_version,
+        indexed_at_ts = excluded.indexed_at_ts,
+        index_source = excluded.index_source
+    `,
+  ).run(...sessionRowBindings(row, indexSource));
+}
+
+export function clearSessionIndexedData(db: SessionIndexDatabase, sessionId: string): void {
+  db.prepare(`DELETE FROM session_text_chunks_fts WHERE session_id = ?`).run(sessionId);
+  db.prepare(`DELETE FROM session_text_chunks WHERE session_id = ?`).run(sessionId);
+  db.prepare(`DELETE FROM session_file_touches WHERE session_id = ?`).run(sessionId);
 }
 
 export function insertTextChunk(db: SessionIndexDatabase, row: SessionTextChunkRow): void {

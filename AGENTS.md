@@ -37,12 +37,13 @@ extensions/                  # All source code
   session-search.ts          # "session_search" tool entry point
   session-ask.ts             # "session_ask" tool entry point
   session-index.ts           # "session-index" command entry point
+  session-hooks.ts           # Hook registration entry point
   session-search/            # Core implementation
     db.ts                    # SQLite schema, queries, CRUD, search ranking
     extract.ts               # JSONL parsing, tree rendering, file-touch extraction
     reindex.ts               # Bulk index rebuild
     normalize.ts             # Path normalization and repo-root derivation
-    hooks.ts                 # Hook state types (stub)
+    hooks.ts                 # Hook controller and sync logic
 ```
 
 Entry points are thin wrappers that register tools/commands with the Pi extension

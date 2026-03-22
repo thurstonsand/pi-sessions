@@ -5,6 +5,7 @@ import path from "node:path";
 export interface TestFilesystem {
   createTempDir(): string;
   cleanup(): void;
+  ensureDir(dir: string): string;
   writeJsonlFile(dir: string, name: string, lines: unknown[]): string;
 }
 
@@ -21,6 +22,10 @@ export function createTestFilesystem(prefix: string): TestFilesystem {
       for (const dir of tempDirs.splice(0)) {
         rmSync(dir, { recursive: true, force: true });
       }
+    },
+    ensureDir(dir) {
+      mkdirSync(dir, { recursive: true });
+      return dir;
     },
     writeJsonlFile(dir, name, lines) {
       mkdirSync(dir, { recursive: true });

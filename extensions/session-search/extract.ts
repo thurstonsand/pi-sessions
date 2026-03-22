@@ -1,5 +1,12 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  deriveSessionRepoRoots,
+  type FileTouchOp,
+  type FileTouchSource,
+  normalizePathRecord,
+  type PathScope,
+} from "./normalize.js";
 
 export interface SessionHeader {
   type: "session";
@@ -26,6 +33,20 @@ export interface SearchTextChunk {
   text: string;
 }
 
+export interface SessionFileTouch {
+  entryId?: string | undefined;
+  op: FileTouchOp;
+  source: FileTouchSource;
+  rawPath: string;
+  absPath?: string | undefined;
+  cwdRelPath?: string | undefined;
+  repoRoot?: string | undefined;
+  repoRelPath?: string | undefined;
+  basename: string;
+  pathScope: PathScope;
+  ts: string;
+}
+
 export interface ExtractedSessionRecord {
   sessionId: string;
   sessionPath: string;
@@ -37,6 +58,7 @@ export interface ExtractedSessionRecord {
   messageCount: number;
   entryCount: number;
   chunks: SearchTextChunk[];
+  fileTouches: SessionFileTouch[];
 }
 
 export interface ParsedSessionFile {
@@ -81,6 +103,7 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
 
   const fallbackTs = parsed.header.timestamp;
   const chunks: SearchTextChunk[] = [];
+  const fileTouches: SessionFileTouch[] = [];
   let modifiedAt = fallbackTs;
   let messageCount = 0;
 
@@ -108,6 +131,9 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
 
         messageCount += 1;
         chunks.push(...extractMessageChunks(entry.id, entryTs, message));
+        fileTouches.push(
+          ...extractMessageFileTouches(entry.id, entryTs, message, parsed.header.cwd),
+        );
         continue;
       }
       case "custom_message":
@@ -119,24 +145,46 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
           contentToText((entry as CustomMessageEntry).content),
         );
         continue;
-      case "branch_summary":
+      case "branch_summary": {
+        const branchSummary = entry as BranchSummaryEntry;
         appendEntryTextChunk(
           chunks,
           entry,
           entryTs,
           "branch_summary",
-          trimmedText((entry as BranchSummaryEntry).summary),
+          trimmedText(branchSummary.summary),
+        );
+        fileTouches.push(
+          ...extractDetailFileTouches(
+            entry.id,
+            entryTs,
+            "branch_summary_details",
+            branchSummary.details,
+            parsed.header.cwd,
+          ),
         );
         continue;
-      case "compaction":
+      }
+      case "compaction": {
+        const compaction = entry as CompactionEntry;
         appendEntryTextChunk(
           chunks,
           entry,
           entryTs,
           "compaction_summary",
-          trimmedText((entry as CompactionEntry).summary),
+          trimmedText(compaction.summary),
+        );
+        fileTouches.push(
+          ...extractDetailFileTouches(
+            entry.id,
+            entryTs,
+            "compaction_details",
+            compaction.details,
+            parsed.header.cwd,
+          ),
         );
         continue;
+      }
       default:
         continue;
     }
@@ -147,12 +195,13 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
     sessionPath,
     sessionName: parsed.sessionName,
     cwd: parsed.header.cwd,
-    repoRoots: [],
+    repoRoots: deriveSessionRepoRoots(parsed.header.cwd, fileTouches),
     startedAt: parsed.header.timestamp,
     modifiedAt,
     messageCount,
     entryCount: parsed.entries.length,
     chunks,
+    fileTouches,
   };
 }
 
@@ -214,6 +263,94 @@ function appendEntryTextChunk(
     sourceKind,
     text,
   });
+}
+
+function extractMessageFileTouches(
+  entryId: string | undefined,
+  ts: string,
+  message: SessionMessage,
+  cwd: string,
+): SessionFileTouch[] {
+  if (message.role !== "assistant" || !Array.isArray(message.content)) {
+    return [];
+  }
+
+  return message.content.filter(isToolCallBlock).flatMap((toolCall) => {
+    const rawPath = stringValue(toolCall.arguments?.path);
+    const op = getToolCallFileTouchOp(toolCall.name);
+    if (!rawPath || !op) {
+      return [];
+    }
+
+    return [createFileTouch(entryId, ts, op, "tool_call", rawPath, cwd)];
+  });
+}
+
+function extractDetailFileTouches(
+  entryId: string | undefined,
+  ts: string,
+  source: Extract<FileTouchSource, "branch_summary_details" | "compaction_details">,
+  details: SummaryDetails | undefined,
+  cwd: string,
+): SessionFileTouch[] {
+  if (!details) {
+    return [];
+  }
+
+  return [
+    ...extractDetailFileTouchGroup(entryId, ts, source, "read", details.readFiles, cwd),
+    ...extractDetailFileTouchGroup(entryId, ts, source, "changed", details.modifiedFiles, cwd),
+  ];
+}
+
+function extractDetailFileTouchGroup(
+  entryId: string | undefined,
+  ts: string,
+  source: Extract<FileTouchSource, "branch_summary_details" | "compaction_details">,
+  op: Extract<FileTouchOp, "read" | "changed">,
+  paths: unknown,
+  cwd: string,
+): SessionFileTouch[] {
+  if (!Array.isArray(paths)) {
+    return [];
+  }
+
+  return paths
+    .filter(
+      (rawPath): rawPath is string => typeof rawPath === "string" && rawPath.trim().length > 0,
+    )
+    .map((rawPath) => createFileTouch(entryId, ts, op, source, rawPath, cwd));
+}
+
+function createFileTouch(
+  entryId: string | undefined,
+  ts: string,
+  op: FileTouchOp,
+  source: FileTouchSource,
+  rawPath: string,
+  cwd: string,
+): SessionFileTouch {
+  return {
+    entryId,
+    op,
+    source,
+    ...normalizePathRecord(rawPath, cwd),
+    ts,
+  };
+}
+
+function getToolCallFileTouchOp(
+  toolName: string,
+): Extract<FileTouchOp, "read" | "changed"> | undefined {
+  switch (toolName) {
+    case "read":
+      return "read";
+    case "edit":
+    case "write":
+      return "changed";
+    default:
+      return undefined;
+  }
 }
 
 function trimmedText(value: unknown): string {
@@ -647,6 +784,10 @@ function stringArg(value: unknown, fallback: string): string {
   return typeof value === "string" ? value : fallback;
 }
 
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
 function summarizeToolResults(toolName: string, toolResults: ToolResultEntry[]): string[] {
   if (toolResults.length === 0) {
     return ["(pending result)"];
@@ -702,14 +843,21 @@ interface CustomMessageEntry extends SessionEntryBase {
   content: unknown;
 }
 
+interface SummaryDetails {
+  readFiles?: unknown;
+  modifiedFiles?: unknown;
+}
+
 interface BranchSummaryEntry extends SessionEntryBase {
   type: "branch_summary";
   summary?: string;
+  details?: SummaryDetails;
 }
 
 interface CompactionEntry extends SessionEntryBase {
   type: "compaction";
   summary?: string;
+  details?: SummaryDetails;
 }
 
 interface SessionMessage {

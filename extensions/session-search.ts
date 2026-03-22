@@ -4,6 +4,7 @@ import {
   buildSearchSessionsQuery,
   getDefaultIndexPath,
   getIndexStatus,
+  INDEX_SCHEMA_VERSION,
   openIndexDatabase,
   type SearchSessionResult,
   type SearchSessionsParams,
@@ -11,6 +12,10 @@ import {
 
 interface SessionSearchToolParams {
   query?: string;
+  files?: {
+    touched?: string[];
+  };
+  repo?: string;
   cwd?: string;
   time?: {
     after?: string;
@@ -24,10 +29,22 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
     name: "session_search",
     label: "Session Search",
     description:
-      "Search across the prebuilt Pi session index to find relevant prior sessions by text, time, and cwd.",
+      "Search across the prebuilt Pi session index to find relevant prior sessions by text, files, repo, time, and cwd.",
     parameters: Type.Object({
       query: Type.Optional(
         Type.String({ description: "Text to search for in indexed session content." }),
+      ),
+      files: Type.Optional(
+        Type.Object({
+          touched: Type.Optional(
+            Type.Array(
+              Type.String({ description: "Return sessions that read or changed this file path." }),
+            ),
+          ),
+        }),
+      ),
+      repo: Type.Optional(
+        Type.String({ description: "Limit results to sessions associated with this repo root." }),
       ),
       cwd: Type.Optional(
         Type.String({ description: "Limit results to sessions at or under this cwd." }),
@@ -50,12 +67,12 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
     }),
     async execute(_toolCallId, params: SessionSearchToolParams) {
       const status = getIndexStatus();
-      if (!status.exists) {
+      if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
         return {
           content: [
             {
               type: "text",
-              text: `Session index missing at ${getDefaultIndexPath()}. Run /session-index and press r to build it.`,
+              text: `Session index missing or incompatible at ${getDefaultIndexPath()}. Run /session-index and press r to rebuild it.`,
             },
           ],
           details: { error: true, status, results: [] },
@@ -89,6 +106,14 @@ function buildSearchParams(params: SessionSearchToolParams): SearchSessionsParam
 
   if (params.query) {
     searchParams.query = params.query;
+  }
+
+  if (params.files?.touched?.length) {
+    searchParams.touched = params.files.touched;
+  }
+
+  if (params.repo) {
+    searchParams.repo = params.repo;
   }
 
   if (params.cwd) {
@@ -126,6 +151,10 @@ function formatSearchResult(result: SearchSessionResult, index: number): string[
     `updated: ${result.modifiedAt}`,
     `score: ${result.score.toFixed(2)} / hits: ${result.hitCount}`,
   ];
+
+  if (result.matchedFiles.length > 0) {
+    lines.push(`matched_files: ${result.matchedFiles.join(", ")}`);
+  }
 
   if (result.snippet) {
     lines.push(`> ${result.snippet}`);

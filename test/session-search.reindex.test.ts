@@ -14,18 +14,21 @@ afterEach(() => {
 });
 
 describe("rebuildSessionIndex", () => {
-  it("indexes sessions and text chunks from disk", async () => {
+  it("indexes sessions, repo roots, and file touches from disk", async () => {
     const root = testFs.createTempDir();
     const sessionsDir = path.join(root, "sessions");
     const nestedDir = path.join(sessionsDir, "--repo--");
     const indexPath = path.join(root, "index.sqlite");
+    const repoRoot = testFs.ensureDir(path.join(root, "repo"));
+    testFs.ensureDir(path.join(repoRoot, ".git"));
+    const cwd = testFs.ensureDir(path.join(repoRoot, "app"));
 
     const sessionPath = testFs.writeJsonlFile(nestedDir, "2026-03-22T00-00-00-000Z_demo.jsonl", [
       {
         type: "session",
         id: "demo-session",
         timestamp: "2026-03-22T00:00:00.000Z",
-        cwd: "/repo/app",
+        cwd,
       },
       {
         type: "session_info",
@@ -51,7 +54,25 @@ describe("rebuildSessionIndex", () => {
         timestamp: "2026-03-22T00:00:03.000Z",
         message: {
           role: "assistant",
-          content: [{ type: "text", text: "We should build a session index." }],
+          content: [
+            { type: "text", text: "We should build a session index." },
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "write",
+              arguments: { path: "src/index.ts" },
+            },
+          ],
+        },
+      },
+      {
+        type: "branch_summary",
+        id: "branch-1",
+        parentId: "assistant-1",
+        timestamp: "2026-03-22T00:00:04.000Z",
+        summary: "Indexed the repo work.",
+        details: {
+          modifiedFiles: ["docs/plan.md"],
         },
       },
     ]);
@@ -60,9 +81,9 @@ describe("rebuildSessionIndex", () => {
       {
         path: sessionPath,
         id: "demo-session",
-        cwd: "/repo/app",
+        cwd,
         created: new Date("2026-03-22T00:00:00.000Z"),
-        modified: new Date("2026-03-22T00:00:03.000Z"),
+        modified: new Date("2026-03-22T00:00:04.000Z"),
         messageCount: 2,
         firstMessage: "search for database indexing",
         allMessagesText: "search for database indexing\nWe should build a session index.",
@@ -76,12 +97,20 @@ describe("rebuildSessionIndex", () => {
     const db = openIndexDatabase(indexPath, { create: false });
     const sessions = buildSearchSessionsQuery(db, { limit: 10 });
     const hits = buildSearchSessionsQuery(db, { query: "session index", limit: 10 });
+    const fileHits = buildSearchSessionsQuery(db, {
+      touched: ["src/index.ts"],
+      repo: repoRoot,
+      limit: 10,
+    });
     db.close();
 
     expect(readFileSync(indexPath).length).toBeGreaterThan(0);
     expect(sessions).toHaveLength(1);
     expect(sessions[0]?.sessionId).toBe("demo-session");
+    expect(sessions[0]?.repoRoots).toEqual([repoRoot]);
     expect(hits).toHaveLength(1);
     expect(hits[0]?.snippet).toContain("session");
+    expect(fileHits).toHaveLength(1);
+    expect(fileHits[0]?.matchedFiles).toEqual(["app/src/index.ts"]);
   });
 });

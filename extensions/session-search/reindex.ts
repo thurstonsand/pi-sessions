@@ -5,12 +5,13 @@ import {
   getDefaultIndexPath,
   initializeSchema,
   insertSession,
+  insertSessionFileTouch,
   insertTextChunk,
   openIndexDatabase,
   type SessionIndexDatabase,
   setMetadata,
 } from "./db.js";
-import { extractSessionRecord, type SearchTextChunk } from "./extract.js";
+import { extractSessionRecord, type SearchTextChunk, type SessionFileTouch } from "./extract.js";
 
 export interface ReindexOptions {
   indexPath?: string;
@@ -65,6 +66,7 @@ function indexSessionFiles(
       insertSession(db, extracted, "full_reindex");
       sessionCount += 1;
       chunkCount += insertSessionChunks(db, extracted.sessionId, extracted.chunks);
+      insertSessionFileTouches(db, extracted.sessionId, extracted.fileTouches);
     }
 
     setMetadata(db, "indexed_at", new Date().toISOString());
@@ -79,20 +81,19 @@ function insertSessionChunks(
   sessionId: string,
   chunks: SearchTextChunk[],
 ): number {
-  let chunkCount = 0;
-
   for (const chunk of chunks) {
-    insertTextChunk(db, {
-      sessionId,
-      entryId: chunk.entryId,
-      entryType: chunk.entryType,
-      role: chunk.role,
-      ts: chunk.ts,
-      sourceKind: chunk.sourceKind,
-      text: chunk.text,
-    });
-    chunkCount += 1;
+    insertTextChunk(db, { sessionId, ...chunk });
   }
 
-  return chunkCount;
+  return chunks.length;
+}
+
+function insertSessionFileTouches(
+  db: SessionIndexDatabase,
+  sessionId: string,
+  fileTouches: SessionFileTouch[],
+): void {
+  for (const fileTouch of fileTouches) {
+    insertSessionFileTouch(db, { sessionId, ...fileTouch });
+  }
 }

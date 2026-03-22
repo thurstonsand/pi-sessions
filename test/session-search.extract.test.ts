@@ -1,3 +1,4 @@
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   extractSessionRecord,
@@ -12,13 +13,18 @@ afterEach(() => {
 });
 
 describe("extractSessionRecord", () => {
-  it("extracts session metadata and searchable chunks", () => {
-    const filePath = testFs.writeJsonlFile(testFs.createTempDir(), "session.jsonl", [
+  it("extracts session metadata, file touches, and repo roots", () => {
+    const root = testFs.createTempDir();
+    const repoRoot = testFs.ensureDir(path.join(root, "repo"));
+    testFs.ensureDir(path.join(repoRoot, ".git"));
+    const cwd = testFs.ensureDir(path.join(repoRoot, "app"));
+
+    const filePath = testFs.writeJsonlFile(root, "session.jsonl", [
       {
         type: "session",
         id: "session-1",
         timestamp: "2026-03-20T00:00:00.000Z",
-        cwd: "/repo/app",
+        cwd,
       },
       {
         type: "session_info",
@@ -48,6 +54,18 @@ describe("extractSessionRecord", () => {
           content: [
             { type: "thinking", thinking: "hidden" },
             { type: "text", text: "We should index this." },
+            {
+              type: "toolCall",
+              id: "call-1",
+              name: "read",
+              arguments: { path: "src/index.ts" },
+            },
+            {
+              type: "toolCall",
+              id: "call-2",
+              name: "write",
+              arguments: { path: `${repoRoot}/generated/out.ts` },
+            },
           ],
           timestamp: Date.parse("2026-03-20T00:00:03.000Z"),
         },
@@ -69,6 +87,10 @@ describe("extractSessionRecord", () => {
         parentId: "assistant-1",
         timestamp: "2026-03-20T00:00:05.000Z",
         summary: "Abandoned branch discussed indexing strategy.",
+        details: {
+          readFiles: ["notes/plan.md"],
+          modifiedFiles: ["src/index.ts"],
+        },
       },
       {
         type: "compaction",
@@ -76,6 +98,10 @@ describe("extractSessionRecord", () => {
         parentId: "branch-1",
         timestamp: "2026-03-20T00:00:06.000Z",
         summary: "Compacted older context.",
+        details: {
+          readFiles: ["README.md"],
+          modifiedFiles: ["generated/out.ts"],
+        },
       },
     ]);
 
@@ -96,6 +122,35 @@ describe("extractSessionRecord", () => {
       ]),
     );
     expect(extracted?.chunks.some((chunk) => chunk.text.includes("hidden"))).toBe(false);
+    expect(extracted?.repoRoots).toEqual([repoRoot]);
+    expect(extracted?.fileTouches).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          op: "read",
+          source: "tool_call",
+          rawPath: "src/index.ts",
+          cwdRelPath: "src/index.ts",
+          repoRelPath: "app/src/index.ts",
+        }),
+        expect.objectContaining({
+          op: "changed",
+          source: "tool_call",
+          rawPath: `${repoRoot}/generated/out.ts`,
+          absPath: `${repoRoot}/generated/out.ts`,
+          repoRelPath: "generated/out.ts",
+        }),
+        expect.objectContaining({
+          op: "changed",
+          source: "branch_summary_details",
+          rawPath: "src/index.ts",
+        }),
+        expect.objectContaining({
+          op: "read",
+          source: "compaction_details",
+          rawPath: "README.md",
+        }),
+      ]),
+    );
   });
 });
 

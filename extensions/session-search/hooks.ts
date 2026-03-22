@@ -1,1 +1,1 @@
-export interface SessionHookState {}
+export type SessionHookState = Record<string, never>;

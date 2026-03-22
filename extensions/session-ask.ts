@@ -23,6 +23,14 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
       question: Type.String({ description: "Question to answer using the full session tree." }),
     }),
     async execute(_toolCallId, params, signal, onUpdate, ctx) {
+      const question = params.question.trim();
+      if (!question) {
+        return {
+          content: [{ type: "text", text: "session_ask requires a non-empty question." }],
+          details: { error: true, sessionPath: params.sessionPath },
+        };
+      }
+
       if (!ctx.model) {
         return {
           content: [{ type: "text", text: "No active model is available for session_ask." }],
@@ -45,21 +53,32 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
 
       onUpdate?.({
         content: [
-          { type: "text", text: `Loading full session tree from ${params.sessionPath}...` },
+          {
+            type: "text",
+            text: [`session_path: ${params.sessionPath}`, `question: ${question}`].join("\n"),
+          },
         ],
         details: { phase: "load" },
       });
 
-      const rendered = renderSessionTreeMarkdown(params.sessionPath);
+      let rendered: ReturnType<typeof renderSessionTreeMarkdown>;
+      try {
+        rendered = renderSessionTreeMarkdown(params.sessionPath);
+      } catch (error) {
+        return {
+          content: [{ type: "text", text: formatSessionAskLoadError(params.sessionPath, error) }],
+          details: { error: true, sessionPath: params.sessionPath, question },
+        };
+      }
 
       onUpdate?.({
         content: [
           {
             type: "text",
-            text: `Asking ${ctx.model.provider}/${ctx.model.id} about session ${rendered.sessionId}...`,
+            text: formatSessionAskHeader(rendered.sessionId, rendered.sessionName, question),
           },
         ],
-        details: { phase: "ask" },
+        details: { phase: "ask", sessionId: rendered.sessionId, sessionName: rendered.sessionName },
       });
 
       const userMessage: Message = {
@@ -67,7 +86,7 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         content: [
           {
             type: "text",
-            text: [`## Session`, rendered.markdown, "", "## Question", params.question].join("\n"),
+            text: [`## Session`, rendered.markdown, "", "## Question", question].join("\n"),
           },
         ],
         timestamp: Date.now(),
@@ -94,12 +113,20 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
       const answer = collectTextBlocks(response.content).join("\n").trim();
 
       return {
-        content: [{ type: "text", text: answer || "No answer generated." }],
+        content: [
+          {
+            type: "text",
+            text: [
+              formatSessionAskHeader(rendered.sessionId, rendered.sessionName, question),
+              answer || "No answer generated.",
+            ].join("\n\n"),
+          },
+        ],
         details: {
           sessionId: rendered.sessionId,
           sessionName: rendered.sessionName,
           sessionPath: params.sessionPath,
-          question: params.question,
+          question,
         },
       };
     },
@@ -108,6 +135,22 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
 
 function collectTextBlocks(content: Array<{ type: string; text?: string }>): string[] {
   return content.filter(isTextContentBlock).map((block) => block.text);
+}
+
+function formatSessionAskHeader(sessionId: string, sessionName: string, question: string): string {
+  return [
+    `session: ${sessionId}`,
+    `title: ${sessionName || "[unnamed]"}`,
+    `question: ${question}`,
+  ].join("\n");
+}
+
+function formatSessionAskLoadError(sessionPath: string, error: unknown): string {
+  if (error instanceof Error && "code" in error && error.code === "ENOENT") {
+    return `Session file not found: ${sessionPath}`;
+  }
+
+  return `Unable to load session file: ${sessionPath}`;
 }
 
 function isTextContentBlock(content: { type: string; text?: string }): content is TextContentBlock {

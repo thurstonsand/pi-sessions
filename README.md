@@ -117,19 +117,22 @@ Parameters:
 - `time?: { after?: string; before?: string }`
 - `limit?: number`
 
-Returns ranked session-level rows with:
+Notes:
 
-- `sessionId`
-- `sessionName`
-- `sessionPath`
+- invalid `time.after` / `time.before` values are rejected
+- `limit` defaults to `10` and must be greater than `0`
+- time filtering uses overlap with the session span from first timestamp to last timestamp
+- when called without text or file evidence, results are ordered newest-first
+- visible output is grouped by `cwd` to reduce repetition
+
+Visible output includes a compact subset such as:
+
+- `title`
+- `session`
 - `cwd`
-- `repoRoots`
-- `startedAt`
-- `modifiedAt`
-- `snippet`
-- `matchedFiles`
-- `score`
-- `hitCount`
+- `matched_files` when applicable
+- `score / hits` when applicable
+- `snippet` when applicable
 
 ### File-touch semantics
 
@@ -153,7 +156,10 @@ Parameters:
 Behavior:
 
 - reads and renders the **entire session tree**
+- requires a non-empty question
+- includes the session id, title, and question in both progress updates and the final result
 - answers using only that session’s contents
+- returns a friendly error when the session path does not exist
 - intended as the deep follow-up after `session_search`
 
 ## Examples

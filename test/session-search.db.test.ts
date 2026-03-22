@@ -82,6 +82,86 @@ describe("session-search db", () => {
     expect(fileHits[0]?.score).toBeGreaterThan(0);
   });
 
+  it("uses session time overlap for after/before filtering", () => {
+    const dir = testFs.createTempDir();
+    const dbPath = path.join(dir, "index.sqlite");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    insertSession(
+      db,
+      {
+        sessionId: "session-overlap",
+        sessionPath: "/tmp/session-overlap.jsonl",
+        sessionName: "Overlap",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:10:00.000Z",
+        messageCount: 2,
+        entryCount: 3,
+      },
+      "full_reindex",
+    );
+    insertSession(
+      db,
+      {
+        sessionId: "session-boundary",
+        sessionPath: "/tmp/session-boundary.jsonl",
+        sessionName: "Boundary",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:07:00.000Z",
+        modifiedAt: "2026-03-22T00:12:00.000Z",
+        messageCount: 2,
+        entryCount: 3,
+      },
+      "full_reindex",
+    );
+    insertSession(
+      db,
+      {
+        sessionId: "session-late",
+        sessionPath: "/tmp/session-late.jsonl",
+        sessionName: "Late",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:20:00.000Z",
+        modifiedAt: "2026-03-22T00:30:00.000Z",
+        messageCount: 2,
+        entryCount: 3,
+      },
+      "full_reindex",
+    );
+    db.close();
+
+    const searchDb = openIndexDatabase(dbPath, { create: false });
+    const overlappingHits = buildSearchSessionsQuery(searchDb, {
+      after: "2026-03-22T00:05:00.000Z",
+      before: "2026-03-22T00:07:00.000Z",
+      limit: 10,
+    });
+    const afterOnlyHits = buildSearchSessionsQuery(searchDb, {
+      after: "2026-03-22T00:11:00.000Z",
+      limit: 10,
+    });
+    const beforeOnlyHits = buildSearchSessionsQuery(searchDb, {
+      before: "2026-03-22T00:00:00.000Z",
+      limit: 10,
+    });
+    searchDb.close();
+
+    expect(overlappingHits.map((result) => result.sessionId)).toEqual([
+      "session-boundary",
+      "session-overlap",
+    ]);
+    expect(afterOnlyHits.map((result) => result.sessionId)).toEqual([
+      "session-late",
+      "session-boundary",
+    ]);
+    expect(beforeOnlyHits.map((result) => result.sessionId)).toEqual(["session-overlap"]);
+  });
+
   it("upserts sessions and clears indexed session data", () => {
     const dir = testFs.createTempDir();
     const dbPath = path.join(dir, "index.sqlite");

@@ -485,7 +485,7 @@ function searchRecentSessions(
           modified_ts as modifiedAt
         FROM sessions
         WHERE (? IS NULL OR modified_ts >= ?)
-          AND (? IS NULL OR modified_ts < ?)
+          AND (? IS NULL OR created_ts <= ?)
           AND (? IS NULL OR cwd = ? OR cwd LIKE ? ESCAPE '\\')
         ORDER BY modified_ts DESC
         LIMIT ?
@@ -525,7 +525,7 @@ function searchTextMatches(
       JOIN sessions s ON s.session_id = c.session_id
       WHERE session_text_chunks_fts MATCH ?
         AND (? IS NULL OR s.modified_ts >= ?)
-        AND (? IS NULL OR s.modified_ts < ?)
+        AND (? IS NULL OR s.created_ts <= ?)
         AND (? IS NULL OR s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\')
       ORDER BY rank ASC, s.modified_ts DESC
       LIMIT ?
@@ -582,7 +582,7 @@ function getCandidateFileTouches(
         FROM session_file_touches f
         JOIN sessions s ON s.session_id = f.session_id
         WHERE (? IS NULL OR s.modified_ts >= ?)
-          AND (? IS NULL OR s.modified_ts < ?)
+          AND (? IS NULL OR s.created_ts <= ?)
           AND (? IS NULL OR s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\')
       `,
     )

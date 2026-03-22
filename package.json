@@ -1,0 +1,38 @@
+{
+  "name": "pi-sessions",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Pi session search, ask, and indexing tools",
+  "keywords": [
+    "pi-package"
+  ],
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  },
+  "scripts": {
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "biome check . && tsc --noEmit && vitest run"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.6",
+    "@mariozechner/pi-coding-agent": "^0.61.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.3.5",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.4.1"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-ai": ">=0.56.0",
+    "@mariozechner/pi-coding-agent": ">=0.56.0",
+    "@mariozechner/pi-tui": ">=0.56.0",
+    "@sinclair/typebox": ">=0.34.0"
+  }
+}

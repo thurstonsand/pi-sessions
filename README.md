@@ -1,3 +1,196 @@
 # pi-sessions
 
-Pi package for session search, session asking, and session index management.
+Pi package for historical session discovery, follow-up questioning, and hook-maintained indexing.
+
+## What it provides
+
+- `session_search` — find relevant prior sessions by text, repo, cwd, time range, and touched files
+- `session_ask` — ask questions about one chosen session by reading the **entire session tree**
+- `/session-index` — small control panel for index status and explicit full reindex
+- hook-driven freshness for future sessions after the first full reindex
+
+## Current model
+
+`pi-sessions` uses a local SQLite sidecar index at:
+
+```text
+~/.pi/agent/pi-sessions/index.sqlite
+```
+
+The package has two modes of keeping that index current:
+
+1. **Full reindex**
+   - bootstrap for all existing sessions
+   - recovery path if indexing was interrupted or hooks were disabled
+2. **Hooks**
+   - keeps future sessions current without doing indexing work on the search path
+
+Search itself only opens the DB, runs the query, and returns ranked session rows.
+
+## Install / load
+
+### Local package
+
+Run Pi with the package path:
+
+```bash
+pi -e ~/Develop/pi-sessions
+```
+
+Or add the package to your Pi package list once you decide where it should live permanently.
+
+## First-time onboarding
+
+On a fresh install, run a full reindex once.
+
+1. Start Pi with `pi-sessions` loaded
+2. Open:
+
+```text
+/session-index
+```
+
+3. Press `r`
+4. Confirm the rebuild
+
+That rebuilds the index from all sessions returned by `SessionManager.listAll()`.
+
+## `/session-index`
+
+The control panel shows:
+
+- index path or `<no index found>`
+- schema version
+- indexed session count
+- `Last full reindex`
+
+Use:
+
+- `r` — request a full rebuild
+- `Enter` / `Esc` — close
+
+## Hook-maintained future sessions
+
+After the first full reindex, future sessions stay current through hooks.
+
+The package currently updates on these events:
+
+- `session_start`
+- `session_switch`
+- `tool_call`
+- `tool_result`
+- `turn_end`
+- `session_tree`
+- `session_compact`
+- `session_shutdown`
+
+What that means in practice:
+
+- new text and file-touch evidence becomes searchable without rerunning reindex
+- branch summaries and compaction summaries are indexed as they are created
+- repo-root membership is recomputed from touched paths during hook flushes
+
+## Failure model
+
+If the sidecar DB is missing or schema-incompatible, `session_search` fails closed and tells you to rebuild.
+
+If hooks were disabled, interrupted, or unavailable for some period, run:
+
+```text
+/session-index
+```
+
+then press `r` and confirm.
+
+That is the supported repair path. Search does **not** inspect raw session files at query time.
+
+## Search behavior
+
+### `session_search`
+
+Parameters:
+
+- `query?: string`
+- `files?: { touched?: string[] }`
+- `repo?: string`
+- `cwd?: string`
+- `time?: { after?: string; before?: string }`
+- `limit?: number`
+
+Returns ranked session-level rows with:
+
+- `sessionId`
+- `sessionName`
+- `sessionPath`
+- `cwd`
+- `repoRoots`
+- `startedAt`
+- `modifiedAt`
+- `snippet`
+- `matchedFiles`
+- `score`
+- `hitCount`
+
+### File-touch semantics
+
+`files.touched` matches sessions that either:
+
+- read the file
+- edited the file
+- wrote the file
+
+Path matching uses normalized absolute, cwd-relative, repo-relative, and basename metadata.
+
+## Follow-up behavior
+
+### `session_ask`
+
+Parameters:
+
+- `sessionPath: string`
+- `question: string`
+
+Behavior:
+
+- reads and renders the **entire session tree**
+- answers using only that session’s contents
+- intended as the deep follow-up after `session_search`
+
+## Examples
+
+### Find sessions about a topic
+
+```text
+Use session_search with query "session_query" and limit 5.
+```
+
+### Find sessions in one repo that touched a file
+
+```text
+Use session_search with repo "/Users/thurstonsand/Develop/ansiblonomicon" and files.touched ["chezmoi/private_dot_pi/agent/extensions/parallel-web-tools/fetch.ts"].
+```
+
+### Restrict by cwd and time
+
+```text
+Use session_search with cwd "/Users/thurstonsand/Develop/ansiblonomicon" and time.after "2026-03-01T00:00:00Z".
+```
+
+### Ask one chosen session what happened
+
+```text
+Use session_ask on /path/to/session.jsonl and ask what decisions were made.
+```
+
+## Development
+
+```bash
+npm run check
+npm test
+npm run lint
+npm run format
+```
+
+## End-to-end smoke test
+
+See [SMOKE.md](./SMOKE.md).

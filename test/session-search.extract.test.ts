@@ -152,6 +152,49 @@ describe("extractSessionRecord", () => {
       ]),
     );
   });
+
+  it("captures durable handoff metadata for child sessions", () => {
+    const root = testFs.createTempDir();
+    const parentPath = testFs.writeJsonlFile(root, "parent.jsonl", [
+      {
+        type: "session",
+        id: "parent-session",
+        timestamp: "2026-03-23T00:00:00.000Z",
+        cwd: "/repo/app",
+      },
+    ]);
+    const childPath = testFs.writeJsonlFile(root, "child.jsonl", [
+      {
+        type: "session",
+        id: "child-session",
+        timestamp: "2026-03-23T00:10:00.000Z",
+        cwd: "/repo/app",
+        parentSession: parentPath,
+      },
+      {
+        type: "custom",
+        id: "custom-1",
+        parentId: null,
+        timestamp: "2026-03-23T00:10:01.000Z",
+        customType: "pi-sessions.handoff",
+        data: {
+          origin: "handoff",
+          goal: "Continue phase 3",
+          nextTask: "Implement autocomplete",
+        },
+      },
+    ]);
+
+    const extracted = extractSessionRecord(childPath);
+
+    expect(extracted).toMatchObject({
+      parentSessionPath: parentPath,
+      parentSessionId: "parent-session",
+      sessionOrigin: "handoff",
+      handoffGoal: "Continue phase 3",
+      handoffNextTask: "Implement autocomplete",
+    });
+  });
 });
 
 describe("renderSessionTreeMarkdown", () => {

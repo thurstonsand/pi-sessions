@@ -1,6 +1,13 @@
+import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import sessionAskExtension from "../extensions/session-ask.js";
+import {
+  initializeSchema,
+  insertSession,
+  openIndexDatabase,
+  setMetadata,
+} from "../extensions/session-search/db.js";
 import { createTestFilesystem } from "./test-helpers.js";
 
 const { completeMock } = vi.hoisted(() => ({
@@ -19,6 +26,7 @@ const testFs = createTestFilesystem("pi-sessions-ask-");
 
 afterEach(() => {
   completeMock.mockReset();
+  delete process.env.PI_SESSIONS_INDEX_DIR;
   testFs.cleanup();
 });
 
@@ -28,7 +36,7 @@ describe("session_ask tool", () => {
 
     const result = await tool.execute(
       "tool-1",
-      { sessionPath: "/tmp/example.jsonl", question: "   " },
+      { session: "12345678-1234-1234-1234-123456789abc", question: "   " },
       undefined,
       undefined,
       createToolContext(),
@@ -36,31 +44,129 @@ describe("session_ask tool", () => {
 
     expect(result.details).toMatchObject({ error: true });
     expect((result.content[0] as { text: string }).text).toContain(
-      "session_ask requires a non-empty question.",
+      "session_ask requires a question.",
     );
   });
 
-  it("returns a friendly error for a missing session path", async () => {
+  it("rejects non-uuid session references", async () => {
     const tool = registerSessionAskTool();
 
     const result = await tool.execute(
       "tool-1",
-      { sessionPath: "/tmp/does-not-exist.jsonl", question: "What happened?" },
+      { session: "@handoff/12345678", question: "What happened?" },
       undefined,
       undefined,
       createToolContext(),
     );
 
     expect(result.details).toMatchObject({ error: true });
-    expect((result.content[0] as { text: string }).text).toContain("Session file not found");
+    expect((result.content[0] as { text: string }).text).toContain(
+      "requires an exact session UUID",
+    );
+  });
+
+  it("returns a friendly error for a missing indexed session id", async () => {
+    const root = testFs.createTempDir();
+    const indexDir = testFs.ensureDir(path.join(root, "index"));
+    const dbPath = path.join(indexDir, "index.sqlite");
+    process.env.PI_SESSIONS_INDEX_DIR = indexDir;
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    db.close();
+
+    const tool = registerSessionAskTool();
+    const result = await tool.execute(
+      "tool-1",
+      { session: "12345678-1234-1234-1234-123456789abc", question: "What happened?" },
+      undefined,
+      undefined,
+      createToolContext(),
+    );
+
+    expect(result.details).toMatchObject({ error: true });
+    expect((result.content[0] as { text: string }).text).toContain("No indexed session found");
+  });
+
+  it("resolves an exact session id through the index", async () => {
+    const root = testFs.createTempDir();
+    const indexDir = testFs.ensureDir(path.join(root, "index"));
+    const dbPath = path.join(indexDir, "index.sqlite");
+    process.env.PI_SESSIONS_INDEX_DIR = indexDir;
+
+    const sessionId = "12345678-1234-1234-1234-123456789abc";
+    const sessionPath = testFs.writeJsonlFile(root, "session.jsonl", [
+      {
+        type: "session",
+        id: sessionId,
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd: "/repo/app",
+      },
+      {
+        type: "message",
+        id: "user-1",
+        parentId: null,
+        timestamp: "2026-03-22T00:00:01.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "Raw id session" }],
+        },
+      },
+    ]);
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    insertSession(
+      db,
+      {
+        sessionId,
+        sessionPath,
+        sessionName: "",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:00:01.000Z",
+        messageCount: 1,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    db.close();
+
+    completeMock.mockResolvedValue({
+      content: [{ type: "text", text: "Resolved by exact id." }],
+      stopReason: "stop",
+    });
+
+    const tool = registerSessionAskTool();
+    const result = await tool.execute(
+      "tool-1",
+      { session: sessionId, question: "What happened?" },
+      undefined,
+      undefined,
+      createToolContext(),
+    );
+
+    expect(result.details).toMatchObject({
+      sessionId,
+      sessionPath,
+    });
+    expect((result.content[0] as { text: string }).text).toContain("Resolved by exact id.");
   });
 
   it("includes session metadata and question in updates and final output", async () => {
-    const tool = registerSessionAskTool();
+    const root = testFs.createTempDir();
+    const indexDir = testFs.ensureDir(path.join(root, "index"));
+    const dbPath = path.join(indexDir, "index.sqlite");
+    process.env.PI_SESSIONS_INDEX_DIR = indexDir;
+
+    const sessionId = "aaaaaaaa-1234-1234-1234-123456789abc";
     const sessionPath = testFs.writeJsonlFile(testFs.createTempDir(), "session.jsonl", [
       {
         type: "session",
-        id: "session-ask-1",
+        id: sessionId,
         timestamp: "2026-03-22T00:00:00.000Z",
         cwd: "/repo/app",
       },
@@ -83,29 +189,50 @@ describe("session_ask tool", () => {
       },
     ]);
 
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    insertSession(
+      db,
+      {
+        sessionId,
+        sessionPath,
+        sessionName: "Ask title",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:00:02.000Z",
+        messageCount: 1,
+        entryCount: 2,
+      },
+      "full_reindex",
+    );
+    db.close();
+
     completeMock.mockResolvedValue({
       content: [{ type: "text", text: "Decisions were made carefully." }],
       stopReason: "stop",
     });
 
+    const tool = registerSessionAskTool();
     const updates: Array<{ content: Array<{ type: string; text?: string }> }> = [];
     const result = await tool.execute(
       "tool-1",
-      { sessionPath, question: "Summarize the decisions." },
+      { session: sessionId, question: "Summarize the decisions." },
       undefined,
       (update) => updates.push(update),
       createToolContext(),
     );
 
     expect(updates).toHaveLength(2);
-    expect((updates[1]?.content[0] as { text: string }).text).toContain("session: session-ask-1");
+    expect((updates[1]?.content[0] as { text: string }).text).toContain(`session: ${sessionId}`);
     expect((updates[1]?.content[0] as { text: string }).text).toContain("title: Ask title");
     expect((updates[1]?.content[0] as { text: string }).text).toContain(
       "question: Summarize the decisions.",
     );
 
     const text = (result.content[0] as { text: string }).text;
-    expect(text).toContain("session: session-ask-1");
+    expect(text).toContain(`session: ${sessionId}`);
     expect(text).toContain("title: Ask title");
     expect(text).toContain("question: Summarize the decisions.");
     expect(text).toContain("Decisions were made carefully.");

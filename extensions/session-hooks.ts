@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { createSessionHookController } from "./session-search/hooks.js";
+import { consumePendingChildOrigin, createSessionHookController } from "./session-search/hooks.js";
 
 export default function sessionHooksExtension(pi: ExtensionAPI): void {
   const controller = createSessionHookController();
@@ -9,7 +9,22 @@ export default function sessionHooksExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_switch", async (event, ctx) => {
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const sessionOrigin =
+      event.reason === "new" && event.previousSessionFile
+        ? consumePendingChildOrigin(event.previousSessionFile)
+        : undefined;
+
     await controller.handleSessionSwitch(
+      event.previousSessionFile,
+      sessionFile,
+      ctx.cwd,
+      sessionOrigin,
+    );
+  });
+
+  pi.on("session_fork", async (event, ctx) => {
+    await controller.handleSessionFork(
       event.previousSessionFile,
       ctx.sessionManager.getSessionFile(),
       ctx.cwd,

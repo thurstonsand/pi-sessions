@@ -51,8 +51,8 @@ On a fresh install, run a full reindex once.
 /session-index
 ```
 
-3. Press `r`
-4. Confirm the rebuild
+1. Press `r`
+2. Confirm the rebuild
 
 That rebuilds the index from all sessions returned by `SessionManager.listAll()`.
 
@@ -73,10 +73,6 @@ Behavior:
 - `j` / `k` — scroll the draft preview and pause auto-start
 
 The new session is created through `ctx.newSession({ parentSession })`, so the child session keeps native Pi parent linkage.
-
-Current limitation:
-
-- the generated prompt references `session_ask`, but `session_ask` still takes `sessionPath` today; resolving raw ids or `@handoff/...` refs is planned for a later phase
 
 ## `/session-index`
 
@@ -173,16 +169,18 @@ Path matching uses normalized absolute, cwd-relative, repo-relative, and basenam
 
 Parameters:
 
-- `sessionPath: string`
+- `session: string`
 - `question: string`
+
+`session` must be the session UUID.
 
 Behavior:
 
 - reads and renders the **entire session tree**
-- requires a non-empty question
+- requires a non-empty session UUID and question
 - includes the session id, title, and question in both progress updates and the final result
 - answers using only that session’s contents
-- returns a friendly error when the session path does not exist
+- returns a friendly error when the session id cannot be resolved
 - intended as the deep follow-up after `session_search`
 
 ## Examples
@@ -208,7 +206,7 @@ Use session_search with cwd "/Users/thurstonsand/Develop/ansiblonomicon" and tim
 ### Ask one chosen session what happened
 
 ```text
-Use session_ask on /path/to/session.jsonl and ask what decisions were made.
+Use session_ask with session "2dc89501-5e75-4c75-bc71-15c499d850b2" and ask what decisions were made.
 ```
 
 ### Start a focused child session

@@ -10,11 +10,20 @@ import {
   type PathScope,
 } from "./normalize.js";
 
-export const INDEX_SCHEMA_VERSION = 2;
+export const INDEX_SCHEMA_VERSION = 5;
 
 const DEFAULT_SEARCH_LIMIT = 10;
 const SEARCH_CANDIDATE_LIMIT = 2_000;
 const TEXT_MATCH_ROW_LIMIT = 1_000;
+
+export type SessionOrigin = "handoff" | "fork" | "unknown_child";
+export type SessionLineageRelation =
+  | "parent"
+  | "ancestor"
+  | "child"
+  | "descendant"
+  | "sibling"
+  | "ancestor_sibling";
 
 export interface SessionRow {
   sessionId: string;
@@ -26,6 +35,29 @@ export interface SessionRow {
   modifiedAt: string;
   messageCount: number;
   entryCount: number;
+  parentSessionPath?: string | undefined;
+  parentSessionId?: string | undefined;
+  sessionOrigin?: SessionOrigin | undefined;
+  handoffGoal?: string | undefined;
+  handoffNextTask?: string | undefined;
+}
+
+export interface SessionLineageRow {
+  sessionId: string;
+  sessionPath: string;
+  sessionName: string;
+  cwd: string;
+  modifiedAt: string;
+  parentSessionPath?: string | undefined;
+  parentSessionId?: string | undefined;
+  sessionOrigin?: SessionOrigin | undefined;
+  handoffGoal?: string | undefined;
+  handoffNextTask?: string | undefined;
+}
+
+export interface SessionRelatedSessionRow extends SessionLineageRow {
+  relation: SessionLineageRelation;
+  distance: number;
 }
 
 export interface SessionTextChunkRow {
@@ -73,6 +105,9 @@ export interface SearchSessionResult {
   repoRoots: string[];
   startedAt: string;
   modifiedAt: string;
+  sessionOrigin?: SessionOrigin | undefined;
+  handoffGoal?: string | undefined;
+  handoffNextTask?: string | undefined;
   snippet: string;
   matchedFiles: string[];
   score: number;
@@ -111,6 +146,42 @@ interface SessionListRow {
   repoRootsJson: string;
   startedAt: string;
   modifiedAt: string;
+}
+
+interface SessionLineageQueryRow {
+  sessionId: string;
+  sessionPath: string;
+  sessionName: string;
+  cwd: string;
+  modifiedAt: string;
+  parentSessionPath?: string | undefined;
+  parentSessionId?: string | undefined;
+  sessionOrigin?: SessionOrigin | undefined;
+  handoffGoal?: string | undefined;
+  handoffNextTask?: string | undefined;
+}
+
+interface SessionRelatedQueryRow extends SessionLineageQueryRow {
+  relation: SessionLineageRelation;
+  distance: number;
+}
+
+interface SessionGraphRow {
+  sessionId: string;
+  sessionPath: string;
+  parentSessionPath?: string | undefined;
+  parentSessionId?: string | undefined;
+}
+
+interface SessionGraphNode extends SessionGraphRow {
+  resolvedParentSessionId?: string | undefined;
+}
+
+interface MaterializedLineageRow {
+  sessionId: string;
+  relatedSessionId: string;
+  relation: SessionLineageRelation;
+  distance: number;
 }
 
 interface FileTouchMatchRow {
@@ -209,6 +280,11 @@ export function initializeSchema(db: SessionIndexDatabase): void {
       modified_ts TEXT NOT NULL,
       message_count INTEGER NOT NULL,
       entry_count INTEGER NOT NULL,
+      parent_session_path TEXT,
+      parent_session_id TEXT,
+      session_origin TEXT,
+      handoff_goal TEXT,
+      handoff_next_task TEXT,
       index_version INTEGER NOT NULL,
       indexed_at_ts TEXT NOT NULL,
       index_source TEXT NOT NULL
@@ -216,6 +292,24 @@ export function initializeSchema(db: SessionIndexDatabase): void {
 
     CREATE INDEX IF NOT EXISTS sessions_modified_idx ON sessions(modified_ts DESC);
     CREATE INDEX IF NOT EXISTS sessions_cwd_idx ON sessions(cwd);
+    CREATE INDEX IF NOT EXISTS sessions_path_idx ON sessions(session_path);
+    CREATE INDEX IF NOT EXISTS sessions_parent_id_idx ON sessions(parent_session_id);
+    CREATE INDEX IF NOT EXISTS sessions_parent_path_idx ON sessions(parent_session_path);
+
+    CREATE TABLE IF NOT EXISTS session_lineage_relations (
+      session_id TEXT NOT NULL,
+      related_session_id TEXT NOT NULL,
+      relation TEXT NOT NULL,
+      distance INTEGER NOT NULL,
+      PRIMARY KEY (session_id, related_session_id),
+      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
+      FOREIGN KEY (related_session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS session_lineage_relations_related_idx
+      ON session_lineage_relations(related_session_id);
+    CREATE INDEX IF NOT EXISTS session_lineage_relations_relation_idx
+      ON session_lineage_relations(session_id, relation, distance);
 
     CREATE TABLE IF NOT EXISTS session_text_chunks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -293,6 +387,11 @@ function sessionRowBindings(
   string,
   number,
   number,
+  string | null,
+  string | null,
+  SessionOrigin | null,
+  string | null,
+  string | null,
   number,
   string,
   string,
@@ -307,6 +406,11 @@ function sessionRowBindings(
     row.modifiedAt,
     row.messageCount,
     row.entryCount,
+    row.parentSessionPath ?? null,
+    row.parentSessionId ?? null,
+    row.sessionOrigin ?? null,
+    row.handoffGoal ?? null,
+    row.handoffNextTask ?? null,
     INDEX_SCHEMA_VERSION,
     new Date().toISOString(),
     indexSource,
@@ -323,8 +427,10 @@ export function insertSession(
       INSERT INTO sessions(
         session_id, session_path, session_name, cwd, repo_roots_json,
         created_ts, modified_ts, message_count, entry_count,
+        parent_session_path, parent_session_id, session_origin,
+        handoff_goal, handoff_next_task,
         index_version, indexed_at_ts, index_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(...sessionRowBindings(row, indexSource));
 }
@@ -339,8 +445,10 @@ export function upsertSession(
       INSERT INTO sessions(
         session_id, session_path, session_name, cwd, repo_roots_json,
         created_ts, modified_ts, message_count, entry_count,
+        parent_session_path, parent_session_id, session_origin,
+        handoff_goal, handoff_next_task,
         index_version, indexed_at_ts, index_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_id) DO UPDATE SET
         session_path = excluded.session_path,
         session_name = excluded.session_name,
@@ -350,6 +458,11 @@ export function upsertSession(
         modified_ts = excluded.modified_ts,
         message_count = excluded.message_count,
         entry_count = excluded.entry_count,
+        parent_session_path = excluded.parent_session_path,
+        parent_session_id = excluded.parent_session_id,
+        session_origin = excluded.session_origin,
+        handoff_goal = excluded.handoff_goal,
+        handoff_next_task = excluded.handoff_next_task,
         index_version = excluded.index_version,
         indexed_at_ts = excluded.indexed_at_ts,
         index_source = excluded.index_source
@@ -361,6 +474,66 @@ export function clearSessionIndexedData(db: SessionIndexDatabase, sessionId: str
   db.prepare(`DELETE FROM session_text_chunks_fts WHERE session_id = ?`).run(sessionId);
   db.prepare(`DELETE FROM session_text_chunks WHERE session_id = ?`).run(sessionId);
   db.prepare(`DELETE FROM session_file_touches WHERE session_id = ?`).run(sessionId);
+}
+
+export function rebuildSessionLineageRelations(db: SessionIndexDatabase): void {
+  db.prepare(`DELETE FROM session_lineage_relations`).run();
+
+  const rows = db
+    .prepare(
+      `
+        SELECT
+          session_id as sessionId,
+          session_path as sessionPath,
+          parent_session_path as parentSessionPath,
+          parent_session_id as parentSessionId
+        FROM sessions
+      `,
+    )
+    .all() as SessionGraphRow[];
+
+  const pathToId = new Map(rows.map((row) => [row.sessionPath, row.sessionId]));
+  const nodes = new Map<string, SessionGraphNode>(
+    rows.map((row) => [
+      row.sessionId,
+      {
+        ...row,
+        resolvedParentSessionId:
+          row.parentSessionId ??
+          (row.parentSessionPath ? pathToId.get(row.parentSessionPath) : undefined),
+      },
+    ]),
+  );
+  const childrenByParent = new Map<string, string[]>();
+
+  for (const node of nodes.values()) {
+    if (!node.resolvedParentSessionId) {
+      continue;
+    }
+
+    const children = childrenByParent.get(node.resolvedParentSessionId) ?? [];
+    children.push(node.sessionId);
+    childrenByParent.set(node.resolvedParentSessionId, children);
+  }
+
+  const insertRelation = db.prepare(
+    `
+      INSERT INTO session_lineage_relations(session_id, related_session_id, relation, distance)
+      VALUES (?, ?, ?, ?)
+    `,
+  );
+
+  for (const node of nodes.values()) {
+    const relations = collectMaterializedLineageRows(node.sessionId, nodes, childrenByParent);
+    for (const relation of relations.values()) {
+      insertRelation.run(
+        relation.sessionId,
+        relation.relatedSessionId,
+        relation.relation,
+        relation.distance,
+      );
+    }
+  }
 }
 
 export function insertTextChunk(db: SessionIndexDatabase, row: SessionTextChunkRow): void {
@@ -435,6 +608,122 @@ export function getIndexStatus(dbPath: string = getDefaultIndexPath()): SessionI
   } finally {
     db.close();
   }
+}
+
+export function getSessionById(
+  db: SessionIndexDatabase,
+  sessionId: string,
+): SessionLineageRow | undefined {
+  const row = db
+    .prepare(
+      `
+        SELECT
+          session_id as sessionId,
+          session_path as sessionPath,
+          session_name as sessionName,
+          cwd,
+          modified_ts as modifiedAt,
+          parent_session_path as parentSessionPath,
+          parent_session_id as parentSessionId,
+          session_origin as sessionOrigin,
+          handoff_goal as handoffGoal,
+          handoff_next_task as handoffNextTask
+        FROM sessions
+        WHERE session_id = ?
+      `,
+    )
+    .get(sessionId) as SessionLineageQueryRow | undefined;
+
+  return row ? buildSessionLineageRow(row) : undefined;
+}
+
+export function getSessionByPath(
+  db: SessionIndexDatabase,
+  sessionPath: string,
+): SessionLineageRow | undefined {
+  const row = db
+    .prepare(
+      `
+        SELECT
+          session_id as sessionId,
+          session_path as sessionPath,
+          session_name as sessionName,
+          cwd,
+          modified_ts as modifiedAt,
+          parent_session_path as parentSessionPath,
+          parent_session_id as parentSessionId,
+          session_origin as sessionOrigin,
+          handoff_goal as handoffGoal,
+          handoff_next_task as handoffNextTask
+        FROM sessions
+        WHERE session_path = ?
+      `,
+    )
+    .get(sessionPath) as SessionLineageQueryRow | undefined;
+
+  return row ? buildSessionLineageRow(row) : undefined;
+}
+
+export function findSessionsByIdPrefix(
+  db: SessionIndexDatabase,
+  prefix: string,
+  limit: number = DEFAULT_SEARCH_LIMIT,
+): SessionLineageRow[] {
+  const rows = db
+    .prepare(
+      `
+        SELECT
+          session_id as sessionId,
+          session_path as sessionPath,
+          session_name as sessionName,
+          cwd,
+          modified_ts as modifiedAt,
+          parent_session_path as parentSessionPath,
+          parent_session_id as parentSessionId,
+          session_origin as sessionOrigin,
+          handoff_goal as handoffGoal,
+          handoff_next_task as handoffNextTask
+        FROM sessions
+        WHERE session_id LIKE ? ESCAPE '\\'
+        ORDER BY modified_ts DESC
+        LIMIT ?
+      `,
+    )
+    .all(`${escapeLikePrefix(prefix)}%`, limit) as SessionLineageQueryRow[];
+
+  return rows.map(buildSessionLineageRow);
+}
+
+export function getLineageSessions(
+  db: SessionIndexDatabase,
+  sessionId: string,
+): SessionRelatedSessionRow[] {
+  return queryRelatedSessions(db, sessionId);
+}
+
+export function getParentSession(
+  db: SessionIndexDatabase,
+  sessionId: string,
+): SessionLineageRow | undefined {
+  return queryRelatedSessions(db, sessionId, ["parent"])[0];
+}
+
+export function getAncestorSessions(
+  db: SessionIndexDatabase,
+  sessionId: string,
+): SessionLineageRow[] {
+  return queryRelatedSessions(db, sessionId, ["parent", "ancestor"]);
+}
+
+export function getChildSessions(db: SessionIndexDatabase, sessionId: string): SessionLineageRow[] {
+  return queryRelatedSessions(db, sessionId, ["child"]);
+}
+
+export function getSiblingSessions(
+  db: SessionIndexDatabase,
+  sessionId: string,
+): SessionLineageRow[] {
+  return queryRelatedSessions(db, sessionId, ["sibling"]);
 }
 
 export function buildSearchSessionsQuery(
@@ -847,6 +1136,201 @@ function sanitizeFtsToken(token: string): string {
 
 function quoteFtsToken(token: string): string {
   return `"${token.replace(/"/g, '""')}"`;
+}
+
+function queryRelatedSessions(
+  db: SessionIndexDatabase,
+  sessionId: string,
+  relations?: SessionLineageRelation[],
+): SessionRelatedSessionRow[] {
+  const relationFilter = relations?.length
+    ? ` AND r.relation IN (${relations.map(() => "?").join(", ")})`
+    : "";
+  const rows = db
+    .prepare(
+      `
+        SELECT
+          s.session_id as sessionId,
+          s.session_path as sessionPath,
+          s.session_name as sessionName,
+          s.cwd as cwd,
+          s.modified_ts as modifiedAt,
+          s.parent_session_path as parentSessionPath,
+          s.parent_session_id as parentSessionId,
+          s.session_origin as sessionOrigin,
+          s.handoff_goal as handoffGoal,
+          s.handoff_next_task as handoffNextTask,
+          r.relation as relation,
+          r.distance as distance
+        FROM session_lineage_relations r
+        JOIN sessions s ON s.session_id = r.related_session_id
+        WHERE r.session_id = ?${relationFilter}
+        ORDER BY
+          CASE r.relation
+            WHEN 'parent' THEN 1
+            WHEN 'child' THEN 2
+            WHEN 'sibling' THEN 3
+            WHEN 'ancestor' THEN 4
+            WHEN 'descendant' THEN 5
+            WHEN 'ancestor_sibling' THEN 6
+            ELSE 7
+          END ASC,
+          r.distance ASC,
+          s.modified_ts DESC
+      `,
+    )
+    .all(sessionId, ...(relations ?? [])) as SessionRelatedQueryRow[];
+
+  return rows.map(buildRelatedSessionRow);
+}
+
+function buildSessionLineageRow(row: SessionLineageQueryRow): SessionLineageRow {
+  return {
+    sessionId: row.sessionId,
+    sessionPath: row.sessionPath,
+    sessionName: row.sessionName,
+    cwd: row.cwd,
+    modifiedAt: row.modifiedAt,
+    parentSessionPath: row.parentSessionPath ?? undefined,
+    parentSessionId: row.parentSessionId ?? undefined,
+    sessionOrigin: row.sessionOrigin ?? undefined,
+    handoffGoal: row.handoffGoal ?? undefined,
+    handoffNextTask: row.handoffNextTask ?? undefined,
+  };
+}
+
+function buildRelatedSessionRow(row: SessionRelatedQueryRow): SessionRelatedSessionRow {
+  return {
+    ...buildSessionLineageRow(row),
+    relation: row.relation,
+    distance: row.distance,
+  };
+}
+
+function collectMaterializedLineageRows(
+  sessionId: string,
+  nodes: Map<string, SessionGraphNode>,
+  childrenByParent: Map<string, string[]>,
+): Map<string, MaterializedLineageRow> {
+  const relations = new Map<string, MaterializedLineageRow>();
+  const visitedAncestors = new Set<string>();
+  const ancestors: Array<{ sessionId: string; distance: number }> = [];
+
+  let currentId = nodes.get(sessionId)?.resolvedParentSessionId;
+  let distance = 1;
+  while (currentId && !visitedAncestors.has(currentId)) {
+    visitedAncestors.add(currentId);
+    ancestors.push({ sessionId: currentId, distance });
+    setMaterializedLineageRow(relations, {
+      sessionId,
+      relatedSessionId: currentId,
+      relation: distance === 1 ? "parent" : "ancestor",
+      distance,
+    });
+    currentId = nodes.get(currentId)?.resolvedParentSessionId;
+    distance += 1;
+  }
+
+  const visitedDescendants = new Set<string>();
+  const queue = (childrenByParent.get(sessionId) ?? []).map((childId) => ({
+    childId,
+    distance: 1,
+  }));
+  while (queue.length > 0) {
+    const next = queue.shift();
+    if (!next || visitedDescendants.has(next.childId)) {
+      continue;
+    }
+
+    visitedDescendants.add(next.childId);
+    setMaterializedLineageRow(relations, {
+      sessionId,
+      relatedSessionId: next.childId,
+      relation: next.distance === 1 ? "child" : "descendant",
+      distance: next.distance,
+    });
+
+    for (const childId of childrenByParent.get(next.childId) ?? []) {
+      queue.push({ childId, distance: next.distance + 1 });
+    }
+  }
+
+  const parentId = nodes.get(sessionId)?.resolvedParentSessionId;
+  if (parentId) {
+    for (const siblingId of childrenByParent.get(parentId) ?? []) {
+      if (siblingId === sessionId) {
+        continue;
+      }
+
+      setMaterializedLineageRow(relations, {
+        sessionId,
+        relatedSessionId: siblingId,
+        relation: "sibling",
+        distance: 1,
+      });
+    }
+  }
+
+  for (const ancestor of ancestors) {
+    const ancestorParentId = nodes.get(ancestor.sessionId)?.resolvedParentSessionId;
+    if (!ancestorParentId) {
+      continue;
+    }
+
+    for (const siblingId of childrenByParent.get(ancestorParentId) ?? []) {
+      if (siblingId === ancestor.sessionId) {
+        continue;
+      }
+
+      setMaterializedLineageRow(relations, {
+        sessionId,
+        relatedSessionId: siblingId,
+        relation: "ancestor_sibling",
+        distance: ancestor.distance + 1,
+      });
+    }
+  }
+
+  return relations;
+}
+
+function setMaterializedLineageRow(
+  rows: Map<string, MaterializedLineageRow>,
+  candidate: MaterializedLineageRow,
+): void {
+  const existing = rows.get(candidate.relatedSessionId);
+  if (!existing) {
+    rows.set(candidate.relatedSessionId, candidate);
+    return;
+  }
+
+  const existingPriority = getLineageRelationPriority(existing.relation);
+  const candidatePriority = getLineageRelationPriority(candidate.relation);
+  if (candidatePriority < existingPriority) {
+    rows.set(candidate.relatedSessionId, candidate);
+    return;
+  }
+
+  if (candidatePriority === existingPriority && candidate.distance < existing.distance) {
+    rows.set(candidate.relatedSessionId, candidate);
+  }
+}
+
+function getLineageRelationPriority(relation: SessionLineageRelation): number {
+  switch (relation) {
+    case "parent":
+      return 1;
+    case "child":
+      return 2;
+    case "sibling":
+      return 3;
+    case "ancestor":
+      return 4;
+    case "descendant":
+      return 5;
+    case "ancestor_sibling":
+      return 6;
+  }
 }
 
 function parseRepoRoots(value: string): string[] {

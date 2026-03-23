@@ -4,16 +4,49 @@ import {
   clearSessionIndexedData,
   getDefaultIndexPath,
   getIndexStatus,
+  getSessionById,
   INDEX_SCHEMA_VERSION,
   insertSessionFileTouch,
   insertTextChunk,
   openIndexDatabase,
+  rebuildSessionLineageRelations,
+  type SessionLineageRow,
+  type SessionOrigin,
   setMetadata,
   upsertSession,
 } from "./db.js";
-import { extractSessionRecord } from "./extract.js";
+import { type ExtractedSessionRecord, extractSessionRecord } from "./extract.js";
 
 const TOOL_RESULT_TEXT_LIMIT = 500;
+
+const pendingChildOrigins = new Map<string, SessionOrigin[]>();
+
+export function queuePendingChildOrigin(
+  parentSessionPath: string,
+  sessionOrigin: SessionOrigin,
+): void {
+  const queue = pendingChildOrigins.get(parentSessionPath) ?? [];
+  queue.push(sessionOrigin);
+  pendingChildOrigins.set(parentSessionPath, queue);
+}
+
+export function clearPendingChildOrigin(parentSessionPath: string): void {
+  pendingChildOrigins.delete(parentSessionPath);
+}
+
+export function consumePendingChildOrigin(parentSessionPath: string): SessionOrigin | undefined {
+  const queue = pendingChildOrigins.get(parentSessionPath);
+  if (!queue || queue.length === 0) {
+    return undefined;
+  }
+
+  const sessionOrigin = queue.shift();
+  if (queue.length === 0) {
+    pendingChildOrigins.delete(parentSessionPath);
+  }
+
+  return sessionOrigin;
+}
 
 type TrackedToolName = "read" | "edit" | "write";
 
@@ -40,6 +73,12 @@ export interface SessionHookController {
   getState(): SessionHookStateSnapshot;
   handleSessionStart(sessionFile: string | undefined, cwd: string): Promise<boolean>;
   handleSessionSwitch(
+    previousSessionFile: string | undefined,
+    sessionFile: string | undefined,
+    cwd: string,
+    sessionOrigin?: SessionOrigin,
+  ): Promise<boolean>;
+  handleSessionFork(
     previousSessionFile: string | undefined,
     sessionFile: string | undefined,
     cwd: string,
@@ -83,10 +122,16 @@ export function createSessionHookController(options?: {
       attachSession(state, sessionFile, cwd);
       return syncAttachedSession(indexPath, state, "session_start");
     },
-    async handleSessionSwitch(previousSessionFile, sessionFile, cwd) {
+    async handleSessionSwitch(previousSessionFile, sessionFile, cwd, sessionOrigin) {
       const previousSynced = syncSessionFile(indexPath, previousSessionFile, "session_switch");
       attachSession(state, sessionFile, cwd);
-      const currentSynced = syncAttachedSession(indexPath, state, "session_switch");
+      const currentSynced = syncAttachedSession(indexPath, state, "session_switch", sessionOrigin);
+      return previousSynced || currentSynced;
+    },
+    async handleSessionFork(previousSessionFile, sessionFile, cwd) {
+      const previousSynced = syncSessionFile(indexPath, previousSessionFile, "session_fork");
+      attachSession(state, sessionFile, cwd);
+      const currentSynced = syncAttachedSession(indexPath, state, "session_fork", "fork");
       return previousSynced || currentSynced;
     },
     handleToolCall(event, sessionFile, cwd) {
@@ -152,8 +197,9 @@ function syncAttachedSession(
   indexPath: string,
   state: SessionHookState,
   eventType: string,
+  sessionOrigin?: SessionOrigin,
 ): boolean {
-  return syncSessionFile(indexPath, state.currentSessionFile, eventType, state);
+  return syncSessionFile(indexPath, state.currentSessionFile, eventType, state, sessionOrigin);
 }
 
 function syncSessionFile(
@@ -161,6 +207,7 @@ function syncSessionFile(
   sessionFile: string | undefined,
   eventType: string,
   state?: SessionHookState,
+  sessionOrigin?: SessionOrigin,
 ): boolean {
   if (!sessionFile || !existsSync(sessionFile)) {
     return false;
@@ -179,7 +226,12 @@ function syncSessionFile(
   const db = openIndexDatabase(indexPath, { create: false });
   try {
     db.transaction(() => {
-      upsertSession(db, extracted, "hook");
+      const existingSession = getSessionById(db, extracted.sessionId);
+      const sessionRow = mergeSessionLineage(extracted, existingSession, sessionOrigin);
+      upsertSession(db, sessionRow, "hook");
+      if (shouldRefreshLineageRelations(existingSession, sessionRow)) {
+        rebuildSessionLineageRelations(db);
+      }
       clearSessionIndexedData(db, extracted.sessionId);
 
       for (const chunk of extracted.chunks) {
@@ -202,6 +254,45 @@ function syncSessionFile(
   }
 
   return true;
+}
+
+function mergeSessionLineage(
+  extracted: ExtractedSessionRecord,
+  existing: SessionLineageRow | undefined,
+  sessionOrigin?: SessionOrigin,
+): ExtractedSessionRecord {
+  const parentSessionPath = extracted.parentSessionPath ?? existing?.parentSessionPath;
+  const parentSessionId = extracted.parentSessionId ?? existing?.parentSessionId;
+  const existingOrigin = existing?.sessionOrigin;
+  const nextOrigin =
+    sessionOrigin ??
+    (extracted.sessionOrigin === "unknown_child" &&
+    existingOrigin &&
+    existingOrigin !== "unknown_child"
+      ? existingOrigin
+      : (extracted.sessionOrigin ?? existingOrigin));
+
+  return {
+    ...extracted,
+    parentSessionPath,
+    parentSessionId,
+    sessionOrigin: parentSessionPath ? (nextOrigin ?? "unknown_child") : undefined,
+  };
+}
+
+function shouldRefreshLineageRelations(
+  existing: SessionLineageRow | undefined,
+  next: ExtractedSessionRecord,
+): boolean {
+  if (!existing) {
+    return true;
+  }
+
+  return (
+    existing.sessionPath !== next.sessionPath ||
+    existing.parentSessionPath !== next.parentSessionPath ||
+    existing.parentSessionId !== next.parentSessionId
+  );
 }
 
 function buildPendingToolCall(event: ToolCallEvent): PendingToolCall | undefined {

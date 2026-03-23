@@ -1,11 +1,24 @@
 import { complete, type Message } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import {
+  getDefaultIndexPath,
+  getIndexStatus,
+  getSessionById,
+  INDEX_SCHEMA_VERSION,
+  openIndexDatabase,
+  type SessionLineageRow,
+} from "./session-search/db.js";
 import { renderSessionTreeMarkdown } from "./session-search/extract.js";
 
 const SESSION_ASK_SYSTEM_PROMPT = `You are analyzing a Pi coding session transcript. The transcript includes the entire session tree, including abandoned branches and summaries.
 
 Answer the user's question using only the session contents. Be specific and concise. Include exact file paths, decisions, and outcomes when present. If the answer is not in the session, say so clearly.`;
+
+interface SessionAskToolParams {
+  session: string;
+  question: string;
+}
 
 interface TextContentBlock {
   type: "text";
@@ -19,21 +32,61 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
     description:
       "Read an entire Pi session tree and answer a specific question about that session.",
     parameters: Type.Object({
-      sessionPath: Type.String({ description: "Full path to the session .jsonl file." }),
-      question: Type.String({ description: "Question to answer using the full session tree." }),
+      session: Type.String({
+        description: "session UUID.",
+      }),
+      question: Type.String({
+        description: "Question to extract from the session.",
+      }),
     }),
-    async execute(_toolCallId, params, signal, onUpdate, ctx) {
+    async execute(_toolCallId, params: SessionAskToolParams, signal, onUpdate, ctx) {
+      const sessionId = params.session.trim();
+      if (!sessionId) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "session_ask requires a session id.",
+            },
+          ],
+          details: { error: true, session: params.session },
+        };
+      }
+
       const question = params.question.trim();
       if (!question) {
         return {
-          content: [{ type: "text", text: "session_ask requires a non-empty question." }],
-          details: { error: true, sessionPath: params.sessionPath },
+          content: [
+            {
+              type: "text",
+              text: "session_ask requires a question.",
+            },
+          ],
+          details: { error: true, session: sessionId },
+        };
+      }
+
+      const resolvedTarget = resolveSessionAskTarget(sessionId);
+      if (!resolvedTarget.resolved) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: resolvedTarget.error ?? "Unable to resolve session id.",
+            },
+          ],
+          details: { error: true, session: sessionId, question },
         };
       }
 
       if (!ctx.model) {
         return {
-          content: [{ type: "text", text: "No active model is available for session_ask." }],
+          content: [
+            {
+              type: "text",
+              text: "No active model is available for session_ask.",
+            },
+          ],
           details: { error: true },
         };
       }
@@ -55,19 +108,36 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         content: [
           {
             type: "text",
-            text: [`session_path: ${params.sessionPath}`, `question: ${question}`].join("\n"),
+            text: [
+              `session: ${sessionId}`,
+              `session_path: ${resolvedTarget.resolved.sessionPath}`,
+              `question: ${question}`,
+            ].join("\n"),
           },
         ],
-        details: { phase: "load" },
+        details: {
+          phase: "load",
+          sessionId: resolvedTarget.resolved.sessionId,
+        },
       });
 
       let rendered: ReturnType<typeof renderSessionTreeMarkdown>;
       try {
-        rendered = renderSessionTreeMarkdown(params.sessionPath);
+        rendered = renderSessionTreeMarkdown(resolvedTarget.resolved.sessionPath);
       } catch (error) {
         return {
-          content: [{ type: "text", text: formatSessionAskLoadError(params.sessionPath, error) }],
-          details: { error: true, sessionPath: params.sessionPath, question },
+          content: [
+            {
+              type: "text",
+              text: formatSessionAskLoadError(resolvedTarget.resolved.sessionPath, error),
+            },
+          ],
+          details: {
+            error: true,
+            session: sessionId,
+            sessionPath: resolvedTarget.resolved.sessionPath,
+            question,
+          },
         };
       }
 
@@ -78,7 +148,11 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
             text: formatSessionAskHeader(rendered.sessionId, rendered.sessionName, question),
           },
         ],
-        details: { phase: "ask", sessionId: rendered.sessionId, sessionName: rendered.sessionName },
+        details: {
+          phase: "ask",
+          sessionId: rendered.sessionId,
+          sessionName: rendered.sessionName,
+        },
       });
 
       const userMessage: Message = {
@@ -118,14 +192,50 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
           },
         ],
         details: {
-          sessionId: rendered.sessionId,
-          sessionName: rendered.sessionName,
-          sessionPath: params.sessionPath,
+          session: sessionId,
+          sessionId: resolvedTarget.resolved.sessionId,
+          sessionName: resolvedTarget.resolved.sessionName,
+          sessionPath: resolvedTarget.resolved.sessionPath,
           question,
         },
       };
     },
   });
+}
+
+function resolveSessionAskTarget(sessionId: string): {
+  resolved?: SessionLineageRow | undefined;
+  error?: string | undefined;
+} {
+  if (!isExactSessionId(sessionId)) {
+    return {
+      error:
+        "session_ask requires an exact session UUID. Use autocomplete or session_search to find it.",
+    };
+  }
+
+  const status = getIndexStatus();
+  if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
+    return {
+      error: `Session index missing or incompatible at ${getDefaultIndexPath()}. Run /session-index and press r to rebuild it.`,
+    };
+  }
+
+  const db = openIndexDatabase(status.dbPath, { create: false });
+  try {
+    const row = getSessionById(db, sessionId);
+    if (!row) {
+      return { error: `No indexed session found for id: ${sessionId}` };
+    }
+
+    return { resolved: row };
+  } finally {
+    db.close();
+  }
+}
+
+function isExactSessionId(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
 function collectTextBlocks(content: Array<{ type: string; text?: string }>): string[] {

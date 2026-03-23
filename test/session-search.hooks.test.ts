@@ -280,6 +280,137 @@ describe("session-search hooks", () => {
     expect(controller.getState().lastFlushedSessionFile).toBe(sessionTwoPath);
   });
 
+  it("records fork lineage and preserves it across later hook syncs", async () => {
+    const root = testFs.createTempDir();
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const db = openIndexDatabase(indexPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    db.close();
+
+    const parentPath = testFs.writeJsonlFile(root, "parent.jsonl", [
+      {
+        type: "session",
+        id: "parent-session",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+    ]);
+    const childPath = testFs.writeJsonlFile(root, "child.jsonl", [
+      {
+        type: "session",
+        id: "child-session",
+        timestamp: "2026-03-22T00:10:00.000Z",
+        cwd,
+        parentSession: parentPath,
+      },
+      {
+        type: "message",
+        id: "user-1",
+        parentId: null,
+        timestamp: "2026-03-22T00:10:01.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "forked work" }],
+        },
+      },
+    ]);
+
+    const controller = createSessionHookController({ indexPath });
+
+    expect(await controller.handleSessionStart(parentPath, cwd)).toBe(true);
+    expect(await controller.handleSessionFork(parentPath, childPath, cwd)).toBe(true);
+    expect(await controller.handleTurnEnd(childPath, cwd)).toBe(true);
+
+    const indexedDb = openIndexDatabase(indexPath, { create: false });
+    const childRow = indexedDb
+      .prepare(
+        `SELECT parent_session_path as parentSessionPath, parent_session_id as parentSessionId, session_origin as sessionOrigin FROM sessions WHERE session_id = ?`,
+      )
+      .get("child-session") as {
+      parentSessionPath?: string;
+      parentSessionId?: string;
+      sessionOrigin?: string;
+    };
+    indexedDb.close();
+
+    expect(childRow).toEqual({
+      parentSessionPath: parentPath,
+      parentSessionId: "parent-session",
+      sessionOrigin: "fork",
+    });
+  });
+
+  it("records handoff lineage when session_switch provides it", async () => {
+    const root = testFs.createTempDir();
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const db = openIndexDatabase(indexPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    db.close();
+
+    const parentPath = testFs.writeJsonlFile(root, "parent.jsonl", [
+      {
+        type: "session",
+        id: "parent-session",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+    ]);
+    const childPath = testFs.writeJsonlFile(root, "child.jsonl", [
+      {
+        type: "session",
+        id: "child-session",
+        timestamp: "2026-03-22T00:10:00.000Z",
+        cwd,
+        parentSession: parentPath,
+      },
+      {
+        type: "custom",
+        id: "custom-1",
+        parentId: null,
+        timestamp: "2026-03-22T00:10:01.000Z",
+        customType: "pi-sessions.handoff",
+        data: {
+          origin: "handoff",
+          goal: "Finish the handoff",
+          nextTask: "Implement autocomplete",
+        },
+      },
+    ]);
+
+    const controller = createSessionHookController({ indexPath });
+
+    expect(await controller.handleSessionSwitch(parentPath, childPath, cwd, "handoff")).toBe(true);
+    expect(await controller.handleTurnEnd(childPath, cwd)).toBe(true);
+
+    const indexedDb = openIndexDatabase(indexPath, { create: false });
+    const childRow = indexedDb
+      .prepare(
+        `SELECT parent_session_path as parentSessionPath, parent_session_id as parentSessionId, session_origin as sessionOrigin, handoff_goal as handoffGoal, handoff_next_task as handoffNextTask FROM sessions WHERE session_id = ?`,
+      )
+      .get("child-session") as {
+      parentSessionPath?: string;
+      parentSessionId?: string;
+      sessionOrigin?: string;
+      handoffGoal?: string;
+      handoffNextTask?: string;
+    };
+    indexedDb.close();
+
+    expect(childRow).toEqual({
+      parentSessionPath: parentPath,
+      parentSessionId: "parent-session",
+      sessionOrigin: "handoff",
+      handoffGoal: "Finish the handoff",
+      handoffNextTask: "Implement autocomplete",
+    });
+  });
+
   it("ingests session_tree and session_compact hook flushes", async () => {
     const root = testFs.createTempDir();
     const indexPath = path.join(root, "index.sqlite");

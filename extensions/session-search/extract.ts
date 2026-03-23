@@ -1,6 +1,11 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
+  HANDOFF_METADATA_CUSTOM_TYPE,
+  type HandoffSessionMetadata,
+} from "../session-handoff/metadata.js";
+import type { SessionOrigin } from "./db.js";
+import {
   deriveSessionRepoRoots,
   type FileTouchOp,
   type FileTouchSource,
@@ -33,6 +38,12 @@ export interface SearchTextChunk {
   text: string;
 }
 
+interface DurableHandoffMetadataRecord {
+  entryId?: string | undefined;
+  ts: string;
+  metadata: HandoffSessionMetadata;
+}
+
 export interface SessionFileTouch {
   entryId?: string | undefined;
   op: FileTouchOp;
@@ -57,6 +68,11 @@ export interface ExtractedSessionRecord {
   modifiedAt: string;
   messageCount: number;
   entryCount: number;
+  parentSessionPath?: string | undefined;
+  parentSessionId?: string | undefined;
+  sessionOrigin?: SessionOrigin | undefined;
+  handoffGoal?: string | undefined;
+  handoffNextTask?: string | undefined;
   chunks: SearchTextChunk[];
   fileTouches: SessionFileTouch[];
 }
@@ -106,6 +122,7 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
   const fileTouches: SessionFileTouch[] = [];
   let modifiedAt = fallbackTs;
   let messageCount = 0;
+  let durableHandoffMetadata: DurableHandoffMetadataRecord | undefined;
 
   if (parsed.sessionName) {
     chunks.push({
@@ -134,6 +151,14 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
         fileTouches.push(
           ...extractMessageFileTouches(entry.id, entryTs, message, parsed.header.cwd),
         );
+        continue;
+      }
+      case "custom": {
+        const customEntry = entry as CustomEntry;
+        const nextHandoffMetadata = parseHandoffSessionMetadata(customEntry, entryTs);
+        if (nextHandoffMetadata) {
+          durableHandoffMetadata = nextHandoffMetadata;
+        }
         continue;
       }
       case "custom_message":
@@ -190,6 +215,10 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
     }
   }
 
+  appendDurableHandoffMetadataChunks(chunks, durableHandoffMetadata);
+
+  const parentSessionPath = normalizeParentSessionPath(parsed.header.parentSession);
+
   return {
     sessionId: parsed.header.id,
     sessionPath,
@@ -200,6 +229,11 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
     modifiedAt,
     messageCount,
     entryCount: parsed.entries.length,
+    parentSessionPath,
+    parentSessionId: parentSessionPath ? readSessionIdFromPath(parentSessionPath) : undefined,
+    sessionOrigin: inferSessionOrigin(parentSessionPath, durableHandoffMetadata?.metadata),
+    handoffGoal: durableHandoffMetadata?.metadata.goal,
+    handoffNextTask: durableHandoffMetadata?.metadata.nextTask,
     chunks,
     fileTouches,
   };
@@ -239,6 +273,119 @@ export function parseSessionFile(sessionPath: string): ParsedSessionFile | undef
   }
 
   return { header, entries, sessionName };
+}
+
+function normalizeParentSessionPath(parentSession: string | undefined): string | undefined {
+  if (typeof parentSession !== "string") {
+    return undefined;
+  }
+
+  const trimmed = parentSession.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function findDurableHandoffMetadata(
+  entries: SessionEntryBase[],
+  fallbackTs: string,
+): DurableHandoffMetadataRecord | undefined {
+  let durableHandoffMetadata: DurableHandoffMetadataRecord | undefined;
+
+  for (const entry of entries) {
+    if (entry.type !== "custom") {
+      continue;
+    }
+
+    const parsed = parseHandoffSessionMetadata(
+      entry as CustomEntry,
+      getEntryTimestamp(entry, fallbackTs),
+    );
+    if (parsed) {
+      durableHandoffMetadata = parsed;
+    }
+  }
+
+  return durableHandoffMetadata;
+}
+
+function readSessionIdFromPath(sessionPath: string): string | undefined {
+  try {
+    const parsed = parseSessionFile(sessionPath);
+    return parsed?.header.id;
+  } catch {
+    return undefined;
+  }
+}
+
+function inferSessionOrigin(
+  parentSessionPath: string | undefined,
+  handoffMetadata: HandoffSessionMetadata | undefined,
+): SessionOrigin | undefined {
+  if (!parentSessionPath) {
+    return undefined;
+  }
+
+  return handoffMetadata?.origin === "handoff" ? "handoff" : "unknown_child";
+}
+
+function parseHandoffSessionMetadata(
+  entry: CustomEntry,
+  ts: string,
+): DurableHandoffMetadataRecord | undefined {
+  if (entry.customType !== HANDOFF_METADATA_CUSTOM_TYPE) {
+    return undefined;
+  }
+
+  const data = entry.data;
+  if (!isRecord(data)) {
+    return undefined;
+  }
+
+  const origin = stringValue(data.origin);
+  const goal = stringValue(data.goal);
+  const nextTask = stringValue(data.nextTask);
+  if (origin !== "handoff" || !goal || !nextTask) {
+    return undefined;
+  }
+
+  return {
+    entryId: entry.id,
+    ts,
+    metadata: {
+      origin,
+      goal,
+      nextTask,
+    },
+  };
+}
+
+function appendDurableHandoffMetadataChunks(
+  chunks: SearchTextChunk[],
+  durableHandoffMetadata: DurableHandoffMetadataRecord | undefined,
+): void {
+  if (!durableHandoffMetadata) {
+    return;
+  }
+
+  const { entryId, ts, metadata } = durableHandoffMetadata;
+  chunks.push(
+    createMetadataChunk(entryId, ts, "handoff_goal", metadata.goal),
+    createMetadataChunk(entryId, ts, "handoff_next_task", metadata.nextTask),
+  );
+}
+
+function createMetadataChunk(
+  entryId: string | undefined,
+  ts: string,
+  sourceKind: string,
+  text: string,
+): SearchTextChunk {
+  return {
+    entryId,
+    entryType: "custom",
+    ts,
+    sourceKind,
+    text,
+  };
 }
 
 function getEntryTimestamp(entry: SessionEntryBase, fallbackTs: string): string {
@@ -379,6 +526,10 @@ function groupEntriesByParent(entries: SessionEntryBase[]): Map<string | null, S
 }
 
 function buildSessionTreeHeader(parsed: ParsedSessionFile, sessionPath: string): string[] {
+  const durableHandoffMetadata = findDurableHandoffMetadata(
+    parsed.entries,
+    parsed.header.timestamp,
+  );
   const lines = [
     `# Session ${parsed.sessionName || parsed.header.id}`,
     "",
@@ -390,6 +541,14 @@ function buildSessionTreeHeader(parsed: ParsedSessionFile, sessionPath: string):
 
   if (parsed.header.parentSession) {
     lines.push(`- parent_session: ${parsed.header.parentSession}`);
+  }
+
+  if (durableHandoffMetadata) {
+    lines.push(
+      `- session_origin: ${durableHandoffMetadata.metadata.origin}`,
+      `- handoff_goal: ${durableHandoffMetadata.metadata.goal}`,
+      `- handoff_next_task: ${durableHandoffMetadata.metadata.nextTask}`,
+    );
   }
 
   lines.push("", "## Session Tree", "");
@@ -834,6 +993,12 @@ interface MessageEntry extends SessionEntryBase {
 interface SessionInfoEntry extends SessionEntryBase {
   type: "session_info";
   name?: string;
+}
+
+interface CustomEntry extends SessionEntryBase {
+  type: "custom";
+  customType?: string;
+  data?: unknown;
 }
 
 interface CustomMessageEntry extends SessionEntryBase {

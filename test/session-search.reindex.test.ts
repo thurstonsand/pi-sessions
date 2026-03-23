@@ -113,4 +113,89 @@ describe("rebuildSessionIndex", () => {
     expect(fileHits).toHaveLength(1);
     expect(fileHits[0]?.matchedFiles).toEqual(["app/src/index.ts"]);
   });
+
+  it("persists unknown child lineage during full reindex", async () => {
+    const root = testFs.createTempDir();
+    const sessionsDir = path.join(root, "sessions");
+    const nestedDir = path.join(sessionsDir, "--repo--");
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const parentPath = testFs.writeJsonlFile(nestedDir, "2026-03-22T00-00-00-000Z_parent.jsonl", [
+      {
+        type: "session",
+        id: "parent-session",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+    ]);
+    const childPath = testFs.writeJsonlFile(nestedDir, "2026-03-22T00-10-00-000Z_child.jsonl", [
+      {
+        type: "session",
+        id: "child-session",
+        timestamp: "2026-03-22T00:10:00.000Z",
+        cwd,
+        parentSession: parentPath,
+      },
+      {
+        type: "custom",
+        id: "custom-1",
+        parentId: null,
+        timestamp: "2026-03-22T00:10:01.000Z",
+        customType: "pi-sessions.handoff",
+        data: {
+          origin: "handoff",
+          goal: "Finish the split",
+          nextTask: "Implement autocomplete",
+        },
+      },
+    ]);
+
+    vi.spyOn(SessionManager, "listAll").mockResolvedValue([
+      {
+        path: parentPath,
+        id: "parent-session",
+        cwd,
+        created: new Date("2026-03-22T00:00:00.000Z"),
+        modified: new Date("2026-03-22T00:00:00.000Z"),
+        messageCount: 0,
+        firstMessage: "",
+        allMessagesText: "",
+      } satisfies SessionInfo,
+      {
+        path: childPath,
+        id: "child-session",
+        cwd,
+        created: new Date("2026-03-22T00:10:00.000Z"),
+        modified: new Date("2026-03-22T00:10:00.000Z"),
+        messageCount: 0,
+        firstMessage: "",
+        allMessagesText: "",
+      } satisfies SessionInfo,
+    ]);
+
+    await rebuildSessionIndex({ indexPath });
+
+    const db = openIndexDatabase(indexPath, { create: false });
+    const childRow = db
+      .prepare(
+        `SELECT parent_session_path as parentSessionPath, parent_session_id as parentSessionId, session_origin as sessionOrigin, handoff_goal as handoffGoal, handoff_next_task as handoffNextTask FROM sessions WHERE session_id = ?`,
+      )
+      .get("child-session") as {
+      parentSessionPath?: string;
+      parentSessionId?: string;
+      sessionOrigin?: string;
+      handoffGoal?: string;
+      handoffNextTask?: string;
+    };
+    db.close();
+
+    expect(childRow).toEqual({
+      parentSessionPath: parentPath,
+      parentSessionId: "parent-session",
+      sessionOrigin: "handoff",
+      handoffGoal: "Finish the split",
+      handoffNextTask: "Implement autocomplete",
+    });
+  });
 });

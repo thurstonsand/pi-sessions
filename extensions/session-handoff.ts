@@ -2,7 +2,12 @@ import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-cod
 import { buildSessionContext } from "@mariozechner/pi-coding-agent";
 import { Key, matchesKey } from "@mariozechner/pi-tui";
 import { generateHandoffDraft, type HandoffDraftResult } from "./session-handoff/extract.js";
+import {
+  createHandoffSessionMetadata,
+  HANDOFF_METADATA_CUSTOM_TYPE,
+} from "./session-handoff/metadata.js";
 import { renderStrongModal, reviewHandoffDraft } from "./session-handoff/review.js";
+import { clearPendingChildOrigin, queuePendingChildOrigin } from "./session-search/hooks.js";
 
 interface HandoffCommandDependencies {
   generateDraft: (
@@ -85,11 +90,22 @@ export function createSessionHandoffCommandHandler(
     }
 
     const parentSession = ctx.sessionManager.getSessionFile();
+    if (parentSession) {
+      queuePendingChildOrigin(parentSession, "handoff");
+    }
+
+    const handoffMetadata = createHandoffSessionMetadata(goal, generatedDraft.context.nextTask);
+    const writeMetadata = async (sm: { appendCustomEntry(type: string, data: unknown): void }) => {
+      sm.appendCustomEntry(HANDOFF_METADATA_CUSTOM_TYPE, handoffMetadata);
+    };
     const newSessionResult = parentSession
-      ? await ctx.newSession({ parentSession })
-      : await ctx.newSession();
+      ? await ctx.newSession({ parentSession, setup: writeMetadata })
+      : await ctx.newSession({ setup: writeMetadata });
 
     if (newSessionResult.cancelled) {
+      if (parentSession) {
+        clearPendingChildOrigin(parentSession);
+      }
       ctx.ui.notify("New session cancelled", "info");
       return;
     }

@@ -185,11 +185,10 @@ session_ask({
 })
 ```
 
-Backward compatibility is fine:
+The public form should just be `session`.
 
-- keep `sessionPath` for now if desired
-- normalize it internally into the same resolver path as `session`
-- treat the new `session` parameter as the long-term, user-facing form
+- normalize all accepted reference styles through the same resolver path
+- do not keep a parallel `sessionPath` parameter
 
 ### Canonical handoff references and editor autocomplete
 
@@ -582,6 +581,7 @@ Deliverable: `@handoff/...` autocompletes in the prompt editor and resolves clea
 - [ ] Wire a handoff-only autocomplete contributor into the prompt editor
 - [ ] Detect `@handoff/` prefixes without introducing a generalized mention parser
 - [ ] Return recent lineage-linked sessions with human-friendly labels
+- [ ] Add a power-user override such as `Ctrl+A` in the autocomplete window to show all sessions, not only the current lineage tree
 - [ ] Apply selected completions as canonical `@handoff/<id>` tokens
 - [ ] Add tests for prefix detection, suggestion ranking, and completion replacement
 

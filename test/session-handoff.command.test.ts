@@ -20,7 +20,7 @@ describe("session handoff command", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("No conversation to hand off", "error");
   });
 
-  it("creates a new session and sends the approved draft", async () => {
+  it("creates a new session, persists handoff metadata, and sends the approved draft", async () => {
     const pi = createPiApi();
     const ctx = createCommandContext();
     const handler = createSessionHandoffCommandHandler(
@@ -30,7 +30,14 @@ describe("session handoff command", () => {
 
     await handler("Finish phase 1", ctx as never);
 
-    expect(ctx.newSession).toHaveBeenCalledWith({ parentSession: "/tmp/session.jsonl" });
+    expect(ctx.newSession).toHaveBeenCalledWith(
+      expect.objectContaining({ parentSession: "/tmp/session.jsonl", setup: expect.any(Function) }),
+    );
+    expect(ctx.appendCustomEntry).toHaveBeenCalledWith("pi-sessions.handoff", {
+      origin: "handoff",
+      goal: "Finish phase 1",
+      nextTask: "Task",
+    });
     expect(pi.sendUserMessage).toHaveBeenCalledWith("Approved handoff draft");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Handoff started in a new session.", "info");
   });
@@ -103,6 +110,7 @@ function createDependencies(options?: { approvedDraft?: string | undefined }) {
 function createCommandContext(options?: { hasMessages?: boolean; newSessionCancelled?: boolean }) {
   const hasMessages = options?.hasMessages ?? true;
   const newSessionCancelled = options?.newSessionCancelled ?? false;
+  const appendCustomEntry = vi.fn();
 
   return {
     hasUI: true,
@@ -139,6 +147,16 @@ function createCommandContext(options?: { hasMessages?: boolean; newSessionCance
         return "/tmp/session.jsonl";
       },
     },
-    newSession: vi.fn(async () => ({ cancelled: newSessionCancelled })),
+    appendCustomEntry,
+    newSession: vi.fn(
+      async (sessionOptions?: {
+        setup?: (sessionManager: { appendCustomEntry: typeof appendCustomEntry }) => Promise<void>;
+      }) => {
+        if (!newSessionCancelled) {
+          await sessionOptions?.setup?.({ appendCustomEntry });
+        }
+        return { cancelled: newSessionCancelled };
+      },
+    ),
   };
 }

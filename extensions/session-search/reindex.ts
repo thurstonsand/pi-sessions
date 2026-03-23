@@ -8,6 +8,7 @@ import {
   insertSessionFileTouch,
   insertTextChunk,
   openIndexDatabase,
+  rebuildSessionLineageRelations,
   type SessionIndexDatabase,
   setMetadata,
 } from "./db.js";
@@ -62,6 +63,7 @@ function indexSessionFiles(
       insertSessionFileTouches(db, extracted.sessionId, extracted.fileTouches);
     }
 
+    rebuildSessionLineageRelations(db);
     setMetadata(db, "indexed_at", new Date().toISOString());
     setMetadata(db, "session_source", "SessionManager.listAll()");
 

@@ -2,7 +2,7 @@
   "name": "pi-sessions",
   "version": "0.1.0",
   "type": "module",
-  "description": "Pi session search, ask, and indexing tools",
+  "description": "Pi session search, ask, handoff, and indexing tools",
   "keywords": [
     "pi-package"
   ],

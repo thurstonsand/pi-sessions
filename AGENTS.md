@@ -3,7 +3,8 @@
 ## Project Overview
 
 Pi extension package providing session search (FTS5), session ask (LLM-powered Q&A),
-and session index management. TypeScript, ES modules, SQLite via better-sqlite3.
+command-driven session handoff, and session index management. TypeScript, ES modules,
+SQLite via better-sqlite3.
 
 ## Commands
 
@@ -38,16 +39,21 @@ extensions/                  # All source code
   session-ask.ts             # "session_ask" tool entry point
   session-index.ts           # "session-index" command entry point
   session-hooks.ts           # Hook registration entry point
-  session-search/            # Core implementation
+  session-handoff.ts         # "/handoff" command entry point
+  session-search/            # Search/index implementation
     db.ts                    # SQLite schema, queries, CRUD, search ranking
     extract.ts               # JSONL parsing, tree rendering, file-touch extraction
     reindex.ts               # Bulk index rebuild
     normalize.ts             # Path normalization and repo-root derivation
     hooks.ts                 # Hook controller and sync logic
+  session-handoff/           # Handoff implementation
+    extract.ts               # Structured extraction and draft assembly
+    review.ts                # Preview overlay and review flow
 ```
 
 Entry points are thin wrappers that register tools/commands with the Pi extension
-API via default exports. Business logic lives in `extensions/session-search/`.
+API via default exports. Business logic lives in `extensions/session-search/` and
+`extensions/session-handoff/`.
 
 ## Code Style
 

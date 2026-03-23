@@ -1,11 +1,12 @@
 # pi-sessions
 
-Pi package for historical session discovery, follow-up questioning, and hook-maintained indexing.
+Pi package for historical session discovery, follow-up questioning, deliberate session handoff, and hook-maintained indexing.
 
 ## What it provides
 
 - `session_search` — find relevant prior sessions by text, repo, cwd, time range, and touched files
 - `session_ask` — ask questions about one chosen session by reading the **entire session tree**
+- `/handoff <goal>` — generate a structured handoff draft, review it, and start a fresh child session
 - `/session-index` — small control panel for index status and explicit full reindex
 - hook-driven freshness for future sessions after the first full reindex
 
@@ -54,6 +55,28 @@ On a fresh install, run a full reindex once.
 4. Confirm the rebuild
 
 That rebuilds the index from all sessions returned by `SessionManager.listAll()`.
+
+## `/handoff`
+
+Phase 1 ships a command-only handoff flow.
+
+Behavior:
+
+- run `/handoff <goal>` from an active session
+- the extension serializes the current conversation branch and asks the active model to call an internal `create_handoff_context` extraction tool
+- the final first message for the new session is assembled in code, not free-written by the model
+- a review overlay appears before switching sessions
+- if you do nothing, the draft auto-starts after 8 seconds
+- `Enter` — start the new session immediately
+- `Esc` — cancel
+- `e` — open the built-in editor for full prompt editing
+- `j` / `k` — scroll the draft preview and pause auto-start
+
+The new session is created through `ctx.newSession({ parentSession })`, so the child session keeps native Pi parent linkage.
+
+Current limitation:
+
+- the generated prompt references `session_ask`, but `session_ask` still takes `sessionPath` today; resolving raw ids or `@handoff/...` refs is planned for a later phase
 
 ## `/session-index`
 
@@ -186,6 +209,12 @@ Use session_search with cwd "/Users/thurstonsand/Develop/ansiblonomicon" and tim
 
 ```text
 Use session_ask on /path/to/session.jsonl and ask what decisions were made.
+```
+
+### Start a focused child session
+
+```text
+/handoff implement phase 1 of the handoff capability
 ```
 
 ## Development

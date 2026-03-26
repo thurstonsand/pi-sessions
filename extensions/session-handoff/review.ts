@@ -231,7 +231,7 @@ function renderPromptSection(lines: string[], width: number, _theme: Theme): str
 }
 
 export async function reviewHandoffDraft(
-  ctx: Pick<ExtensionCommandContext, "ui">,
+  ctx: ExtensionCommandContext,
   draft: string,
 ): Promise<string | undefined> {
   const action = await runPreviewGate(ctx.ui, draft);
@@ -251,10 +251,7 @@ export async function reviewHandoffDraft(
   return editedDraft;
 }
 
-async function runPreviewGate(
-  ui: Pick<ExtensionUIContext, "custom">,
-  draft: string,
-): Promise<ReviewAction> {
+async function runPreviewGate(ui: ExtensionUIContext, draft: string): Promise<ReviewAction> {
   return ui.custom<ReviewAction>(
     (tui, theme, _keybindings, done) =>
       new HandoffPreviewComponent(draft, theme, () => tui.requestRender(), done),

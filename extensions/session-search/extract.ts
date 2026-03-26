@@ -62,6 +62,7 @@ export interface ExtractedSessionRecord {
   sessionId: string;
   sessionPath: string;
   sessionName: string;
+  firstUserPrompt?: string | undefined;
   cwd: string;
   repoRoots: string[];
   startedAt: string;
@@ -122,6 +123,7 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
   const fileTouches: SessionFileTouch[] = [];
   let modifiedAt = fallbackTs;
   let messageCount = 0;
+  let firstUserPrompt: string | undefined;
   let durableHandoffMetadata: DurableHandoffMetadataRecord | undefined;
 
   if (parsed.sessionName) {
@@ -147,6 +149,9 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
         }
 
         messageCount += 1;
+        if (!firstUserPrompt && message.role === "user") {
+          firstUserPrompt = contentToText(message.content);
+        }
         chunks.push(...extractMessageChunks(entry.id, entryTs, message));
         fileTouches.push(
           ...extractMessageFileTouches(entry.id, entryTs, message, parsed.header.cwd),
@@ -223,6 +228,7 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
     sessionId: parsed.header.id,
     sessionPath,
     sessionName: parsed.sessionName,
+    firstUserPrompt: trimmedText(firstUserPrompt),
     cwd: parsed.header.cwd,
     repoRoots: deriveSessionRepoRoots(parsed.header.cwd, fileTouches),
     startedAt: parsed.header.timestamp,
@@ -479,9 +485,9 @@ function createFileTouch(
 ): SessionFileTouch {
   return {
     entryId,
-    op,
     source,
     ...normalizePathRecord(rawPath, cwd),
+    op,
     ts,
   };
 }
@@ -555,10 +561,16 @@ function buildSessionTreeHeader(parsed: ParsedSessionFile, sessionPath: string):
   return lines;
 }
 
+export interface RenderedSessionTree {
+  markdown: string;
+  sessionId: string;
+  sessionName: string;
+}
+
 export function renderSessionTreeMarkdown(
   sessionPath: string,
   options?: { maxChars?: number },
-): { markdown: string; sessionId: string; sessionName: string } {
+): RenderedSessionTree {
   const parsed = parseSessionFile(sessionPath);
   if (!parsed) {
     throw new Error(`Unable to parse session file: ${sessionPath}`);

@@ -216,7 +216,7 @@ Concretely, v1 should add a narrow slice of infrastructure just for `@handoff/..
 2. query indexed lineage-linked sessions from the sidecar DB
 3. return autocomplete suggestions using canonical handoff refs plus a human-friendly label
 4. replace the typed prefix with the chosen `@handoff/<id>` token
-5. let `session_ask` resolve that token later
+5. rewrite canonical handoff tokens to raw session UUIDs before model execution so `session_ask` can stay UUID-only
 
 This is intentionally smaller than the `bdsqqq/dots` architecture. We want the ergonomics of `@handoff` now, without taking on a full multi-kind mention system.
 
@@ -574,7 +574,7 @@ Deliverable: lineage-linked parent/child relationships are indexed and recall to
 
 ### Phase 3 — handoff-only autocomplete
 
-Deliverable: `@handoff/...` autocompletes in the prompt editor and resolves cleanly to indexed lineage-linked sessions.
+Deliverable: `@session:<uuid>` autocompletes in the prompt editor and stays visible to the model as a session token.
 
 - [ ] Add `extensions/session-handoff/autocomplete.ts`
 - [ ] Add `extensions/session-handoff/query.ts`

@@ -1,3 +1,4 @@
+import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import { createSessionHandoffCommandHandler } from "../extensions/session-handoff.js";
 
@@ -72,9 +73,35 @@ describe("session handoff command", () => {
   });
 });
 
-function createPiApi() {
+function createPiApi(): ExtensionAPI {
   return {
+    on: vi.fn(),
+    registerTool: vi.fn(),
+    registerCommand: vi.fn(),
+    registerShortcut: vi.fn(),
+    registerFlag: vi.fn(),
+    getFlag: vi.fn(),
+    registerMessageRenderer: vi.fn(),
+    sendMessage: vi.fn(),
     sendUserMessage: vi.fn(),
+    appendEntry: vi.fn(),
+    setSessionName: vi.fn(),
+    getSessionName: vi.fn(),
+    setLabel: vi.fn(),
+    exec: vi.fn(),
+    getActiveTools: vi.fn(),
+    getAllTools: vi.fn(),
+    setActiveTools: vi.fn(),
+    getCommands: vi.fn(),
+    setModel: vi.fn(),
+    getThinkingLevel: vi.fn(),
+    setThinkingLevel: vi.fn(),
+    registerProvider: vi.fn(),
+    unregisterProvider: vi.fn(),
+    events: {
+      emit: vi.fn(),
+      on: vi.fn().mockReturnValue(() => {}),
+    },
   };
 }
 

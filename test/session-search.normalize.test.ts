@@ -30,7 +30,7 @@ describe("session-search normalize", () => {
     expect(normalized.pathScope).toBe("relative");
   });
 
-  it("aggregates repo roots from cwd and touched files", () => {
+  it("aggregates repo roots from cwd and modified files only", () => {
     const root = testFs.createTempDir();
     const firstRepo = testFs.ensureDir(path.join(root, "repo-one"));
     const secondRepo = testFs.ensureDir(path.join(root, "repo-two"));
@@ -38,7 +38,8 @@ describe("session-search normalize", () => {
     testFs.ensureDir(path.join(secondRepo, ".git"));
 
     const repoRoots = deriveSessionRepoRoots(firstRepo, [
-      normalizePathRecord(`${secondRepo}/docs/readme.md`, firstRepo),
+      { ...normalizePathRecord(`${secondRepo}/docs/readme.md`, firstRepo), op: "read" },
+      { ...normalizePathRecord(`${secondRepo}/src/index.ts`, firstRepo), op: "changed" },
     ]);
 
     expect(repoRoots).toEqual([firstRepo, secondRepo]);

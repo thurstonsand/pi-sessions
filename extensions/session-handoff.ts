@@ -1,6 +1,11 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+} from "@mariozechner/pi-coding-agent";
 import { buildSessionContext } from "@mariozechner/pi-coding-agent";
 import { Key, matchesKey } from "@mariozechner/pi-tui";
+import { HandoffAutocompleteEditor } from "./session-handoff/autocomplete.js";
 import { generateHandoffDraft, type HandoffDraftResult } from "./session-handoff/extract.js";
 import {
   createHandoffSessionMetadata,
@@ -34,10 +39,29 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
     description: "Transfer context to a new focused session",
     handler: createSessionHandoffCommandHandler(pi),
   });
+
+  pi.on("session_start", async (_event, ctx) => {
+    installHandoffEditor(ctx);
+  });
+
+  pi.on("session_switch", async (_event, ctx) => {
+    installHandoffEditor(ctx);
+  });
+
+  pi.on("session_fork", async (_event, ctx) => {
+    installHandoffEditor(ctx);
+  });
+
+  pi.on("before_agent_start", async () => {
+    return {
+      systemPrompt:
+        "When the user references @session:<uuid>, treat it as a session token. If you call session_ask, pass only the UUID value, not the @session: prefix.",
+    };
+  });
 }
 
 export function createSessionHandoffCommandHandler(
-  pi: Pick<ExtensionAPI, "sendUserMessage">,
+  pi: ExtensionAPI,
   dependencies: HandoffCommandDependencies = defaultDependencies,
 ): (args: string, ctx: ExtensionCommandContext) => Promise<void> {
   return async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
@@ -169,6 +193,30 @@ async function runWithLoader<T>(
   }
 
   return result;
+}
+
+function installHandoffEditor(ctx: ExtensionContext): void {
+  const autocompleteHintKey = "pi-sessions.session-autocomplete";
+
+  if (!ctx.hasUI) {
+    return;
+  }
+
+  ctx.ui.setWidget(autocompleteHintKey, undefined);
+  ctx.ui.setEditorComponent((tui, theme, keybindings) => {
+    return new HandoffAutocompleteEditor(tui, theme, keybindings, {
+      getCurrentSessionPath: () => ctx.sessionManager.getSessionFile(),
+      getCurrentCwd: () => ctx.cwd,
+      setAutocompleteStatus: (text: string | undefined) => {
+        if (!text) {
+          ctx.ui.setWidget(autocompleteHintKey, undefined);
+          return;
+        }
+
+        ctx.ui.setWidget(autocompleteHintKey, [text], { placement: "belowEditor" });
+      },
+    });
+  });
 }
 
 function formatHandoffError(error: unknown): string {

@@ -14,6 +14,7 @@ export interface NormalizedPathRecord {
   repoRelPath?: string | undefined;
   basename: string;
   pathScope: PathScope;
+  op?: FileTouchOp | undefined;
 }
 
 export function normalizePathRecord(rawPath: string, cwd: string): NormalizedPathRecord {
@@ -64,9 +65,11 @@ export function deriveSessionRepoRoots(
   }
 
   for (const normalizedPath of normalizedPaths) {
-    if (normalizedPath.repoRoot) {
-      repoRoots.add(normalizedPath.repoRoot);
+    if (!normalizedPath.repoRoot || normalizedPath.op === "read") {
+      continue;
     }
+
+    repoRoots.add(normalizedPath.repoRoot);
   }
 
   return [...repoRoots].sort();

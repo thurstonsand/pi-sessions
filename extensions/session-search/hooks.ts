@@ -263,14 +263,11 @@ function mergeSessionLineage(
 ): ExtractedSessionRecord {
   const parentSessionPath = extracted.parentSessionPath ?? existing?.parentSessionPath;
   const parentSessionId = extracted.parentSessionId ?? existing?.parentSessionId;
-  const existingOrigin = existing?.sessionOrigin;
-  const nextOrigin =
-    sessionOrigin ??
-    (extracted.sessionOrigin === "unknown_child" &&
-    existingOrigin &&
-    existingOrigin !== "unknown_child"
-      ? existingOrigin
-      : (extracted.sessionOrigin ?? existingOrigin));
+  const nextOrigin = resolveSessionOrigin(
+    sessionOrigin,
+    extracted.sessionOrigin,
+    existing?.sessionOrigin,
+  );
 
   return {
     ...extracted,
@@ -278,6 +275,23 @@ function mergeSessionLineage(
     parentSessionId,
     sessionOrigin: parentSessionPath ? (nextOrigin ?? "unknown_child") : undefined,
   };
+}
+
+function resolveSessionOrigin(
+  explicit: SessionOrigin | undefined,
+  extracted: SessionOrigin | undefined,
+  existing: SessionOrigin | undefined,
+): SessionOrigin | undefined {
+  if (explicit) {
+    return explicit;
+  }
+
+  // Preserve a specific origin when the extracted record only knows "unknown_child"
+  if (extracted === "unknown_child" && existing && existing !== "unknown_child") {
+    return existing;
+  }
+
+  return extracted ?? existing;
 }
 
 function shouldRefreshLineageRelations(

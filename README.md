@@ -58,8 +58,6 @@ That rebuilds the index from all sessions returned by `SessionManager.listAll()`
 
 ## `/handoff`
 
-Phase 1 ships a command-only handoff flow.
-
 Behavior:
 
 - run `/handoff <goal>` from an active session
@@ -73,6 +71,17 @@ Behavior:
 - `j` / `k` — scroll the draft preview and pause auto-start
 
 The new session is created through `ctx.newSession({ parentSession })`, so the child session keeps native Pi parent linkage.
+
+### Handoff autocomplete
+
+Behavior:
+
+- type `@session` in the editor to browse prior sessions
+- the default view pins lineage-linked sessions first, then shows recent sessions from the current repo or current cwd
+- `Alt+A` widens the list to all indexed sessions while still pinning lineage-linked sessions at the top
+- the list is scrollable rather than capped to a tiny fixed slice
+- selecting a suggestion inserts `@session:<session-id>`
+- the model sees `@session:<uuid>` tokens directly; when calling `session_ask`, it should pass only the UUID value
 
 ## `/session-index`
 
@@ -212,7 +221,7 @@ Use session_ask with session "2dc89501-5e75-4c75-bc71-15c499d850b2" and ask what
 ### Start a focused child session
 
 ```text
-/handoff implement phase 1 of the handoff capability
+/handoff continue the session handoff autocomplete work
 ```
 
 ## Development

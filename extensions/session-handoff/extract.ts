@@ -61,7 +61,7 @@ export interface HandoffDraftResult {
 }
 
 export async function generateHandoffDraft(
-  ctx: Pick<ExtensionContext, "model" | "modelRegistry" | "sessionManager">,
+  ctx: ExtensionContext,
   goal: string,
   signal?: AbortSignal,
 ): Promise<HandoffDraftResult | undefined> {

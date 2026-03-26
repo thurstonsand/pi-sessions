@@ -9,7 +9,7 @@ import {
   openIndexDatabase,
   type SessionLineageRow,
 } from "./session-search/db.js";
-import { renderSessionTreeMarkdown } from "./session-search/extract.js";
+import { type RenderedSessionTree, renderSessionTreeMarkdown } from "./session-search/extract.js";
 
 const SESSION_ASK_SYSTEM_PROMPT = `You are analyzing a Pi coding session transcript. The transcript includes the entire session tree, including abandoned branches and summaries.
 
@@ -121,7 +121,7 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         },
       });
 
-      let rendered: ReturnType<typeof renderSessionTreeMarkdown>;
+      let rendered: RenderedSessionTree;
       try {
         rendered = renderSessionTreeMarkdown(resolvedTarget.resolved.sessionPath);
       } catch (error) {

@@ -101,6 +101,10 @@ Run `npm run format` to auto-fix. Biome config is in `biome.json`.
 - All function parameters and return types explicitly typed
 - Define types for any JSON or external data before using it
 - Prefer narrow types over broad ones (`string` literals over `string` where possible)
+- Use the real/named existing type by default, over utility-type derivations
+- Avoid `Pick`, `Omit`, `Partial`, `ReturnType`, etc. unless they are clearly justified
+- Only introduce a smaller interface for a real runtime boundary, not field-trimming convenience
+- Do not change production types to make tests easier; mock the real type instead
 - No `any` — use `unknown` and narrow with type guards if the type is truly unknown
 - No type assertions (`as`) unless unavoidable; add a comment explaining why
 

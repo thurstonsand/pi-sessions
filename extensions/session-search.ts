@@ -9,6 +9,7 @@ import {
   openIndexDatabase,
   type SearchSessionResult,
   type SearchSessionsParams,
+  type SessionIndexStatus,
 } from "./session-search/db.js";
 
 interface SessionSearchToolParams {
@@ -28,7 +29,7 @@ interface SessionSearchToolParams {
 interface SessionSearchToolDetails {
   error: boolean;
   results: SearchSessionResult[];
-  status?: ReturnType<typeof getIndexStatus> | undefined;
+  status?: SessionIndexStatus | undefined;
 }
 
 export default function sessionSearchExtension(pi: ExtensionAPI): void {

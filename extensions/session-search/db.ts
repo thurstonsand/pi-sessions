@@ -10,7 +10,7 @@ import {
   type PathScope,
 } from "./normalize.js";
 
-export const INDEX_SCHEMA_VERSION = 5;
+export const INDEX_SCHEMA_VERSION = 6;
 
 const DEFAULT_SEARCH_LIMIT = 10;
 const SEARCH_CANDIDATE_LIMIT = 2_000;
@@ -29,6 +29,7 @@ export interface SessionRow {
   sessionId: string;
   sessionPath: string;
   sessionName: string;
+  firstUserPrompt?: string | undefined;
   cwd: string;
   repoRoots: string[];
   startedAt: string;
@@ -46,7 +47,9 @@ export interface SessionLineageRow {
   sessionId: string;
   sessionPath: string;
   sessionName: string;
+  firstUserPrompt?: string | undefined;
   cwd: string;
+  repoRoots: string[];
   modifiedAt: string;
   parentSessionPath?: string | undefined;
   parentSessionId?: string | undefined;
@@ -152,7 +155,9 @@ interface SessionLineageQueryRow {
   sessionId: string;
   sessionPath: string;
   sessionName: string;
+  firstUserPrompt?: string | undefined;
   cwd: string;
+  repoRootsJson: string;
   modifiedAt: string;
   parentSessionPath?: string | undefined;
   parentSessionId?: string | undefined;
@@ -182,6 +187,24 @@ interface MaterializedLineageRow {
   relatedSessionId: string;
   relation: SessionLineageRelation;
   distance: number;
+}
+
+function sessionLineageColumns(alias?: string): string {
+  const p = alias ? `${alias}.` : "";
+  return [
+    `${p}session_id as sessionId`,
+    `${p}session_path as sessionPath`,
+    `${p}session_name as sessionName`,
+    `${p}first_user_prompt as firstUserPrompt`,
+    `${p}cwd`,
+    `${p}repo_roots_json as repoRootsJson`,
+    `${p}modified_ts as modifiedAt`,
+    `${p}parent_session_path as parentSessionPath`,
+    `${p}parent_session_id as parentSessionId`,
+    `${p}session_origin as sessionOrigin`,
+    `${p}handoff_goal as handoffGoal`,
+    `${p}handoff_next_task as handoffNextTask`,
+  ].join(",\n          ");
 }
 
 interface FileTouchMatchRow {
@@ -274,6 +297,7 @@ export function initializeSchema(db: SessionIndexDatabase): void {
       session_id TEXT PRIMARY KEY,
       session_path TEXT NOT NULL,
       session_name TEXT NOT NULL,
+      first_user_prompt TEXT,
       cwd TEXT NOT NULL,
       repo_roots_json TEXT NOT NULL,
       created_ts TEXT NOT NULL,
@@ -381,6 +405,7 @@ function sessionRowBindings(
   string,
   string,
   string,
+  string | null,
   string,
   string,
   string,
@@ -400,6 +425,7 @@ function sessionRowBindings(
     row.sessionId,
     row.sessionPath,
     row.sessionName,
+    row.firstUserPrompt ?? null,
     row.cwd,
     JSON.stringify(row.repoRoots),
     row.startedAt,
@@ -425,12 +451,12 @@ export function insertSession(
   db.prepare(
     `
       INSERT INTO sessions(
-        session_id, session_path, session_name, cwd, repo_roots_json,
+        session_id, session_path, session_name, first_user_prompt, cwd, repo_roots_json,
         created_ts, modified_ts, message_count, entry_count,
         parent_session_path, parent_session_id, session_origin,
         handoff_goal, handoff_next_task,
         index_version, indexed_at_ts, index_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(...sessionRowBindings(row, indexSource));
 }
@@ -443,15 +469,16 @@ export function upsertSession(
   db.prepare(
     `
       INSERT INTO sessions(
-        session_id, session_path, session_name, cwd, repo_roots_json,
+        session_id, session_path, session_name, first_user_prompt, cwd, repo_roots_json,
         created_ts, modified_ts, message_count, entry_count,
         parent_session_path, parent_session_id, session_origin,
         handoff_goal, handoff_next_task,
         index_version, indexed_at_ts, index_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_id) DO UPDATE SET
         session_path = excluded.session_path,
         session_name = excluded.session_name,
+        first_user_prompt = excluded.first_user_prompt,
         cwd = excluded.cwd,
         repo_roots_json = excluded.repo_roots_json,
         created_ts = excluded.created_ts,
@@ -617,17 +644,7 @@ export function getSessionById(
   const row = db
     .prepare(
       `
-        SELECT
-          session_id as sessionId,
-          session_path as sessionPath,
-          session_name as sessionName,
-          cwd,
-          modified_ts as modifiedAt,
-          parent_session_path as parentSessionPath,
-          parent_session_id as parentSessionId,
-          session_origin as sessionOrigin,
-          handoff_goal as handoffGoal,
-          handoff_next_task as handoffNextTask
+        SELECT ${sessionLineageColumns()}
         FROM sessions
         WHERE session_id = ?
       `,
@@ -644,17 +661,7 @@ export function getSessionByPath(
   const row = db
     .prepare(
       `
-        SELECT
-          session_id as sessionId,
-          session_path as sessionPath,
-          session_name as sessionName,
-          cwd,
-          modified_ts as modifiedAt,
-          parent_session_path as parentSessionPath,
-          parent_session_id as parentSessionId,
-          session_origin as sessionOrigin,
-          handoff_goal as handoffGoal,
-          handoff_next_task as handoffNextTask
+        SELECT ${sessionLineageColumns()}
         FROM sessions
         WHERE session_path = ?
       `,
@@ -672,17 +679,7 @@ export function findSessionsByIdPrefix(
   const rows = db
     .prepare(
       `
-        SELECT
-          session_id as sessionId,
-          session_path as sessionPath,
-          session_name as sessionName,
-          cwd,
-          modified_ts as modifiedAt,
-          parent_session_path as parentSessionPath,
-          parent_session_id as parentSessionId,
-          session_origin as sessionOrigin,
-          handoff_goal as handoffGoal,
-          handoff_next_task as handoffNextTask
+        SELECT ${sessionLineageColumns()}
         FROM sessions
         WHERE session_id LIKE ? ESCAPE '\\'
         ORDER BY modified_ts DESC
@@ -724,6 +721,93 @@ export function getSiblingSessions(
   sessionId: string,
 ): SessionLineageRow[] {
   return queryRelatedSessions(db, sessionId, ["sibling"]);
+}
+
+export function getLineageAutocompleteSessions(
+  db: SessionIndexDatabase,
+  sessionId: string,
+  prefix: string,
+  limit?: number,
+): SessionRelatedSessionRow[] {
+  const normalizedPrefix = prefix.trim();
+  const limitClause = typeof limit === "number" ? "\n        LIMIT ?" : "";
+  const params: Array<string | number> = [
+    sessionId,
+    normalizedPrefix,
+    `${escapeLikePrefix(normalizedPrefix)}%`,
+  ];
+  if (typeof limit === "number") {
+    params.push(limit);
+  }
+
+  const rows = db
+    .prepare(
+      `
+        SELECT
+          ${sessionLineageColumns("s")},
+          r.relation as relation,
+          r.distance as distance
+        FROM session_lineage_relations r
+        JOIN sessions s ON s.session_id = r.related_session_id
+        WHERE r.session_id = ?
+          AND (? = '' OR s.session_id LIKE ? ESCAPE '\\')
+        ORDER BY
+          CASE r.relation
+            WHEN 'parent' THEN 1
+            WHEN 'child' THEN 2
+            WHEN 'sibling' THEN 3
+            WHEN 'ancestor' THEN 4
+            WHEN 'descendant' THEN 5
+            WHEN 'ancestor_sibling' THEN 6
+            ELSE 7
+          END ASC,
+          r.distance ASC,
+          s.modified_ts DESC${limitClause}
+      `,
+    )
+    .all(...params) as SessionRelatedQueryRow[];
+
+  return rows.map(buildRelatedSessionRow);
+}
+
+export function getRecentAutocompleteSessions(
+  db: SessionIndexDatabase,
+  prefix: string,
+  limit?: number,
+  options?: { excludeSessionId?: string | undefined; preferredCwd?: string | undefined },
+): SessionLineageRow[] {
+  const normalizedPrefix = prefix.trim();
+  const limitClause = typeof limit === "number" ? "\n        LIMIT ?" : "";
+  const params: Array<string | number | null> = [
+    options?.excludeSessionId ?? null,
+    options?.excludeSessionId ?? null,
+    normalizedPrefix,
+    `${escapeLikePrefix(normalizedPrefix)}%`,
+    options?.preferredCwd ?? null,
+    options?.preferredCwd ?? null,
+  ];
+  if (typeof limit === "number") {
+    params.push(limit);
+  }
+
+  const rows = db
+    .prepare(
+      `
+        SELECT ${sessionLineageColumns()}
+        FROM sessions
+        WHERE (? IS NULL OR session_id != ?)
+          AND (? = '' OR session_id LIKE ? ESCAPE '\\')
+        ORDER BY
+          CASE
+            WHEN ? IS NOT NULL AND cwd = ? THEN 0
+            ELSE 1
+          END ASC,
+          modified_ts DESC${limitClause}
+      `,
+    )
+    .all(...params) as SessionLineageQueryRow[];
+
+  return rows.map(buildSessionLineageRow);
 }
 
 export function buildSearchSessionsQuery(
@@ -1150,16 +1234,7 @@ function queryRelatedSessions(
     .prepare(
       `
         SELECT
-          s.session_id as sessionId,
-          s.session_path as sessionPath,
-          s.session_name as sessionName,
-          s.cwd as cwd,
-          s.modified_ts as modifiedAt,
-          s.parent_session_path as parentSessionPath,
-          s.parent_session_id as parentSessionId,
-          s.session_origin as sessionOrigin,
-          s.handoff_goal as handoffGoal,
-          s.handoff_next_task as handoffNextTask,
+          ${sessionLineageColumns("s")},
           r.relation as relation,
           r.distance as distance
         FROM session_lineage_relations r
@@ -1189,7 +1264,9 @@ function buildSessionLineageRow(row: SessionLineageQueryRow): SessionLineageRow 
     sessionId: row.sessionId,
     sessionPath: row.sessionPath,
     sessionName: row.sessionName,
+    firstUserPrompt: row.firstUserPrompt ?? undefined,
     cwd: row.cwd,
+    repoRoots: parseRepoRoots(row.repoRootsJson),
     modifiedAt: row.modifiedAt,
     parentSessionPath: row.parentSessionPath ?? undefined,
     parentSessionId: row.parentSessionId ?? undefined,

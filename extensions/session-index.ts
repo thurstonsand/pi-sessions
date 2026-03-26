@@ -5,7 +5,7 @@ import {
   type Theme,
 } from "@mariozechner/pi-coding-agent";
 import { type Focusable, matchesKey, visibleWidth } from "@mariozechner/pi-tui";
-import { getIndexStatus } from "./session-search/db.js";
+import { getIndexStatus, type SessionIndexStatus } from "./session-search/db.js";
 import { type ReindexResult, rebuildSessionIndex } from "./session-search/reindex.js";
 
 type SessionIndexAction = "reindex" | undefined;
@@ -67,7 +67,7 @@ class SessionIndexPanel implements Focusable {
 
   constructor(
     private readonly theme: Theme,
-    private readonly status: ReturnType<typeof getIndexStatus>,
+    private readonly status: SessionIndexStatus,
     private readonly done: (result: SessionIndexAction) => void,
   ) {}
 

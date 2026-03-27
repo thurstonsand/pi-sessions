@@ -69,8 +69,8 @@ export async function generateHandoffDraft(
     throw new Error("No model is available for handoff.");
   }
 
-  const apiKey = await ctx.modelRegistry.getApiKey(ctx.model);
-  if (!apiKey) {
+  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
+  if (!auth.ok || !auth.apiKey) {
     throw new Error(`No API key is available for ${ctx.model.provider}/${ctx.model.id}.`);
   }
 
@@ -101,7 +101,18 @@ export async function generateHandoffDraft(
       messages: [userMessage],
       tools: [HANDOFF_EXTRACTION_TOOL],
     },
-    signal ? { apiKey, signal, toolChoice: "any" } : { apiKey, toolChoice: "any" },
+    signal
+      ? {
+          apiKey: auth.apiKey,
+          ...(auth.headers ? { headers: auth.headers } : {}),
+          signal,
+          toolChoice: "any",
+        }
+      : {
+          apiKey: auth.apiKey,
+          ...(auth.headers ? { headers: auth.headers } : {}),
+          toolChoice: "any",
+        },
   );
 
   if (response.stopReason === "aborted") {

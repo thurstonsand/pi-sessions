@@ -62,7 +62,7 @@ describe("session handoff autocomplete", () => {
     expect(detectHandoffPrefix("Ask about @session:2dc89501 more")).toBeUndefined();
   });
 
-  it("returns handoff suggestions and applies canonical completion", () => {
+  it("returns handoff suggestions and applies canonical completion", async () => {
     const listCandidates = vi.fn().mockReturnValue({
       mode: "lineage",
       candidates: [
@@ -84,7 +84,12 @@ describe("session handoff autocomplete", () => {
       { listCandidates },
     );
 
-    const suggestions = provider.getSuggestions(["Use @session:2dc8"], 0, 17);
+    const suggestions = await provider.getSuggestions(
+      ["Use @session:2dc8"],
+      0,
+      17,
+      createAutocompleteOptions(),
+    );
 
     expect(listCandidates).toHaveBeenCalledWith({
       currentSessionPath: "/tmp/current.jsonl",
@@ -109,7 +114,7 @@ describe("session handoff autocomplete", () => {
     expect(completion.cursorCol).toBe(49);
   });
 
-  it("toggles all-session mode with alt+a while handoff autocomplete is open", () => {
+  it("toggles all-session mode with alt+a while handoff autocomplete is open", async () => {
     const listCandidates = vi.fn().mockImplementation((options: { includeAll: boolean }) => {
       return options.includeAll
         ? {
@@ -157,12 +162,22 @@ describe("session handoff autocomplete", () => {
     const provider = editor.getProvider();
     expect(provider).toBeDefined();
 
-    const beforeToggle = provider?.getSuggestions(editor.getLines(), 0, editor.getCursor().col);
+    const beforeToggle = await provider?.getSuggestions(
+      editor.getLines(),
+      0,
+      editor.getCursor().col,
+      createAutocompleteOptions(),
+    );
     expect(beforeToggle?.items[0]?.value).toBe("@session:lineage-session");
 
     editor.handleInput("\x1ba");
 
-    const afterToggle = provider?.getSuggestions(editor.getLines(), 0, editor.getCursor().col);
+    const afterToggle = await provider?.getSuggestions(
+      editor.getLines(),
+      0,
+      editor.getCursor().col,
+      createAutocompleteOptions(),
+    );
     expect(afterToggle?.items[0]?.value).toBe("@session:all-session");
     expect(listCandidates).toHaveBeenLastCalledWith({
       currentSessionPath: "/tmp/current.jsonl",
@@ -175,7 +190,7 @@ describe("session handoff autocomplete", () => {
     editor.handleInput("\x1ba");
   });
 
-  it("uses the current scope label when toggling back from all sessions", () => {
+  it("uses the current scope label when toggling back from all sessions", async () => {
     const listCandidates = vi.fn().mockReturnValue({
       mode: "default",
       defaultScopeLabel: "current repo",
@@ -205,7 +220,12 @@ describe("session handoff autocomplete", () => {
     editor.setAutocompleteVisible(true);
 
     const provider = editor.getProvider();
-    const suggestions = provider?.getSuggestions(editor.getLines(), 0, editor.getCursor().col);
+    const suggestions = await provider?.getSuggestions(
+      editor.getLines(),
+      0,
+      editor.getCursor().col,
+      createAutocompleteOptions(),
+    );
 
     expect(suggestions?.items[0]?.value).toBe("@session:fallback-session");
     editor.handleInput("\x1ba");
@@ -213,7 +233,7 @@ describe("session handoff autocomplete", () => {
     expect(listCandidates).toHaveBeenCalledTimes(1);
   });
 
-  it("surfaces provider-owned hint text and powerline actions", () => {
+  it("surfaces provider-owned hint text and powerline actions", async () => {
     const listCandidates = vi.fn().mockImplementation((options: { includeAll: boolean }) => {
       return options.includeAll
         ? {
@@ -251,14 +271,54 @@ describe("session handoff autocomplete", () => {
       { listCandidates },
     );
 
-    const suggestions = provider.getSuggestions(["Use @session:"], 0, 13);
+    const suggestions = await provider.getSuggestions(
+      ["Use @session:"],
+      0,
+      13,
+      createAutocompleteOptions(),
+    );
     expect(suggestions?.items[0]?.value).toBe("@session:lineage-session");
     expect(provider.getPowerlineAutocompleteHint()).toBe("Alt+A: show all sessions");
     provider.toggleIncludeAllSessions();
 
-    const toggledSuggestions = provider.getSuggestions(["Use @session:"], 0, 13);
+    const toggledSuggestions = await provider.getSuggestions(
+      ["Use @session:"],
+      0,
+      13,
+      createAutocompleteOptions(),
+    );
     expect(toggledSuggestions?.items[0]?.value).toBe("@session:all-session");
     expect(provider.getPowerlineAutocompleteHint()).toBe("Alt+A: show current repo sessions");
+  });
+
+  it("preserves force and signal when delegating to the wrapped provider", async () => {
+    const received: { force: boolean | undefined; signal: AbortSignal | undefined }[] = [];
+    const signal = new AbortController().signal;
+    const baseProvider: AutocompleteProvider = {
+      getSuggestions: vi.fn().mockImplementation(
+        async (_lines, _cursorLine, _cursorCol, options: { signal: AbortSignal; force?: boolean }) => {
+          received.push({ force: options.force, signal: options.signal });
+          return {
+            items: [{ value: "session-not-active", label: "session-not-active" }],
+            prefix: "session-not-active",
+          };
+        },
+      ),
+      applyCompletion: vi.fn(),
+    };
+    const provider = new HandoffAutocompleteProvider({
+      baseProvider,
+      getCurrentSessionPath: () => "/tmp/current.jsonl",
+      getCurrentCwd: () => "/repo/app",
+    });
+
+    const suggestions = await provider.getSuggestions(["plain text"], 0, 10, {
+      signal,
+      force: false,
+    });
+
+    expect(suggestions?.prefix).toBe("session-not-active");
+    expect(received).toEqual([{ force: false, signal }]);
   });
 
   it("lists lineage candidates with durable goal and next-task labels", () => {
@@ -417,8 +477,15 @@ class TestHandoffAutocompleteEditor extends HandoffAutocompleteEditor {
 
 function createBaseProvider(): AutocompleteProvider {
   return {
-    getSuggestions: vi.fn().mockReturnValue(null),
+    getSuggestions: vi.fn().mockResolvedValue(null),
     applyCompletion: vi.fn(),
+  };
+}
+
+function createAutocompleteOptions(force?: boolean): { signal: AbortSignal; force?: boolean } {
+  return {
+    signal: new AbortController().signal,
+    ...(force === undefined ? {} : { force }),
   };
 }
 

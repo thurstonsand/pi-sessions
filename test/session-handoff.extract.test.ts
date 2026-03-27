@@ -169,8 +169,8 @@ function createGenerationContext() {
   return {
     model: { provider: "openai", id: "gpt-5.4" },
     modelRegistry: {
-      async getApiKey() {
-        return "test-key";
+      async getApiKeyAndHeaders() {
+        return { ok: true, apiKey: "test-key", headers: undefined };
       },
     },
     sessionManager: {

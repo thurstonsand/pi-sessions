@@ -2,6 +2,7 @@ import { CustomEditor, type KeybindingsManager } from "@mariozechner/pi-coding-a
 import {
   type AutocompleteItem,
   type AutocompleteProvider,
+  type AutocompleteSuggestions,
   type EditorTheme,
   matchesKey,
   type TUI,
@@ -36,15 +37,6 @@ interface HandoffAutocompleteProviderOptions {
   getCurrentSessionPath: () => string | undefined;
   getCurrentCwd: () => string | undefined;
   limit?: number | undefined;
-}
-
-interface ForceAutocompleteProvider extends AutocompleteProvider {
-  getForceFileSuggestions?(
-    lines: string[],
-    cursorLine: number,
-    cursorCol: number,
-  ): { items: AutocompleteItem[]; prefix: string } | null;
-  shouldTriggerFileCompletion?(lines: string[], cursorLine: number, cursorCol: number): boolean;
 }
 
 export interface HandoffAutocompleteRefreshData {
@@ -88,7 +80,7 @@ export function isCanonicalSessionToken(text: string): boolean {
 }
 
 export class HandoffAutocompleteProvider
-  implements ForceAutocompleteProvider, PowerlineEnhancedAutocompleteProvider
+  implements PowerlineEnhancedAutocompleteProvider
 {
   private readonly baseProvider: AutocompleteProvider;
   private readonly getCurrentSessionPath: () => string | undefined;
@@ -116,14 +108,15 @@ export class HandoffAutocompleteProvider
     lines: string[],
     cursorLine: number,
     cursorCol: number,
-  ): { items: AutocompleteItem[]; prefix: string } | null {
+    options: { signal: AbortSignal; force?: boolean },
+  ): Promise<AutocompleteSuggestions | null> {
     const handoffSuggestions = this.getHandoffSuggestions(lines, cursorLine, cursorCol);
     if (handoffSuggestions) {
-      return handoffSuggestions;
+      return Promise.resolve(handoffSuggestions);
     }
 
     this.resetHandoffState();
-    return this.baseProvider.getSuggestions(lines, cursorLine, cursorCol);
+    return this.baseProvider.getSuggestions(lines, cursorLine, cursorCol, options);
   }
 
   applyCompletion(
@@ -152,30 +145,6 @@ export class HandoffAutocompleteProvider
       cursorLine,
       cursorCol: start + item.value.length,
     };
-  }
-
-  getForceFileSuggestions(
-    lines: string[],
-    cursorLine: number,
-    cursorCol: number,
-  ): { items: AutocompleteItem[]; prefix: string } | null {
-    const handoffSuggestions = this.getHandoffSuggestions(lines, cursorLine, cursorCol);
-    if (handoffSuggestions) {
-      return handoffSuggestions;
-    }
-
-    const provider = this.baseProvider as ForceAutocompleteProvider;
-    return provider.getForceFileSuggestions?.(lines, cursorLine, cursorCol) ?? null;
-  }
-
-  shouldTriggerFileCompletion(lines: string[], cursorLine: number, cursorCol: number): boolean {
-    const line = lines[cursorLine] ?? "";
-    if (detectHandoffPrefix(line, cursorCol)) {
-      return true;
-    }
-
-    const provider = this.baseProvider as ForceAutocompleteProvider;
-    return provider.shouldTriggerFileCompletion?.(lines, cursorLine, cursorCol) ?? true;
   }
 
   toggleIncludeAllSessions(): boolean {

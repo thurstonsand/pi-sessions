@@ -91,8 +91,8 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         };
       }
 
-      const apiKey = await ctx.modelRegistry.getApiKey(ctx.model);
-      if (!apiKey) {
+      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
+      if (!auth.ok || !auth.apiKey) {
         return {
           content: [
             {
@@ -169,7 +169,16 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
       const response = await complete(
         ctx.model,
         { systemPrompt: SESSION_ASK_SYSTEM_PROMPT, messages: [userMessage] },
-        signal ? { apiKey, signal } : { apiKey },
+        signal
+          ? {
+              apiKey: auth.apiKey,
+              ...(auth.headers ? { headers: auth.headers } : {}),
+              signal,
+            }
+          : {
+              apiKey: auth.apiKey,
+              ...(auth.headers ? { headers: auth.headers } : {}),
+            },
       );
 
       if (response.stopReason === "aborted") {

@@ -1,18 +1,26 @@
 import type {
+  EventBus,
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionContext,
+  KeybindingsManager,
 } from "@mariozechner/pi-coding-agent";
 import { buildSessionContext } from "@mariozechner/pi-coding-agent";
-import { Key, matchesKey } from "@mariozechner/pi-tui";
+import { type EditorTheme, Key, matchesKey, type TUI } from "@mariozechner/pi-tui";
 import { HandoffAutocompleteEditor } from "./session-handoff/autocomplete.js";
 import { generateHandoffDraft, type HandoffDraftResult } from "./session-handoff/extract.js";
 import {
   createHandoffSessionMetadata,
   HANDOFF_METADATA_CUSTOM_TYPE,
 } from "./session-handoff/metadata.js";
+import { connectPowerlineHandoffAutocomplete } from "./session-handoff/powerline.js";
 import { renderStrongModal, reviewHandoffDraft } from "./session-handoff/review.js";
+import { readSessionHandoffSettings } from "./session-handoff/settings.js";
 import { clearPendingChildOrigin, queuePendingChildOrigin } from "./session-search/hooks.js";
+
+const AUTOCOMPLETE_HINT_KEY = "pi-sessions.session-autocomplete";
+const POWERLINE_AUTOCOMPLETE_TIMEOUT_MS = 150;
+const POWERLINE_EXTENSION_ID = "pi-sessions";
 
 interface HandoffCommandDependencies {
   generateDraft: (
@@ -28,11 +36,18 @@ interface HandoffCommandDependencies {
   ) => Promise<T | undefined>;
 }
 
+interface InstalledHandoffAutocomplete {
+  mode: "standalone" | "powerline";
+  dispose(): void;
+}
+
 const defaultDependencies: HandoffCommandDependencies = {
   generateDraft: generateHandoffDraft,
   reviewDraft: reviewHandoffDraft,
   runWithLoader: runWithLoader,
 };
+
+let installedAutocomplete: InstalledHandoffAutocomplete | undefined;
 
 export default function sessionHandoffExtension(pi: ExtensionAPI): void {
   pi.registerCommand("handoff", {
@@ -41,15 +56,20 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    installHandoffEditor(ctx);
+    await installHandoffAutocomplete(ctx, pi.events);
   });
 
   pi.on("session_switch", async (_event, ctx) => {
-    installHandoffEditor(ctx);
+    await installHandoffAutocomplete(ctx, pi.events);
   });
 
   pi.on("session_fork", async (_event, ctx) => {
-    installHandoffEditor(ctx);
+    await installHandoffAutocomplete(ctx, pi.events);
+  });
+
+  pi.on("session_shutdown", async () => {
+    installedAutocomplete?.dispose();
+    installedAutocomplete = undefined;
   });
 
   pi.on("before_agent_start", async () => {
@@ -139,6 +159,56 @@ export function createSessionHandoffCommandHandler(
   };
 }
 
+export async function installHandoffAutocomplete(
+  ctx: ExtensionContext,
+  events: EventBus,
+): Promise<void> {
+  if (!ctx.hasUI) {
+    return;
+  }
+
+  installedAutocomplete?.dispose();
+  installedAutocomplete = undefined;
+  ctx.ui.setWidget(AUTOCOMPLETE_HINT_KEY, undefined);
+
+  const settings = readSessionHandoffSettings(ctx.cwd);
+  const host = settings.editorHost;
+
+  if (host === "standalone") {
+    installedAutocomplete = installStandaloneHandoffAutocomplete(ctx);
+    return;
+  }
+
+  if (host === "powerline") {
+    const result = await tryPowerlineHandoffAutocomplete(ctx, events);
+    if (result) {
+      installedAutocomplete = result;
+    } else {
+      ctx.ui.notify(
+        "Powerline is configured for sessions handoff autocomplete but the autocomplete bridge is unavailable.",
+        "error",
+      );
+    }
+    return;
+  }
+
+  if (!settings.powerlineConfigured) {
+    installedAutocomplete = installStandaloneHandoffAutocomplete(ctx);
+    return;
+  }
+
+  const result = await tryPowerlineHandoffAutocomplete(ctx, events);
+  if (result) {
+    installedAutocomplete = result;
+  } else {
+    ctx.ui.notify(
+      "Powerline appears configured but the autocomplete bridge did not respond. Falling back to standalone editor.",
+      "warning",
+    );
+    installedAutocomplete = installStandaloneHandoffAutocomplete(ctx);
+  }
+}
+
 async function runWithLoader<T>(
   ctx: ExtensionCommandContext,
   label: string,
@@ -195,28 +265,92 @@ async function runWithLoader<T>(
   return result;
 }
 
-function installHandoffEditor(ctx: ExtensionContext): void {
-  const autocompleteHintKey = "pi-sessions.session-autocomplete";
+function installStandaloneHandoffAutocomplete(ctx: ExtensionContext): InstalledHandoffAutocomplete {
+  let currentEditor: HandoffAutocompleteEditor | undefined;
+  let autocompleteFixed = false;
 
-  if (!ctx.hasUI) {
-    return;
-  }
-
-  ctx.ui.setWidget(autocompleteHintKey, undefined);
-  ctx.ui.setEditorComponent((tui, theme, keybindings) => {
-    return new HandoffAutocompleteEditor(tui, theme, keybindings, {
+  // Pi calls setAutocompleteProvider asynchronously after the editor is created.
+  // If the user types before the provider arrives, re-install the editor to let
+  // Pi attach the provider on the next creation cycle.
+  const editorFactory = (tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => {
+    const editor = new HandoffAutocompleteEditor(tui, theme, keybindings, {
       getCurrentSessionPath: () => ctx.sessionManager.getSessionFile(),
       getCurrentCwd: () => ctx.cwd,
       setAutocompleteStatus: (text: string | undefined) => {
         if (!text) {
-          ctx.ui.setWidget(autocompleteHintKey, undefined);
+          ctx.ui.setWidget(AUTOCOMPLETE_HINT_KEY, undefined);
           return;
         }
 
-        ctx.ui.setWidget(autocompleteHintKey, [text], { placement: "belowEditor" });
+        ctx.ui.setWidget(AUTOCOMPLETE_HINT_KEY, [text], { placement: "belowEditor" });
       },
     });
+    const originalHandleInput = editor.handleInput.bind(editor);
+    editor.handleInput = (data: string) => {
+      if (!autocompleteFixed && !editor.hasAutocompleteProviderAttached()) {
+        autocompleteFixed = true;
+        ctx.ui.setEditorComponent(editorFactory);
+        currentEditor?.handleInput(data);
+        return;
+      }
+
+      originalHandleInput(data);
+    };
+    currentEditor = editor;
+    return editor;
+  };
+
+  ctx.ui.setEditorComponent(editorFactory);
+
+  return {
+    mode: "standalone",
+    dispose() {
+      ctx.ui.setWidget(AUTOCOMPLETE_HINT_KEY, undefined);
+    },
+  };
+}
+
+async function tryPowerlineHandoffAutocomplete(
+  ctx: ExtensionContext,
+  events: EventBus,
+): Promise<InstalledHandoffAutocomplete | null> {
+  const connection = await connectPowerlineHandoffAutocomplete(events, {
+    extension: { id: POWERLINE_EXTENSION_ID },
+    getCurrentSessionPath: () => ctx.sessionManager.getSessionFile(),
+    getCurrentCwd: () => ctx.cwd,
+    pingTimeoutMs: POWERLINE_AUTOCOMPLETE_TIMEOUT_MS,
   });
+
+  if (!connection) {
+    return null;
+  }
+
+  let includeAllSessions = false;
+  const unsubscribeState = connection.interaction.subscribe((isActive: boolean) => {
+    if (!isActive) {
+      includeAllSessions = false;
+    }
+  });
+
+  const unsubscribeInput = ctx.ui.onTerminalInput((data: string) => {
+    if (!matchesKey(data, "alt+a") || !connection.interaction.isActive()) {
+      return undefined;
+    }
+
+    includeAllSessions = !includeAllSessions;
+    connection.interaction.requestRefresh({ includeAllSessions });
+    return { consume: true };
+  });
+
+  return {
+    mode: "powerline",
+    dispose() {
+      ctx.ui.setWidget(AUTOCOMPLETE_HINT_KEY, undefined);
+      unsubscribeState();
+      unsubscribeInput();
+      connection.disconnect();
+    },
+  };
 }
 
 function formatHandoffError(error: unknown): string {

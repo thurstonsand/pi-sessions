@@ -213,6 +213,54 @@ describe("session handoff autocomplete", () => {
     expect(listCandidates).toHaveBeenCalledTimes(1);
   });
 
+  it("surfaces provider-owned hint text and powerline actions", () => {
+    const listCandidates = vi.fn().mockImplementation((options: { includeAll: boolean }) => {
+      return options.includeAll
+        ? {
+            mode: "all",
+            defaultScopeLabel: "current repo",
+            candidates: [
+              {
+                value: "@session:all-session",
+                label: "All session - all-sess",
+                description: "Other task",
+                sessionId: "all-session",
+              },
+            ],
+          }
+        : {
+            mode: "default",
+            defaultScopeLabel: "current repo",
+            candidates: [
+              {
+                value: "@session:lineage-session",
+                label: "parent - Lineage session - lineage-",
+                description: "Continue current work",
+                sessionId: "lineage-session",
+              },
+            ],
+          };
+    });
+
+    const provider = new HandoffAutocompleteProvider(
+      {
+        baseProvider: createBaseProvider(),
+        getCurrentSessionPath: () => "/tmp/current.jsonl",
+        getCurrentCwd: () => "/repo/app",
+      },
+      { listCandidates },
+    );
+
+    const suggestions = provider.getSuggestions(["Use @session:"], 0, 13);
+    expect(suggestions?.items[0]?.value).toBe("@session:lineage-session");
+    expect(provider.getPowerlineAutocompleteHint()).toBe("Alt+A: show all sessions");
+    provider.toggleIncludeAllSessions();
+
+    const toggledSuggestions = provider.getSuggestions(["Use @session:"], 0, 13);
+    expect(toggledSuggestions?.items[0]?.value).toBe("@session:all-session");
+    expect(provider.getPowerlineAutocompleteHint()).toBe("Alt+A: show current repo sessions");
+  });
+
   it("lists lineage candidates with durable goal and next-task labels", () => {
     const dir = testFs.createTempDir();
     const dbPath = path.join(dir, "index.sqlite");
@@ -363,8 +411,7 @@ class TestHandoffAutocompleteEditor extends HandoffAutocompleteEditor {
   }
 
   getProvider(): HandoffAutocompleteProvider | undefined {
-    const provider = Reflect.get(this, "handoffProvider");
-    return provider instanceof HandoffAutocompleteProvider ? provider : undefined;
+    return this.getHandoffProvider();
   }
 }
 

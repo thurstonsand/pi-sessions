@@ -1,5 +1,10 @@
 import { existsSync } from "node:fs";
-import type { ToolCallEvent, ToolResultEvent } from "@mariozechner/pi-coding-agent";
+import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
+import {
+  isToolCallEventType,
+  type ToolCallEvent,
+  type ToolResultEvent,
+} from "@mariozechner/pi-coding-agent";
 import {
   clearSessionIndexedData,
   getIndexStatus,
@@ -307,27 +312,42 @@ function shouldRefreshLineageRelations(
 }
 
 function buildPendingToolCall(event: ToolCallEvent): PendingToolCall | undefined {
-  switch (event.toolName) {
-    case "read":
-    case "edit":
-    case "write": {
-      const path = stringValue(event.input.path);
-      if (!path) {
-        return undefined;
-      }
-
-      return {
-        toolCallId: event.toolCallId,
-        toolName: event.toolName,
-        path,
-      };
-    }
-    default:
-      return undefined;
+  if (isToolCallEventType("read", event)) {
+    return buildTrackedToolCall(event.toolCallId, "read", event.input.path);
   }
+
+  if (isToolCallEventType("edit", event)) {
+    return buildTrackedToolCall(event.toolCallId, "edit", event.input.path);
+  }
+
+  if (isToolCallEventType("write", event)) {
+    return buildTrackedToolCall(event.toolCallId, "write", event.input.path);
+  }
+
+  return undefined;
 }
 
-function summarizeToolResultText(toolName: string, content: ToolResultEvent["content"]): string {
+function buildTrackedToolCall(
+  toolCallId: string,
+  toolName: TrackedToolName,
+  rawPath: string,
+): PendingToolCall | undefined {
+  const path = stringValue(rawPath);
+  if (!path) {
+    return undefined;
+  }
+
+  return {
+    toolCallId,
+    toolName,
+    path,
+  };
+}
+
+function summarizeToolResultText(
+  toolName: string,
+  content: Array<TextContent | ImageContent>,
+): string {
   const text = content
     .filter((part): part is { type: "text"; text: string } => {
       return part.type === "text" && typeof part.text === "string";

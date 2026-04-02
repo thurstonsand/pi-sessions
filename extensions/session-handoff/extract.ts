@@ -1,11 +1,20 @@
-import { type AssistantMessage, complete, type Message, type Tool } from "@mariozechner/pi-ai";
+import {
+  type AssistantMessage,
+  complete,
+  type Message,
+  type TextContent,
+  type ThinkingContent,
+  type Tool,
+  type ToolCall,
+} from "@mariozechner/pi-ai";
 import type { ExtensionContext } from "@mariozechner/pi-coding-agent";
 import {
   buildSessionContext,
   convertToLlm,
   serializeConversation,
 } from "@mariozechner/pi-coding-agent";
-import { Type } from "@sinclair/typebox";
+import { type Static, Type } from "@sinclair/typebox";
+import { parseTypeBoxValue } from "../shared/typebox.js";
 
 const MAX_RELEVANT_FILES = 12;
 const MAX_OPEN_QUESTIONS = 8;
@@ -45,6 +54,13 @@ const HANDOFF_EXTRACTION_TOOL: Tool<typeof HANDOFF_EXTRACTION_PARAMETERS> = {
   description: "Extract the structured handoff context for the next session.",
   parameters: HANDOFF_EXTRACTION_PARAMETERS,
 };
+
+type RequiredHandoffExtractionArgs = Static<typeof REQUIRED_HANDOFF_EXTRACTION_PARAMETERS>;
+
+const REQUIRED_HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
+  summary: HANDOFF_EXTRACTION_PARAMETERS.properties.summary,
+  nextTask: HANDOFF_EXTRACTION_PARAMETERS.properties.nextTask,
+});
 
 export interface HandoffContext {
   summary: string;
@@ -198,9 +214,20 @@ export function extractHandoffContext(
     return undefined;
   }
 
-  const summary = normalizeText(toolCall.arguments.summary);
+  let requiredArguments: RequiredHandoffExtractionArgs;
+  try {
+    requiredArguments = parseTypeBoxValue(
+      REQUIRED_HANDOFF_EXTRACTION_PARAMETERS,
+      toolCall.arguments,
+      "Invalid create_handoff_context arguments",
+    );
+  } catch {
+    return undefined;
+  }
+
+  const summary = normalizeText(requiredArguments.summary);
   const relevantFiles = normalizeStringArray(toolCall.arguments.relevantFiles, MAX_RELEVANT_FILES);
-  const nextTask = normalizeText(toolCall.arguments.nextTask) || goal.trim();
+  const nextTask = normalizeText(requiredArguments.nextTask) || goal.trim();
   const openQuestions = normalizeStringArray(toolCall.arguments.openQuestions, MAX_OPEN_QUESTIONS);
 
   if (!summary || !nextTask) {
@@ -244,11 +271,8 @@ function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function isCreateHandoffContextToolCall(content: AssistantMessage["content"][number]): content is {
-  type: "toolCall";
-  id: string;
-  name: "create_handoff_context";
-  arguments: Record<string, unknown>;
-} {
+function isCreateHandoffContextToolCall(
+  content: TextContent | ThinkingContent | ToolCall,
+): content is ToolCall {
   return content.type === "toolCall" && content.name === "create_handoff_context";
 }

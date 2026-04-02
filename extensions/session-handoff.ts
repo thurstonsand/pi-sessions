@@ -16,7 +16,7 @@ import {
 import { connectPowerlineHandoffAutocomplete } from "./session-handoff/powerline.js";
 import { renderStrongModal, reviewHandoffDraft } from "./session-handoff/review.js";
 import { clearPendingChildOrigin, queuePendingChildOrigin } from "./session-search/hooks.js";
-import { loadSettings, type PiSessionsSettings } from "./shared/settings.js";
+import { loadSettings, type SessionSettings } from "./shared/settings.js";
 
 const AUTOCOMPLETE_HINT_KEY = "pi-sessions.session-autocomplete";
 const POWERLINE_AUTOCOMPLETE_TIMEOUT_MS = 150;
@@ -164,7 +164,7 @@ export function createSessionHandoffCommandHandler(
 export async function installHandoffAutocomplete(
   ctx: ExtensionContext,
   events: EventBus,
-  settings: PiSessionsSettings,
+  settings: SessionSettings,
 ): Promise<void> {
   if (!ctx.hasUI) {
     return;

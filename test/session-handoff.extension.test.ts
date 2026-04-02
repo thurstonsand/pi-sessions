@@ -16,7 +16,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockLoadSettings.mockReturnValue({
     handoff: { editorMode: "standalone" },
-    index: { dir: "/tmp/pi-sessions", path: "/tmp/pi-sessions/index.sqlite" },
+    index: { path: "/tmp/pi-sessions/index.sqlite" },
   });
   mockConnectPowerlineHandoffAutocomplete.mockResolvedValue(null);
 });
@@ -75,7 +75,7 @@ describe("session handoff extension", () => {
   it("registers through the Powerline bridge when powerline mode is enabled", async () => {
     mockLoadSettings.mockReturnValue({
       handoff: { editorMode: "powerline" },
-      index: { dir: "/tmp/pi-sessions", path: "/tmp/pi-sessions/index.sqlite" },
+      index: { path: "/tmp/pi-sessions/index.sqlite" },
     });
     const disconnect = vi.fn();
     mockConnectPowerlineHandoffAutocomplete.mockResolvedValue({
@@ -123,7 +123,7 @@ describe("session handoff extension", () => {
   it("fails loudly when powerline mode is enabled but the bridge is unavailable", async () => {
     mockLoadSettings.mockReturnValue({
       handoff: { editorMode: "powerline" },
-      index: { dir: "/tmp/pi-sessions", path: "/tmp/pi-sessions/index.sqlite" },
+      index: { path: "/tmp/pi-sessions/index.sqlite" },
     });
     mockConnectPowerlineHandoffAutocomplete.mockResolvedValue(null);
 

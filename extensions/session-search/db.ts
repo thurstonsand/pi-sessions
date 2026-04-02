@@ -1,6 +1,8 @@
 import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
+import { Type } from "@sinclair/typebox";
 import Database from "better-sqlite3";
+import { parseTypeBoxRows, parseTypeBoxValue, safeParseTypeBoxJson } from "../shared/typebox.js";
 import {
   type FileTouchOp,
   type FileTouchSource,
@@ -136,7 +138,7 @@ interface SearchChunkRow {
   modifiedAt: string;
   snippet: string;
   rank: number;
-  entryId?: string | undefined;
+  entryId: string | null;
   sourceKind: string;
 }
 
@@ -154,15 +156,15 @@ interface SessionLineageQueryRow {
   sessionId: string;
   sessionPath: string;
   sessionName: string;
-  firstUserPrompt?: string | undefined;
+  firstUserPrompt: string | null;
   cwd: string;
   repoRootsJson: string;
   modifiedAt: string;
-  parentSessionPath?: string | undefined;
-  parentSessionId?: string | undefined;
-  sessionOrigin?: SessionOrigin | undefined;
-  handoffGoal?: string | undefined;
-  handoffNextTask?: string | undefined;
+  parentSessionPath: string | null;
+  parentSessionId: string | null;
+  sessionOrigin: SessionOrigin | null;
+  handoffGoal: string | null;
+  handoffNextTask: string | null;
 }
 
 interface SessionRelatedQueryRow extends SessionLineageQueryRow {
@@ -173,8 +175,8 @@ interface SessionRelatedQueryRow extends SessionLineageQueryRow {
 interface SessionGraphRow {
   sessionId: string;
   sessionPath: string;
-  parentSessionPath?: string | undefined;
-  parentSessionId?: string | undefined;
+  parentSessionPath: string | null;
+  parentSessionId: string | null;
 }
 
 interface SessionGraphNode extends SessionGraphRow {
@@ -209,9 +211,9 @@ function sessionLineageColumns(alias?: string): string {
 interface FileTouchMatchRow {
   sessionId: string;
   rawPath: string;
-  absPath?: string | undefined;
-  cwdRelPath?: string | undefined;
-  repoRelPath?: string | undefined;
+  absPath: string | null;
+  cwdRelPath: string | null;
+  repoRelPath: string | null;
   basename: string;
   op: FileTouchOp;
 }
@@ -249,6 +251,84 @@ interface SearchResultAccumulator {
   evidenceKeys: Set<string>;
 }
 
+const NULLABLE_STRING_SCHEMA = Type.Union([Type.String(), Type.Null()]);
+const SESSION_ORIGIN_SCHEMA = Type.Union([
+  Type.Literal("handoff"),
+  Type.Literal("fork"),
+  Type.Literal("unknown_child"),
+]);
+const SESSION_LINEAGE_RELATION_SCHEMA = Type.Union([
+  Type.Literal("parent"),
+  Type.Literal("ancestor"),
+  Type.Literal("child"),
+  Type.Literal("descendant"),
+  Type.Literal("sibling"),
+  Type.Literal("ancestor_sibling"),
+]);
+const ROW_COUNT_SCHEMA = Type.Object({
+  count: Type.Number(),
+});
+const METADATA_ROW_SCHEMA = Type.Object({
+  value: Type.String(),
+});
+const SESSION_GRAPH_ROW_SCHEMA = Type.Object({
+  sessionId: Type.String(),
+  sessionPath: Type.String(),
+  parentSessionPath: NULLABLE_STRING_SCHEMA,
+  parentSessionId: NULLABLE_STRING_SCHEMA,
+});
+const SESSION_LIST_ROW_SCHEMA = Type.Object({
+  sessionId: Type.String(),
+  sessionName: Type.String(),
+  sessionPath: Type.String(),
+  cwd: Type.String(),
+  repoRootsJson: Type.String(),
+  startedAt: Type.String(),
+  modifiedAt: Type.String(),
+});
+const SEARCH_CHUNK_ROW_SCHEMA = Type.Object({
+  sessionId: Type.String(),
+  sessionName: Type.String(),
+  sessionPath: Type.String(),
+  cwd: Type.String(),
+  repoRootsJson: Type.String(),
+  startedAt: Type.String(),
+  modifiedAt: Type.String(),
+  snippet: Type.String(),
+  rank: Type.Number(),
+  entryId: NULLABLE_STRING_SCHEMA,
+  sourceKind: Type.String(),
+});
+const FILE_TOUCH_MATCH_ROW_SCHEMA = Type.Object({
+  sessionId: Type.String(),
+  rawPath: Type.String(),
+  absPath: NULLABLE_STRING_SCHEMA,
+  cwdRelPath: NULLABLE_STRING_SCHEMA,
+  repoRelPath: NULLABLE_STRING_SCHEMA,
+  basename: Type.String(),
+  op: Type.Union([Type.Literal("read"), Type.Literal("changed")]),
+});
+const SESSION_LINEAGE_QUERY_ROW_SCHEMA = Type.Object({
+  sessionId: Type.String(),
+  sessionPath: Type.String(),
+  sessionName: Type.String(),
+  firstUserPrompt: NULLABLE_STRING_SCHEMA,
+  cwd: Type.String(),
+  repoRootsJson: Type.String(),
+  modifiedAt: Type.String(),
+  parentSessionPath: NULLABLE_STRING_SCHEMA,
+  parentSessionId: NULLABLE_STRING_SCHEMA,
+  sessionOrigin: Type.Union([SESSION_ORIGIN_SCHEMA, Type.Null()]),
+  handoffGoal: NULLABLE_STRING_SCHEMA,
+  handoffNextTask: NULLABLE_STRING_SCHEMA,
+});
+const SESSION_RELATED_QUERY_ROW_SCHEMA = Type.Intersect([
+  SESSION_LINEAGE_QUERY_ROW_SCHEMA,
+  Type.Object({
+    relation: SESSION_LINEAGE_RELATION_SCHEMA,
+    distance: Type.Number(),
+  }),
+]);
 export function ensureIndexDir(dir: string): string {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
@@ -381,10 +461,12 @@ export function setMetadata(db: SessionIndexDatabase, key: string, value: string
 }
 
 export function getMetadata(db: SessionIndexDatabase, key: string): string | undefined {
-  const row = db.prepare(`SELECT value FROM metadata WHERE key = ?`).get(key) as
-    | { value: string }
-    | undefined;
-  return row?.value;
+  const row = db.prepare(`SELECT value FROM metadata WHERE key = ?`).get(key);
+  if (row === undefined) {
+    return undefined;
+  }
+
+  return parseTypeBoxValue(METADATA_ROW_SCHEMA, row, `Invalid metadata row for key ${key}`).value;
 }
 
 function sessionRowBindings(
@@ -495,18 +577,22 @@ export function clearSessionIndexedData(db: SessionIndexDatabase, sessionId: str
 export function rebuildSessionLineageRelations(db: SessionIndexDatabase): void {
   db.prepare(`DELETE FROM session_lineage_relations`).run();
 
-  const rows = db
-    .prepare(
-      `
-        SELECT
-          session_id as sessionId,
-          session_path as sessionPath,
-          parent_session_path as parentSessionPath,
-          parent_session_id as parentSessionId
-        FROM sessions
-      `,
-    )
-    .all() as SessionGraphRow[];
+  const rows = parseTypeBoxRows(
+    SESSION_GRAPH_ROW_SCHEMA,
+    db
+      .prepare(
+        `
+          SELECT
+            session_id as sessionId,
+            session_path as sessionPath,
+            parent_session_path as parentSessionPath,
+            parent_session_id as parentSessionId
+          FROM sessions
+        `,
+      )
+      .all(),
+    "Invalid session graph rows",
+  );
 
   const pathToId = new Map(rows.map((row) => [row.sessionPath, row.sessionId]));
   const nodes = new Map<string, SessionGraphNode>(
@@ -610,9 +696,11 @@ export function getIndexStatus(dbPath: string): SessionIndexStatus {
   try {
     const schemaVersionRaw = getMetadata(db, "schema_version");
     const lastFullReindexAt = getMetadata(db, "indexed_at");
-    const sessionCountRow = db.prepare(`SELECT COUNT(*) as count FROM sessions`).get() as {
-      count: number;
-    };
+    const sessionCountRow = parseTypeBoxValue(
+      ROW_COUNT_SCHEMA,
+      db.prepare(`SELECT COUNT(*) as count FROM sessions`).get(),
+      "Invalid session count row",
+    );
 
     return {
       dbPath,
@@ -638,9 +726,19 @@ export function getSessionById(
         WHERE session_id = ?
       `,
     )
-    .get(sessionId) as SessionLineageQueryRow | undefined;
+    .get(sessionId);
 
-  return row ? buildSessionLineageRow(row) : undefined;
+  if (row === undefined) {
+    return undefined;
+  }
+
+  return buildSessionLineageRow(
+    parseTypeBoxValue(
+      SESSION_LINEAGE_QUERY_ROW_SCHEMA,
+      row,
+      `Invalid session row for ${sessionId}`,
+    ),
+  );
 }
 
 export function getSessionByPath(
@@ -655,9 +753,19 @@ export function getSessionByPath(
         WHERE session_path = ?
       `,
     )
-    .get(sessionPath) as SessionLineageQueryRow | undefined;
+    .get(sessionPath);
 
-  return row ? buildSessionLineageRow(row) : undefined;
+  if (row === undefined) {
+    return undefined;
+  }
+
+  return buildSessionLineageRow(
+    parseTypeBoxValue(
+      SESSION_LINEAGE_QUERY_ROW_SCHEMA,
+      row,
+      `Invalid session row for path ${sessionPath}`,
+    ),
+  );
 }
 
 export function findSessionsByIdPrefix(
@@ -665,17 +773,21 @@ export function findSessionsByIdPrefix(
   prefix: string,
   limit: number = DEFAULT_SEARCH_LIMIT,
 ): SessionLineageRow[] {
-  const rows = db
-    .prepare(
-      `
-        SELECT ${sessionLineageColumns()}
-        FROM sessions
-        WHERE session_id LIKE ? ESCAPE '\\'
-        ORDER BY modified_ts DESC
-        LIMIT ?
-      `,
-    )
-    .all(`${escapeLikePrefix(prefix)}%`, limit) as SessionLineageQueryRow[];
+  const rows = parseTypeBoxRows(
+    SESSION_LINEAGE_QUERY_ROW_SCHEMA,
+    db
+      .prepare(
+        `
+          SELECT ${sessionLineageColumns()}
+          FROM sessions
+          WHERE session_id LIKE ? ESCAPE '\\'
+          ORDER BY modified_ts DESC
+          LIMIT ?
+        `,
+      )
+      .all(`${escapeLikePrefix(prefix)}%`, limit),
+    `Invalid session prefix rows for ${prefix}`,
+  );
 
   return rows.map(buildSessionLineageRow);
 }
@@ -729,32 +841,36 @@ export function getLineageAutocompleteSessions(
     params.push(limit);
   }
 
-  const rows = db
-    .prepare(
-      `
-        SELECT
-          ${sessionLineageColumns("s")},
-          r.relation as relation,
-          r.distance as distance
-        FROM session_lineage_relations r
-        JOIN sessions s ON s.session_id = r.related_session_id
-        WHERE r.session_id = ?
-          AND (? = '' OR s.session_id LIKE ? ESCAPE '\\')
-        ORDER BY
-          CASE r.relation
-            WHEN 'parent' THEN 1
-            WHEN 'child' THEN 2
-            WHEN 'sibling' THEN 3
-            WHEN 'ancestor' THEN 4
-            WHEN 'descendant' THEN 5
-            WHEN 'ancestor_sibling' THEN 6
-            ELSE 7
-          END ASC,
-          r.distance ASC,
-          s.modified_ts DESC${limitClause}
-      `,
-    )
-    .all(...params) as SessionRelatedQueryRow[];
+  const rows = parseTypeBoxRows(
+    SESSION_RELATED_QUERY_ROW_SCHEMA,
+    db
+      .prepare(
+        `
+          SELECT
+            ${sessionLineageColumns("s")},
+            r.relation as relation,
+            r.distance as distance
+          FROM session_lineage_relations r
+          JOIN sessions s ON s.session_id = r.related_session_id
+          WHERE r.session_id = ?
+            AND (? = '' OR s.session_id LIKE ? ESCAPE '\\')
+          ORDER BY
+            CASE r.relation
+              WHEN 'parent' THEN 1
+              WHEN 'child' THEN 2
+              WHEN 'sibling' THEN 3
+              WHEN 'ancestor' THEN 4
+              WHEN 'descendant' THEN 5
+              WHEN 'ancestor_sibling' THEN 6
+              ELSE 7
+            END ASC,
+            r.distance ASC,
+            s.modified_ts DESC${limitClause}
+        `,
+      )
+      .all(...params),
+    `Invalid lineage autocomplete rows for ${sessionId}`,
+  );
 
   return rows.map(buildRelatedSessionRow);
 }
@@ -779,22 +895,26 @@ export function getRecentAutocompleteSessions(
     params.push(limit);
   }
 
-  const rows = db
-    .prepare(
-      `
-        SELECT ${sessionLineageColumns()}
-        FROM sessions
-        WHERE (? IS NULL OR session_id != ?)
-          AND (? = '' OR session_id LIKE ? ESCAPE '\\')
-        ORDER BY
-          CASE
-            WHEN ? IS NOT NULL AND cwd = ? THEN 0
-            ELSE 1
-          END ASC,
-          modified_ts DESC${limitClause}
-      `,
-    )
-    .all(...params) as SessionLineageQueryRow[];
+  const rows = parseTypeBoxRows(
+    SESSION_LINEAGE_QUERY_ROW_SCHEMA,
+    db
+      .prepare(
+        `
+          SELECT ${sessionLineageColumns()}
+          FROM sessions
+          WHERE (? IS NULL OR session_id != ?)
+            AND (? = '' OR session_id LIKE ? ESCAPE '\\')
+          ORDER BY
+            CASE
+              WHEN ? IS NOT NULL AND cwd = ? THEN 0
+              ELSE 1
+            END ASC,
+            modified_ts DESC${limitClause}
+        `,
+      )
+      .all(...params),
+    `Invalid recent autocomplete rows for ${prefix}`,
+  );
 
   return rows.map(buildSessionLineageRow);
 }
@@ -834,26 +954,30 @@ function searchRecentSessions(
   db: SessionIndexDatabase,
   filters: SearchFilters,
 ): SearchSessionResult[] {
-  const rows = db
-    .prepare(
-      `
-        SELECT
-          session_id as sessionId,
-          session_name as sessionName,
-          session_path as sessionPath,
-          cwd,
-          repo_roots_json as repoRootsJson,
-          created_ts as startedAt,
-          modified_ts as modifiedAt
-        FROM sessions
-        WHERE (? IS NULL OR modified_ts >= ?)
-          AND (? IS NULL OR created_ts <= ?)
-          AND (? IS NULL OR cwd = ? OR cwd LIKE ? ESCAPE '\\')
-        ORDER BY modified_ts DESC
-        LIMIT ?
-      `,
-    )
-    .all(...getSearchFilterBindings(filters), SEARCH_CANDIDATE_LIMIT) as SessionListRow[];
+  const rows = parseTypeBoxRows(
+    SESSION_LIST_ROW_SCHEMA,
+    db
+      .prepare(
+        `
+          SELECT
+            session_id as sessionId,
+            session_name as sessionName,
+            session_path as sessionPath,
+            cwd,
+            repo_roots_json as repoRootsJson,
+            created_ts as startedAt,
+            modified_ts as modifiedAt
+          FROM sessions
+          WHERE (? IS NULL OR modified_ts >= ?)
+            AND (? IS NULL OR created_ts <= ?)
+            AND (? IS NULL OR cwd = ? OR cwd LIKE ? ESCAPE '\\')
+          ORDER BY modified_ts DESC
+          LIMIT ?
+        `,
+      )
+      .all(...getSearchFilterBindings(filters), SEARCH_CANDIDATE_LIMIT),
+    "Invalid recent session rows",
+  );
 
   return rows.map((row) => buildSearchResult(row, row.sessionName || row.cwd, 0, 0));
 }
@@ -867,33 +991,37 @@ function searchTextMatches(
     return [];
   }
 
-  const rows = db
-    .prepare(
-      `
-      SELECT
-        s.session_id as sessionId,
-        s.session_name as sessionName,
-        s.session_path as sessionPath,
-        s.cwd as cwd,
-        s.repo_roots_json as repoRootsJson,
-        s.created_ts as startedAt,
-        s.modified_ts as modifiedAt,
-        snippet(session_text_chunks_fts, 2, '[', ']', ' … ', 12) as snippet,
-        bm25(session_text_chunks_fts) as rank,
-        c.entry_id as entryId,
-        c.source_kind as sourceKind
-      FROM session_text_chunks_fts
-      JOIN session_text_chunks c ON c.id = CAST(session_text_chunks_fts.chunk_id AS INTEGER)
-      JOIN sessions s ON s.session_id = c.session_id
-      WHERE session_text_chunks_fts MATCH ?
-        AND (? IS NULL OR s.modified_ts >= ?)
-        AND (? IS NULL OR s.created_ts <= ?)
-        AND (? IS NULL OR s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\')
-      ORDER BY rank ASC, s.modified_ts DESC
-      LIMIT ?
-    `,
-    )
-    .all(match, ...getSearchFilterBindings(filters), TEXT_MATCH_ROW_LIMIT) as SearchChunkRow[];
+  const rows = parseTypeBoxRows(
+    SEARCH_CHUNK_ROW_SCHEMA,
+    db
+      .prepare(
+        `
+        SELECT
+          s.session_id as sessionId,
+          s.session_name as sessionName,
+          s.session_path as sessionPath,
+          s.cwd as cwd,
+          s.repo_roots_json as repoRootsJson,
+          s.created_ts as startedAt,
+          s.modified_ts as modifiedAt,
+          snippet(session_text_chunks_fts, 2, '[', ']', ' … ', 12) as snippet,
+          bm25(session_text_chunks_fts) as rank,
+          c.entry_id as entryId,
+          c.source_kind as sourceKind
+        FROM session_text_chunks_fts
+        JOIN session_text_chunks c ON c.id = CAST(session_text_chunks_fts.chunk_id AS INTEGER)
+        JOIN sessions s ON s.session_id = c.session_id
+        WHERE session_text_chunks_fts MATCH ?
+          AND (? IS NULL OR s.modified_ts >= ?)
+          AND (? IS NULL OR s.created_ts <= ?)
+          AND (? IS NULL OR s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\')
+        ORDER BY rank ASC, s.modified_ts DESC
+        LIMIT ?
+      `,
+      )
+      .all(match, ...getSearchFilterBindings(filters), TEXT_MATCH_ROW_LIMIT),
+    "Invalid text search rows",
+  );
 
   const results = new Map<string, SearchResultAccumulator>();
   for (const row of rows) {
@@ -930,25 +1058,29 @@ function getCandidateFileTouches(
   db: SessionIndexDatabase,
   filters: SearchFilters,
 ): FileTouchMatchRow[] {
-  return db
-    .prepare(
-      `
-        SELECT
-          f.session_id as sessionId,
-          f.raw_path as rawPath,
-          f.abs_path as absPath,
-          f.cwd_rel_path as cwdRelPath,
-          f.repo_rel_path as repoRelPath,
-          f.basename as basename,
-          f.op as op
-        FROM session_file_touches f
-        JOIN sessions s ON s.session_id = f.session_id
-        WHERE (? IS NULL OR s.modified_ts >= ?)
-          AND (? IS NULL OR s.created_ts <= ?)
-          AND (? IS NULL OR s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\')
-      `,
-    )
-    .all(...getSearchFilterBindings(filters)) as FileTouchMatchRow[];
+  return parseTypeBoxRows(
+    FILE_TOUCH_MATCH_ROW_SCHEMA,
+    db
+      .prepare(
+        `
+          SELECT
+            f.session_id as sessionId,
+            f.raw_path as rawPath,
+            f.abs_path as absPath,
+            f.cwd_rel_path as cwdRelPath,
+            f.repo_rel_path as repoRelPath,
+            f.basename as basename,
+            f.op as op
+          FROM session_file_touches f
+          JOIN sessions s ON s.session_id = f.session_id
+          WHERE (? IS NULL OR s.modified_ts >= ?)
+            AND (? IS NULL OR s.created_ts <= ?)
+            AND (? IS NULL OR s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\')
+        `,
+      )
+      .all(...getSearchFilterBindings(filters)),
+    "Invalid file touch match rows",
+  );
 }
 
 function collectFileMatches(
@@ -1219,31 +1351,35 @@ function queryRelatedSessions(
   const relationFilter = relations?.length
     ? ` AND r.relation IN (${relations.map(() => "?").join(", ")})`
     : "";
-  const rows = db
-    .prepare(
-      `
-        SELECT
-          ${sessionLineageColumns("s")},
-          r.relation as relation,
-          r.distance as distance
-        FROM session_lineage_relations r
-        JOIN sessions s ON s.session_id = r.related_session_id
-        WHERE r.session_id = ?${relationFilter}
-        ORDER BY
-          CASE r.relation
-            WHEN 'parent' THEN 1
-            WHEN 'child' THEN 2
-            WHEN 'sibling' THEN 3
-            WHEN 'ancestor' THEN 4
-            WHEN 'descendant' THEN 5
-            WHEN 'ancestor_sibling' THEN 6
-            ELSE 7
-          END ASC,
-          r.distance ASC,
-          s.modified_ts DESC
-      `,
-    )
-    .all(sessionId, ...(relations ?? [])) as SessionRelatedQueryRow[];
+  const rows = parseTypeBoxRows(
+    SESSION_RELATED_QUERY_ROW_SCHEMA,
+    db
+      .prepare(
+        `
+          SELECT
+            ${sessionLineageColumns("s")},
+            r.relation as relation,
+            r.distance as distance
+          FROM session_lineage_relations r
+          JOIN sessions s ON s.session_id = r.related_session_id
+          WHERE r.session_id = ?${relationFilter}
+          ORDER BY
+            CASE r.relation
+              WHEN 'parent' THEN 1
+              WHEN 'child' THEN 2
+              WHEN 'sibling' THEN 3
+              WHEN 'ancestor' THEN 4
+              WHEN 'descendant' THEN 5
+              WHEN 'ancestor_sibling' THEN 6
+              ELSE 7
+            END ASC,
+            r.distance ASC,
+            s.modified_ts DESC
+        `,
+      )
+      .all(sessionId, ...(relations ?? [])),
+    `Invalid related session rows for ${sessionId}`,
+  );
 
   return rows.map(buildRelatedSessionRow);
 }
@@ -1400,14 +1536,5 @@ function getLineageRelationPriority(relation: SessionLineageRelation): number {
 }
 
 function parseRepoRoots(value: string): string[] {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) {
-      return parsed;
-    }
-  } catch {
-    // Ignore malformed JSON and fall back to empty list.
-  }
-
-  return [];
+  return safeParseTypeBoxJson(Type.Array(Type.String()), value) ?? [];
 }

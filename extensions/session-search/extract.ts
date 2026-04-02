@@ -1,9 +1,21 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AssistantMessage, ToolCall, ToolResultMessage } from "@mariozechner/pi-ai";
+import {
+  type CustomEntry,
+  parseSessionEntries,
+  type SessionEntry,
+  type SessionHeader,
+  type SessionMessageEntry,
+} from "@mariozechner/pi-coding-agent";
+import { Type } from "@sinclair/typebox";
 import {
   HANDOFF_METADATA_CUSTOM_TYPE,
   type HandoffSessionMetadata,
+  parseHandoffSessionMetadata,
 } from "../session-handoff/metadata.js";
+import { safeParseTypeBoxValue } from "../shared/typebox.js";
 import type { SessionOrigin } from "./db.js";
 import {
   deriveSessionRepoRoots,
@@ -12,22 +24,6 @@ import {
   normalizePathRecord,
   type PathScope,
 } from "./normalize.js";
-
-export interface SessionHeader {
-  type: "session";
-  id: string;
-  timestamp: string;
-  cwd: string;
-  parentSession?: string;
-  version?: number;
-}
-
-export interface SessionEntryBase {
-  type: string;
-  id?: string;
-  parentId?: string | null;
-  timestamp?: string;
-}
 
 export interface SearchTextChunk {
   entryId?: string | undefined;
@@ -80,12 +76,16 @@ export interface ExtractedSessionRecord {
 
 export interface ParsedSessionFile {
   header: SessionHeader;
-  entries: SessionEntryBase[];
+  entries: SessionEntry[];
   sessionName: string;
 }
 
 const TOOL_RESULT_TEXT_LIMIT = 500;
 const BASH_OUTPUT_TEXT_LIMIT = 500;
+const SUMMARY_DETAILS_SCHEMA = Type.Object({
+  readFiles: Type.Optional(Type.Array(Type.String())),
+  modifiedFiles: Type.Optional(Type.Array(Type.String())),
+});
 
 export function listSessionFiles(sessionsDir: string): string[] {
   if (!existsSync(sessionsDir)) {
@@ -143,10 +143,7 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
 
     switch (entry.type) {
       case "message": {
-        const message = (entry as MessageEntry).message;
-        if (!message) {
-          continue;
-        }
+        const { message } = entry;
 
         messageCount += 1;
         if (!firstUserPrompt && message.role === "user") {
@@ -159,8 +156,7 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
         continue;
       }
       case "custom": {
-        const customEntry = entry as CustomEntry;
-        const nextHandoffMetadata = parseHandoffSessionMetadata(customEntry, entryTs);
+        const nextHandoffMetadata = extractHandoffMetadata(entry, entryTs);
         if (nextHandoffMetadata) {
           durableHandoffMetadata = nextHandoffMetadata;
         }
@@ -172,44 +168,36 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
           entry,
           entryTs,
           "custom_message",
-          contentToText((entry as CustomMessageEntry).content),
+          contentToText(entry.content),
         );
         continue;
       case "branch_summary": {
-        const branchSummary = entry as BranchSummaryEntry;
-        appendEntryTextChunk(
-          chunks,
-          entry,
-          entryTs,
-          "branch_summary",
-          trimmedText(branchSummary.summary),
-        );
+        appendEntryTextChunk(chunks, entry, entryTs, "branch_summary", trimmedText(entry.summary));
         fileTouches.push(
           ...extractDetailFileTouches(
             entry.id,
             entryTs,
             "branch_summary_details",
-            branchSummary.details,
+            entry.details,
             parsed.header.cwd,
           ),
         );
         continue;
       }
       case "compaction": {
-        const compaction = entry as CompactionEntry;
         appendEntryTextChunk(
           chunks,
           entry,
           entryTs,
           "compaction_summary",
-          trimmedText(compaction.summary),
+          trimmedText(entry.summary),
         );
         fileTouches.push(
           ...extractDetailFileTouches(
             entry.id,
             entryTs,
             "compaction_details",
-            compaction.details,
+            entry.details,
             parsed.header.cwd,
           ),
         );
@@ -247,35 +235,27 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
 
 export function parseSessionFile(sessionPath: string): ParsedSessionFile | undefined {
   const raw = readFileSync(sessionPath, "utf8");
-  const lines = raw.split("\n").filter((line) => line.trim().length > 0);
-  if (lines.length === 0) return undefined;
-
-  let header: SessionHeader | undefined;
-  const entries: SessionEntryBase[] = [];
-  let sessionName = "";
-
-  for (const line of lines) {
-    try {
-      const entry = JSON.parse(line) as SessionHeader | SessionEntryBase;
-      if (entry.type === "session") {
-        header = entry as SessionHeader;
-        continue;
-      }
-
-      entries.push(entry);
-      if (entry.type === "session_info") {
-        const sessionInfoName = (entry as SessionInfoEntry).name;
-        if (typeof sessionInfoName === "string") {
-          sessionName = sessionInfoName.trim();
-        }
-      }
-    } catch {
-      // Ignore malformed lines.
-    }
+  const fileEntries = parseSessionEntries(raw);
+  if (fileEntries.length === 0) {
+    return undefined;
   }
 
-  if (!header) {
+  const header = fileEntries[0];
+  if (!header || header.type !== "session") {
     return undefined;
+  }
+
+  const entries = fileEntries.slice(1).filter(isSessionEntry);
+
+  let sessionName = "";
+  for (const entry of entries) {
+    if (entry.type !== "session_info") {
+      continue;
+    }
+
+    if (typeof entry.name === "string") {
+      sessionName = entry.name.trim();
+    }
   }
 
   return { header, entries, sessionName };
@@ -291,7 +271,7 @@ function normalizeParentSessionPath(parentSession: string | undefined): string |
 }
 
 function findDurableHandoffMetadata(
-  entries: SessionEntryBase[],
+  entries: SessionEntry[],
   fallbackTs: string,
 ): DurableHandoffMetadataRecord | undefined {
   let durableHandoffMetadata: DurableHandoffMetadataRecord | undefined;
@@ -301,10 +281,7 @@ function findDurableHandoffMetadata(
       continue;
     }
 
-    const parsed = parseHandoffSessionMetadata(
-      entry as CustomEntry,
-      getEntryTimestamp(entry, fallbackTs),
-    );
+    const parsed = extractHandoffMetadata(entry, getEntryTimestamp(entry, fallbackTs));
     if (parsed) {
       durableHandoffMetadata = parsed;
     }
@@ -333,7 +310,7 @@ function inferSessionOrigin(
   return handoffMetadata?.origin === "handoff" ? "handoff" : "unknown_child";
 }
 
-function parseHandoffSessionMetadata(
+function extractHandoffMetadata(
   entry: CustomEntry,
   ts: string,
 ): DurableHandoffMetadataRecord | undefined {
@@ -341,26 +318,15 @@ function parseHandoffSessionMetadata(
     return undefined;
   }
 
-  const data = entry.data;
-  if (!isRecord(data)) {
-    return undefined;
-  }
-
-  const origin = stringValue(data.origin);
-  const goal = stringValue(data.goal);
-  const nextTask = stringValue(data.nextTask);
-  if (origin !== "handoff" || !goal || !nextTask) {
+  const metadata = parseHandoffSessionMetadata(entry.data);
+  if (!metadata) {
     return undefined;
   }
 
   return {
     entryId: entry.id,
     ts,
-    metadata: {
-      origin,
-      goal,
-      nextTask,
-    },
+    metadata,
   };
 }
 
@@ -394,13 +360,13 @@ function createMetadataChunk(
   };
 }
 
-function getEntryTimestamp(entry: SessionEntryBase, fallbackTs: string): string {
+function getEntryTimestamp(entry: SessionEntry, fallbackTs: string): string {
   return entry.timestamp ?? fallbackTs;
 }
 
 function appendEntryTextChunk(
   chunks: SearchTextChunk[],
-  entry: SessionEntryBase,
+  entry: SessionEntry,
   ts: string,
   sourceKind: string,
   text: string,
@@ -421,7 +387,7 @@ function appendEntryTextChunk(
 function extractMessageFileTouches(
   entryId: string | undefined,
   ts: string,
-  message: SessionMessage,
+  message: AgentMessage,
   cwd: string,
 ): SessionFileTouch[] {
   if (message.role !== "assistant" || !Array.isArray(message.content)) {
@@ -442,25 +408,33 @@ function extractMessageFileTouches(
 function extractDetailFileTouches(
   entryId: string | undefined,
   ts: string,
-  source: Extract<FileTouchSource, "branch_summary_details" | "compaction_details">,
-  details: SummaryDetails | undefined,
+  source: FileTouchSource,
+  details: unknown,
   cwd: string,
 ): SessionFileTouch[] {
-  if (!details) {
+  const normalizedDetails = getSummaryDetails(details);
+  if (!normalizedDetails) {
     return [];
   }
 
   return [
-    ...extractDetailFileTouchGroup(entryId, ts, source, "read", details.readFiles, cwd),
-    ...extractDetailFileTouchGroup(entryId, ts, source, "changed", details.modifiedFiles, cwd),
+    ...extractDetailFileTouchGroup(entryId, ts, source, "read", normalizedDetails.readFiles, cwd),
+    ...extractDetailFileTouchGroup(
+      entryId,
+      ts,
+      source,
+      "changed",
+      normalizedDetails.modifiedFiles,
+      cwd,
+    ),
   ];
 }
 
 function extractDetailFileTouchGroup(
   entryId: string | undefined,
   ts: string,
-  source: Extract<FileTouchSource, "branch_summary_details" | "compaction_details">,
-  op: Extract<FileTouchOp, "read" | "changed">,
+  source: FileTouchSource,
+  op: FileTouchOp,
   paths: unknown,
   cwd: string,
 ): SessionFileTouch[] {
@@ -492,9 +466,7 @@ function createFileTouch(
   };
 }
 
-function getToolCallFileTouchOp(
-  toolName: string,
-): Extract<FileTouchOp, "read" | "changed"> | undefined {
+function getToolCallFileTouchOp(toolName: string): FileTouchOp | undefined {
   switch (toolName) {
     case "read":
       return "read";
@@ -510,8 +482,8 @@ function trimmedText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function groupEntriesByParent(entries: SessionEntryBase[]): Map<string | null, SessionEntryBase[]> {
-  const byParent = new Map<string | null, SessionEntryBase[]>();
+function groupEntriesByParent(entries: SessionEntry[]): Map<string | null, SessionEntry[]> {
+  const byParent = new Map<string | null, SessionEntry[]>();
 
   for (const entry of entries) {
     const parentId = entry.parentId ?? null;
@@ -598,12 +570,12 @@ export function renderSessionTreeMarkdown(
 }
 
 function renderTreeSegment(
-  start: SessionEntryBase,
-  byParent: Map<string | null, SessionEntryBase[]>,
+  start: SessionEntry,
+  byParent: Map<string | null, SessionEntry[]>,
   lines: string[],
   depth = 0,
 ): void {
-  let current: SessionEntryBase | undefined = start;
+  let current: SessionEntry | undefined = start;
 
   while (current) {
     appendEntryLines(lines, describeEntry(current, byParent), depth);
@@ -637,26 +609,22 @@ function appendEntryLines(lines: string[], entryLines: string[], depth: number):
 }
 
 function describeEntry(
-  entry: SessionEntryBase,
-  byParent: Map<string | null, SessionEntryBase[]>,
+  entry: SessionEntry,
+  byParent: Map<string | null, SessionEntry[]>,
 ): string[] {
   switch (entry.type) {
     case "message":
-      return describeMessageEntry(entry as MessageEntry, byParent);
+      return describeMessageEntry(entry, byParent);
     case "branch_summary":
-      return [describeLabeledText("Branch summary", (entry as BranchSummaryEntry).summary, 220)];
+      return [describeLabeledText("Branch summary", entry.summary, 220)];
     case "compaction":
-      return [describeLabeledText("Compaction summary", (entry as CompactionEntry).summary, 220)];
+      return [describeLabeledText("Compaction summary", entry.summary, 220)];
     case "session_info":
-      return [describeLabeledText("Session name", (entry as SessionInfoEntry).name, 180)];
-    case "model_change": {
-      const modelChange = entry as ModelChangeEntry;
-      return [`Model: ${modelChange.provider}/${modelChange.modelId}`];
-    }
-    case "thinking_level_change": {
-      const thinkingChange = entry as ThinkingLevelChangeEntry;
-      return [`Thinking: ${thinkingChange.thinkingLevel}`];
-    }
+      return [describeLabeledText("Session name", entry.name, 180)];
+    case "model_change":
+      return [`Model: ${entry.provider}/${entry.modelId}`];
+    case "thinking_level_change":
+      return [`Thinking: ${entry.thinkingLevel}`];
     default:
       return [entry.type];
   }
@@ -664,30 +632,23 @@ function describeEntry(
 
 function describeMessageEntry(
   entry: MessageEntry,
-  byParent: Map<string | null, SessionEntryBase[]>,
+  byParent: Map<string | null, SessionEntry[]>,
 ): string[] {
   const { message } = entry;
-  if (!message) {
-    return ["Message"];
-  }
 
   switch (message.role) {
     case "user":
       return [`User: ${fullText(contentToText(message.content))}`];
     case "assistant":
-      return describeAssistantMessage(entry, byParent);
+      return describeAssistantMessage(entry, byParent, message);
     case "toolResult":
       return [];
-    case "bashExecution": {
-      const bashMessage = message as BashExecutionMessage;
-      return [
-        `Bash ${previewText(bashMessage.command, 120)}: ${previewText(bashMessage.output, 220)}`,
-      ];
-    }
+    case "bashExecution":
+      return [`Bash ${previewText(message.command, 120)}: ${previewText(message.output, 220)}`];
     case "custom":
       return [`Custom: ${fullText(contentToText(message.content))}`];
     default:
-      return [`${message.role}: ${fullText(contentToText(message.content))}`];
+      return [describeFallbackMessage(message)];
   }
 }
 
@@ -698,7 +659,7 @@ function describeLabeledText(label: string, value: unknown, limit: number): stri
 function extractMessageChunks(
   entryId: string | undefined,
   fallbackTs: string,
-  message: SessionMessage,
+  message: AgentMessage,
 ): SearchTextChunk[] {
   const ts = message.timestamp ? new Date(message.timestamp).toISOString() : fallbackTs;
 
@@ -731,16 +692,15 @@ function extractMessageChunks(
       );
     }
     case "bashExecution": {
-      const bashMessage = message as BashExecutionMessage;
       const chunks: SearchTextChunk[] = [];
 
-      if (bashMessage.command) {
+      if (message.command) {
         chunks.push(
-          createMessageChunk(entryId, "bashExecution", ts, "bash_command", bashMessage.command),
+          createMessageChunk(entryId, "bashExecution", ts, "bash_command", message.command),
         );
       }
 
-      const output = truncateText(bashMessage.output, BASH_OUTPUT_TEXT_LIMIT);
+      const output = message.output ? truncateText(message.output, BASH_OUTPUT_TEXT_LIMIT) : "";
       if (output) {
         chunks.push(createMessageChunk(entryId, "bashExecution", ts, "bash_output", output));
       }
@@ -818,10 +778,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function describeAssistantMessage(
   entry: MessageEntry,
-  byParent: Map<string | null, SessionEntryBase[]>,
+  byParent: Map<string | null, SessionEntry[]>,
+  assistantMessage: AssistantMessage,
 ): string[] {
   const blocks: string[] = [];
-  const assistantMessage = entry.message;
   const text = contentToText(assistantMessage.content);
   if (text) {
     blocks.push(`Assistant: ${fullText(text)}`);
@@ -859,22 +819,23 @@ function isToolCallBlock(part: unknown): part is ToolCallBlock {
     isRecord(part) &&
     part.type === "toolCall" &&
     typeof part.id === "string" &&
-    typeof part.name === "string"
+    typeof part.name === "string" &&
+    isRecord(part.arguments)
   );
 }
 
 function getChildEntries(
   entryId: string | undefined,
-  byParent: Map<string | null, SessionEntryBase[]>,
-): SessionEntryBase[] {
+  byParent: Map<string | null, SessionEntry[]>,
+): SessionEntry[] {
   return byParent.get(entryId ?? null) ?? [];
 }
 
 function getDescendantChildren(
-  entries: SessionEntryBase[],
-  byParent: Map<string | null, SessionEntryBase[]>,
-): SessionEntryBase[] {
-  const descendants: SessionEntryBase[] = [];
+  entries: SessionEntry[],
+  byParent: Map<string | null, SessionEntry[]>,
+): SessionEntry[] {
+  const descendants: SessionEntry[] = [];
 
   for (const entry of entries) {
     descendants.push(...getChildEntries(entry.id, byParent));
@@ -883,13 +844,13 @@ function getDescendantChildren(
   return descendants;
 }
 
-function isToolResultEntry(entry: SessionEntryBase): entry is ToolResultEntry {
-  return entry.type === "message" && (entry as MessageEntry).message?.role === "toolResult";
+function isToolResultEntry(entry: SessionEntry): entry is ToolResultEntry {
+  return entry.type === "message" && entry.message.role === "toolResult";
 }
 
 function getToolResults(
   entry: MessageEntry,
-  byParent: Map<string | null, SessionEntryBase[]>,
+  byParent: Map<string | null, SessionEntry[]>,
 ): ToolResultEntry[] {
   const results: ToolResultEntry[] = [];
   let currentChildren = getChildEntries(entry.id, byParent);
@@ -909,9 +870,9 @@ function getToolResults(
 }
 
 function getRenderableChildren(
-  entry: SessionEntryBase,
-  byParent: Map<string | null, SessionEntryBase[]>,
-): SessionEntryBase[] {
+  entry: SessionEntry,
+  byParent: Map<string | null, SessionEntry[]>,
+): SessionEntry[] {
   let currentChildren = getChildEntries(entry.id, byParent);
 
   while (currentChildren.length > 0) {
@@ -997,54 +958,11 @@ function previewText(text: string, limit: number): string {
   return truncateText(fullText(text), limit);
 }
 
-interface MessageEntry extends SessionEntryBase {
-  type: "message";
-  message: SessionMessage;
-}
-
-interface SessionInfoEntry extends SessionEntryBase {
-  type: "session_info";
-  name?: string;
-}
-
-interface CustomEntry extends SessionEntryBase {
-  type: "custom";
-  customType?: string;
-  data?: unknown;
-}
-
-interface CustomMessageEntry extends SessionEntryBase {
-  type: "custom_message";
-  content: unknown;
-}
+type MessageEntry = SessionMessageEntry;
 
 interface SummaryDetails {
   readFiles?: unknown;
   modifiedFiles?: unknown;
-}
-
-interface BranchSummaryEntry extends SessionEntryBase {
-  type: "branch_summary";
-  summary?: string;
-  details?: SummaryDetails;
-}
-
-interface CompactionEntry extends SessionEntryBase {
-  type: "compaction";
-  summary?: string;
-  details?: SummaryDetails;
-}
-
-interface SessionMessage {
-  role: string;
-  timestamp?: number;
-  content?: unknown;
-}
-
-interface BashExecutionMessage extends SessionMessage {
-  role: "bashExecution";
-  command: string;
-  output: string;
 }
 
 interface TextBlock {
@@ -1052,27 +970,28 @@ interface TextBlock {
   text: string;
 }
 
-interface ToolCallBlock {
-  type: "toolCall";
-  id: string;
-  name: string;
-  arguments?: Record<string, unknown>;
+type ToolCallBlock = ToolCall & {
+  arguments: Record<string, unknown>;
+};
+
+type ToolResultEntry = MessageEntry & {
+  message: ToolResultMessage;
+};
+
+function isSessionEntry(entry: SessionHeader | SessionEntry): entry is SessionEntry {
+  return entry.type !== "session";
 }
 
-interface ToolResultEntry extends MessageEntry {
-  message: SessionMessage & {
-    role: "toolResult";
-    toolCallId?: string;
-  };
+function getSummaryDetails(details: unknown): SummaryDetails | undefined {
+  return safeParseTypeBoxValue(SUMMARY_DETAILS_SCHEMA, details);
 }
 
-interface ModelChangeEntry extends SessionEntryBase {
-  type: "model_change";
-  provider: string;
-  modelId: string;
+function describeFallbackMessage(message: AgentMessage): string {
+  return hasMessageContent(message)
+    ? `${message.role}: ${fullText(contentToText(message.content))}`
+    : message.role;
 }
 
-interface ThinkingLevelChangeEntry extends SessionEntryBase {
-  type: "thinking_level_change";
-  thinkingLevel: string;
+function hasMessageContent(message: AgentMessage): message is AgentMessage & { content: unknown } {
+  return "content" in message;
 }

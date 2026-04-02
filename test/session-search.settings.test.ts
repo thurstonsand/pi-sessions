@@ -1,10 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  getDefaultIndexDir,
-  getDefaultIndexPath,
-  loadSettings,
-} from "../extensions/shared/settings.js";
+import { getDefaultIndexPath, loadSettings } from "../extensions/shared/settings.js";
 import { createTestFilesystem } from "./test-helpers.js";
 
 const testFs = createTestFilesystem("pi-sessions-settings-");
@@ -25,7 +21,6 @@ describe("pi-sessions index settings", () => {
     process.env.PI_CODING_AGENT_DIR = agentDir;
 
     const settings = loadSettings();
-    expect(settings.index.dir).toBe(getDefaultIndexDir());
     expect(settings.index.path).toBe(getDefaultIndexPath());
   });
 
@@ -40,7 +35,6 @@ describe("pi-sessions index settings", () => {
     );
 
     const settings = loadSettings();
-    expect(settings.index.dir).toBe(dir);
     expect(settings.index.path).toBe(`${dir}/index.sqlite`);
   });
 
@@ -62,7 +56,7 @@ describe("pi-sessions index settings", () => {
     );
 
     const settings = loadSettings();
-    expect(settings.index.dir).toBe(globalDir);
+    expect(settings.index.path).toBe(`${globalDir}/index.sqlite`);
   });
 
   it("rejects relative index dirs", () => {

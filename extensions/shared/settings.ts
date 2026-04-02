@@ -1,24 +1,42 @@
 import os from "node:os";
 import path from "node:path";
 import { getAgentDir, SettingsManager } from "@mariozechner/pi-coding-agent";
+import { type Static, Type } from "@sinclair/typebox";
+import { parseTypeBoxValue } from "./typebox.js";
 
 const DEFAULT_HANDOFF_EDITOR_MODE = "standalone" as const;
+const SESSION_HANDOFF_EDITOR_MODE_SCHEMA = Type.Union([
+  Type.Literal("standalone"),
+  Type.Literal("powerline"),
+]);
+const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
+  handoff: Type.Optional(
+    Type.Object({
+      editor: Type.Optional(SESSION_HANDOFF_EDITOR_MODE_SCHEMA),
+    }),
+  ),
+  index: Type.Optional(
+    Type.Object({
+      dir: Type.Optional(Type.String()),
+    }),
+  ),
+});
+const ROOT_SETTINGS_SCHEMA = Type.Object({
+  sessions: Type.Optional(SESSION_FILE_SETTINGS_SCHEMA),
+});
 
-export type SessionHandoffEditorMode = "standalone" | "powerline";
+export type SessionHandoffEditorMode = Static<typeof SESSION_HANDOFF_EDITOR_MODE_SCHEMA>;
 
-export interface PiSessionsSettings {
+export interface SessionSettings {
   handoff: {
     editorMode: SessionHandoffEditorMode;
   };
   index: {
-    dir: string;
     path: string;
   };
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+type SessionFileSettings = Static<typeof SESSION_FILE_SETTINGS_SCHEMA>;
 
 export function getDefaultIndexDir(): string {
   return path.join(os.homedir(), ".pi", "agent", "pi-sessions");
@@ -40,8 +58,8 @@ function expandHome(rawPath: string): string {
   return rawPath;
 }
 
-function normalizeIndexDir(value: unknown): string {
-  if (typeof value !== "string") {
+function normalizeIndexDir(value: string | undefined): string {
+  if (value === undefined) {
     return getDefaultIndexDir();
   }
 
@@ -58,46 +76,25 @@ function normalizeIndexDir(value: unknown): string {
   return path.normalize(expanded);
 }
 
-function drillRecord(root: unknown, ...keys: string[]): unknown {
-  let current = root;
-  for (const key of keys) {
-    if (!isRecord(current)) {
-      return undefined;
-    }
-    current = current[key];
-  }
-  return current;
-}
-
-function readConfiguredHandoffEditorMode(settings: unknown): SessionHandoffEditorMode | undefined {
-  const editor = drillRecord(settings, "sessions", "handoff", "editor");
-  if (editor === undefined) {
-    return undefined;
-  }
-
-  return editor === "powerline" || editor === "standalone" ? editor : DEFAULT_HANDOFF_EDITOR_MODE;
-}
-
-function readConfiguredIndexDir(settings: unknown): string {
-  const dir = drillRecord(settings, "sessions", "index", "dir");
-  if (dir === undefined) {
-    return getDefaultIndexDir();
-  }
-
-  return normalizeIndexDir(dir);
-}
-
-export function loadSettings(): PiSessionsSettings {
+function loadSessionFileSettings(): SessionFileSettings {
   const globalSettings = SettingsManager.create(undefined, getAgentDir()).getGlobalSettings();
-  const indexDir = readConfiguredIndexDir(globalSettings);
+  const parsed = parseTypeBoxValue(ROOT_SETTINGS_SCHEMA, globalSettings, "Invalid settings");
+  return parsed.sessions ?? {};
+}
+
+function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSettings {
+  const indexDir = normalizeIndexDir(fileSettings.index?.dir);
 
   return {
     handoff: {
-      editorMode: readConfiguredHandoffEditorMode(globalSettings) ?? DEFAULT_HANDOFF_EDITOR_MODE,
+      editorMode: fileSettings.handoff?.editor ?? DEFAULT_HANDOFF_EDITOR_MODE,
     },
     index: {
-      dir: indexDir,
       path: path.join(indexDir, "index.sqlite"),
     },
   };
+}
+
+export function loadSettings(): SessionSettings {
+  return resolveSessionSettings(loadSessionFileSettings());
 }

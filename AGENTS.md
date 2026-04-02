@@ -50,7 +50,8 @@ extensions/                  # All source code
     extract.ts               # Structured extraction and draft assembly
     review.ts                # Preview overlay and review flow
   shared/
-    settings.ts              # Strongly typed global settings loader
+    settings.ts              # File-backed config loading and resolved runtime settings
+    typebox.ts               # Shared TypeBox validation helpers
 ```
 
 Entry points are thin wrappers that register tools/commands with the Pi extension
@@ -105,6 +106,7 @@ Run `npm run format` to auto-fix. Biome config is in `biome.json`.
 - Prefer narrow types over broad ones (`string` literals over `string` where possible)
 - Use the real/named existing type by default, over utility-type derivations
 - Avoid `Pick`, `Omit`, `Partial`, `ReturnType`, etc. unless they are clearly justified
+- Exception: deriving TypeScript types from TypeBox schemas is preferred for TypeBox-owned runtime shapes
 - Only introduce a smaller interface for a real runtime boundary, not field-trimming convenience
 - Do not change production types to make tests easier; mock the real type instead
 - No `any` — use `unknown` and narrow with type guards if the type is truly unknown

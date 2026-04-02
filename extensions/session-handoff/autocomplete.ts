@@ -34,6 +34,7 @@ export interface HandoffPrefixMatch {
 
 interface HandoffAutocompleteProviderOptions {
   baseProvider: AutocompleteProvider;
+  indexPath: string;
   getCurrentSessionPath: () => string | undefined;
   getCurrentCwd: () => string | undefined;
   limit?: number | undefined;
@@ -44,6 +45,7 @@ export interface HandoffAutocompleteRefreshData {
 }
 
 export interface HandoffAutocompleteEditorOptions {
+  indexPath: string;
   getCurrentSessionPath: () => string | undefined;
   getCurrentCwd: () => string | undefined;
   setAutocompleteStatus: (text: string | undefined) => void;
@@ -79,10 +81,9 @@ export function isCanonicalSessionToken(text: string): boolean {
   return text.startsWith(SESSION_TOKEN_PREFIX);
 }
 
-export class HandoffAutocompleteProvider
-  implements PowerlineEnhancedAutocompleteProvider
-{
+export class HandoffAutocompleteProvider implements PowerlineEnhancedAutocompleteProvider {
   private readonly baseProvider: AutocompleteProvider;
+  private readonly indexPath: string;
   private readonly getCurrentSessionPath: () => string | undefined;
   private readonly getCurrentCwd: () => string | undefined;
   private readonly limit: number;
@@ -98,6 +99,7 @@ export class HandoffAutocompleteProvider
     deps: HandoffAutocompleteDeps = defaultDeps,
   ) {
     this.baseProvider = options.baseProvider;
+    this.indexPath = options.indexPath;
     this.getCurrentSessionPath = options.getCurrentSessionPath;
     this.getCurrentCwd = options.getCurrentCwd;
     this.limit = options.limit ?? DEFAULT_AUTOCOMPLETE_LIMIT;
@@ -199,6 +201,7 @@ export class HandoffAutocompleteProvider
     }
 
     const result = this.deps.listCandidates({
+      indexPath: this.indexPath,
       currentSessionPath: this.getCurrentSessionPath(),
       currentCwd: this.getCurrentCwd(),
       prefix: prefix.sessionIdPrefix,
@@ -258,6 +261,7 @@ export class HandoffAutocompleteEditor extends CustomEditor {
     this.handoffProvider = new HandoffAutocompleteProvider(
       {
         baseProvider: provider,
+        indexPath: this.options.indexPath,
         getCurrentSessionPath: this.options.getCurrentSessionPath,
         getCurrentCwd: this.options.getCurrentCwd,
         limit: this.options.limit,

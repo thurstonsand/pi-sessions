@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -23,10 +24,15 @@ vi.mock("@mariozechner/pi-ai", async () => {
 });
 
 const testFs = createTestFilesystem("pi-sessions-ask-");
+const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 afterEach(() => {
   completeMock.mockReset();
-  delete process.env.PI_SESSIONS_INDEX_DIR;
+  if (originalAgentDir === undefined) {
+    delete process.env.PI_CODING_AGENT_DIR;
+  } else {
+    process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+  }
   testFs.cleanup();
 });
 
@@ -39,7 +45,7 @@ describe("session_ask tool", () => {
       { session: "12345678-1234-1234-1234-123456789abc", question: "   " },
       undefined,
       undefined,
-      createToolContext(),
+      createToolContext(testFs.createTempDir()),
     );
 
     expect(result.details).toMatchObject({ error: true });
@@ -56,7 +62,7 @@ describe("session_ask tool", () => {
       { session: "@handoff/12345678", question: "What happened?" },
       undefined,
       undefined,
-      createToolContext(),
+      createToolContext(testFs.createTempDir()),
     );
 
     expect(result.details).toMatchObject({ error: true });
@@ -66,10 +72,12 @@ describe("session_ask tool", () => {
   });
 
   it("returns a friendly error for a missing indexed session id", async () => {
+    const agentDir = testFs.createTempDir();
     const root = testFs.createTempDir();
     const indexDir = testFs.ensureDir(path.join(root, "index"));
     const dbPath = path.join(indexDir, "index.sqlite");
-    process.env.PI_SESSIONS_INDEX_DIR = indexDir;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    configureIndexSettings(agentDir, indexDir);
 
     const db = openIndexDatabase(dbPath, { create: true });
     initializeSchema(db);
@@ -82,7 +90,7 @@ describe("session_ask tool", () => {
       { session: "12345678-1234-1234-1234-123456789abc", question: "What happened?" },
       undefined,
       undefined,
-      createToolContext(),
+      createToolContext(root),
     );
 
     expect(result.details).toMatchObject({ error: true });
@@ -90,10 +98,12 @@ describe("session_ask tool", () => {
   });
 
   it("resolves an exact session id through the index", async () => {
+    const agentDir = testFs.createTempDir();
     const root = testFs.createTempDir();
     const indexDir = testFs.ensureDir(path.join(root, "index"));
     const dbPath = path.join(indexDir, "index.sqlite");
-    process.env.PI_SESSIONS_INDEX_DIR = indexDir;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    configureIndexSettings(agentDir, indexDir);
 
     const sessionId = "12345678-1234-1234-1234-123456789abc";
     const sessionPath = testFs.writeJsonlFile(root, "session.jsonl", [
@@ -146,7 +156,7 @@ describe("session_ask tool", () => {
       { session: sessionId, question: "What happened?" },
       undefined,
       undefined,
-      createToolContext(),
+      createToolContext(root),
     );
 
     expect(result.details).toMatchObject({
@@ -157,10 +167,12 @@ describe("session_ask tool", () => {
   });
 
   it("includes session metadata and question in updates and final output", async () => {
+    const agentDir = testFs.createTempDir();
     const root = testFs.createTempDir();
     const indexDir = testFs.ensureDir(path.join(root, "index"));
     const dbPath = path.join(indexDir, "index.sqlite");
-    process.env.PI_SESSIONS_INDEX_DIR = indexDir;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    configureIndexSettings(agentDir, indexDir);
 
     const sessionId = "aaaaaaaa-1234-1234-1234-123456789abc";
     const sessionPath = testFs.writeJsonlFile(testFs.createTempDir(), "session.jsonl", [
@@ -221,7 +233,7 @@ describe("session_ask tool", () => {
       { session: sessionId, question: "Summarize the decisions." },
       undefined,
       (update) => updates.push(update),
-      createToolContext(),
+      createToolContext(root),
     );
 
     expect(updates).toHaveLength(2);
@@ -255,8 +267,16 @@ function registerSessionAskTool() {
   return registeredTool;
 }
 
-function createToolContext() {
+function configureIndexSettings(agentDir: string, dir: string): void {
+  writeFileSync(
+    path.join(agentDir, "settings.json"),
+    `${JSON.stringify({ sessions: { index: { dir } } }, null, 2)}\n`,
+  );
+}
+
+function createToolContext(cwd: string) {
   return {
+    cwd,
     model: { provider: "openai", id: "gpt-5.4" },
     modelRegistry: {
       async getApiKeyAndHeaders() {

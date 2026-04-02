@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { readSessionHandoffSettings } from "../extensions/session-handoff/settings.js";
+import { loadSettings } from "../extensions/shared/settings.js";
 import { createTestFilesystem } from "./test-helpers.js";
 
 const testFs = createTestFilesystem("pi-sessions-handoff-settings-");
@@ -16,31 +16,33 @@ afterEach(() => {
   testFs.cleanup();
 });
 
-describe("session handoff settings", () => {
-  it("reads nested host config and detects powerline from packages", () => {
+describe("pi-sessions handoff settings", () => {
+  it("defaults to standalone editor mode", () => {
     const agentDir = testFs.createTempDir();
-    const cwd = testFs.createTempDir();
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    expect(loadSettings().handoff.editorMode).toBe("standalone");
+  });
+
+  it("reads explicit powerline editor mode from global settings", () => {
+    const agentDir = testFs.createTempDir();
     process.env.PI_CODING_AGENT_DIR = agentDir;
 
     writeFileSync(
       path.join(agentDir, "settings.json"),
       `${JSON.stringify(
         {
-          packages: ["npm:pi-powerline-footer"],
-          sessions: { handoff: { editor: { host: "powerline" } } },
+          sessions: { handoff: { editor: "powerline" } },
         },
         null,
         2,
       )}\n`,
     );
 
-    expect(readSessionHandoffSettings(cwd)).toMatchObject({
-      editorHost: "powerline",
-      powerlineConfigured: true,
-    });
+    expect(loadSettings().handoff.editorMode).toBe("powerline");
   });
 
-  it("lets project settings override host config and detect explicit extension paths", () => {
+  it("ignores project settings and only reads global editor mode", () => {
     const agentDir = testFs.createTempDir();
     const cwd = testFs.createTempDir();
     process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -50,7 +52,7 @@ describe("session handoff settings", () => {
       path.join(agentDir, "settings.json"),
       `${JSON.stringify(
         {
-          sessions: { handoff: { editor: { host: "powerline" } } },
+          sessions: { handoff: { editor: "powerline" } },
         },
         null,
         2,
@@ -60,17 +62,13 @@ describe("session handoff settings", () => {
       path.join(cwd, ".pi", "settings.json"),
       `${JSON.stringify(
         {
-          extensions: ["./extensions/pi-powerline-footer/index.ts"],
-          sessions: { handoff: { editor: { host: "standalone" } } },
+          sessions: { handoff: { editor: "standalone" } },
         },
         null,
         2,
       )}\n`,
     );
 
-    expect(readSessionHandoffSettings(cwd)).toMatchObject({
-      editorHost: "standalone",
-      powerlineConfigured: true,
-    });
+    expect(loadSettings().handoff.editorMode).toBe("powerline");
   });
 });

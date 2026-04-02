@@ -1,8 +1,10 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { consumePendingChildOrigin, createSessionHookController } from "./session-search/hooks.js";
+import { loadSettings } from "./shared/settings.js";
 
 export default function sessionHooksExtension(pi: ExtensionAPI): void {
-  const controller = createSessionHookController();
+  const settings = loadSettings();
+  const controller = createSessionHookController({ indexPath: settings.index.path });
 
   pi.on("session_start", async (_event, ctx) => {
     await controller.handleSessionStart(ctx.sessionManager.getSessionFile(), ctx.cwd);

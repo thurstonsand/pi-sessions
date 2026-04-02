@@ -2,7 +2,6 @@ import { existsSync } from "node:fs";
 import type { ToolCallEvent, ToolResultEvent } from "@mariozechner/pi-coding-agent";
 import {
   clearSessionIndexedData,
-  getDefaultIndexPath,
   getIndexStatus,
   getSessionById,
   INDEX_SCHEMA_VERSION,
@@ -99,10 +98,8 @@ interface SessionHookState {
   lastFlushedSessionFile?: string | undefined;
 }
 
-export function createSessionHookController(options?: {
-  indexPath?: string;
-}): SessionHookController {
-  const indexPath = options?.indexPath ?? getDefaultIndexPath();
+export function createSessionHookController(options: { indexPath: string }): SessionHookController {
+  const { indexPath } = options;
   const state: SessionHookState = {
     pendingToolCalls: new Map(),
     finalizedToolCalls: new Map(),

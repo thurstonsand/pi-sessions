@@ -18,6 +18,18 @@ Pi package for historical session discovery, follow-up questioning, deliberate s
 ~/.pi/agent/pi-sessions/index.sqlite
 ```
 
+You can override the index directory via Pi settings:
+
+```json
+{
+  "sessions": {
+    "index": {
+      "dir": "~/.pi/agent/pi-sessions"
+    }
+  }
+}
+```
+
 The package has two modes of keeping that index current:
 
 1. **Full reindex**

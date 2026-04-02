@@ -1,6 +1,5 @@
 import path from "node:path";
 import {
-  getDefaultIndexPath,
   getIndexStatus,
   getSessionById,
   INDEX_SCHEMA_VERSION,
@@ -43,7 +42,7 @@ export function isHandoffRef(value: string): boolean {
 
 export function resolveSessionReference(
   reference: string,
-  options?: { indexPath?: string },
+  options: { indexPath: string },
 ): SessionReferenceResolution {
   const trimmed = reference.trim();
   if (!trimmed) {
@@ -97,14 +96,14 @@ function resolveIndexedReference(
   input: string,
   rawValue: string,
   kind: SessionReferenceKind,
-  options?: { indexPath?: string },
+  options: { indexPath: string },
 ): SessionReferenceResolution {
   const value = rawValue.trim();
   if (!value) {
     return { error: `Invalid session reference: ${input}. ${SESSION_REFERENCE_HELP}` };
   }
 
-  const status = getIndexStatus(options?.indexPath ?? getDefaultIndexPath());
+  const status = getIndexStatus(options.indexPath);
   if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
     return {
       error: `Session reference resolution requires a current index at ${status.dbPath}. Run /session-index and press r to rebuild it.`,

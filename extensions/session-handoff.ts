@@ -15,8 +15,8 @@ import {
 } from "./session-handoff/metadata.js";
 import { connectPowerlineHandoffAutocomplete } from "./session-handoff/powerline.js";
 import { renderStrongModal, reviewHandoffDraft } from "./session-handoff/review.js";
-import { readSessionHandoffSettings } from "./session-handoff/settings.js";
 import { clearPendingChildOrigin, queuePendingChildOrigin } from "./session-search/hooks.js";
+import { loadSettings, type PiSessionsSettings } from "./shared/settings.js";
 
 const AUTOCOMPLETE_HINT_KEY = "pi-sessions.session-autocomplete";
 const POWERLINE_AUTOCOMPLETE_TIMEOUT_MS = 150;
@@ -50,21 +50,23 @@ const defaultDependencies: HandoffCommandDependencies = {
 let installedAutocomplete: InstalledHandoffAutocomplete | undefined;
 
 export default function sessionHandoffExtension(pi: ExtensionAPI): void {
+  const settings = loadSettings();
+
   pi.registerCommand("handoff", {
     description: "Transfer context to a new focused session",
     handler: createSessionHandoffCommandHandler(pi),
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    await installHandoffAutocomplete(ctx, pi.events);
+    await installHandoffAutocomplete(ctx, pi.events, settings);
   });
 
   pi.on("session_switch", async (_event, ctx) => {
-    await installHandoffAutocomplete(ctx, pi.events);
+    await installHandoffAutocomplete(ctx, pi.events, settings);
   });
 
   pi.on("session_fork", async (_event, ctx) => {
-    await installHandoffAutocomplete(ctx, pi.events);
+    await installHandoffAutocomplete(ctx, pi.events, settings);
   });
 
   pi.on("session_shutdown", async () => {
@@ -162,6 +164,7 @@ export function createSessionHandoffCommandHandler(
 export async function installHandoffAutocomplete(
   ctx: ExtensionContext,
   events: EventBus,
+  settings: PiSessionsSettings,
 ): Promise<void> {
   if (!ctx.hasUI) {
     return;
@@ -171,42 +174,21 @@ export async function installHandoffAutocomplete(
   installedAutocomplete = undefined;
   ctx.ui.setWidget(AUTOCOMPLETE_HINT_KEY, undefined);
 
-  const settings = readSessionHandoffSettings(ctx.cwd);
-  const host = settings.editorHost;
-
-  if (host === "standalone") {
-    installedAutocomplete = installStandaloneHandoffAutocomplete(ctx);
+  if (settings.handoff.editorMode === "standalone") {
+    installedAutocomplete = installStandaloneHandoffAutocomplete(ctx, settings.index.path);
     return;
   }
 
-  if (host === "powerline") {
-    const result = await tryPowerlineHandoffAutocomplete(ctx, events);
-    if (result) {
-      installedAutocomplete = result;
-    } else {
-      ctx.ui.notify(
-        "Powerline is configured for sessions handoff autocomplete but the autocomplete bridge is unavailable.",
-        "error",
-      );
-    }
-    return;
-  }
-
-  if (!settings.powerlineConfigured) {
-    installedAutocomplete = installStandaloneHandoffAutocomplete(ctx);
-    return;
-  }
-
-  const result = await tryPowerlineHandoffAutocomplete(ctx, events);
+  const result = await tryPowerlineHandoffAutocomplete(ctx, events, settings.index.path);
   if (result) {
     installedAutocomplete = result;
-  } else {
-    ctx.ui.notify(
-      "Powerline appears configured but the autocomplete bridge did not respond. Falling back to standalone editor.",
-      "warning",
-    );
-    installedAutocomplete = installStandaloneHandoffAutocomplete(ctx);
+    return;
   }
+
+  ctx.ui.notify(
+    'sessions.handoff.editor is set to "powerline", but the Powerline autocomplete bridge is unavailable.',
+    "error",
+  );
 }
 
 async function runWithLoader<T>(
@@ -265,7 +247,10 @@ async function runWithLoader<T>(
   return result;
 }
 
-function installStandaloneHandoffAutocomplete(ctx: ExtensionContext): InstalledHandoffAutocomplete {
+function installStandaloneHandoffAutocomplete(
+  ctx: ExtensionContext,
+  indexPath: string,
+): InstalledHandoffAutocomplete {
   let currentEditor: HandoffAutocompleteEditor | undefined;
   let autocompleteFixed = false;
 
@@ -274,6 +259,7 @@ function installStandaloneHandoffAutocomplete(ctx: ExtensionContext): InstalledH
   // Pi attach the provider on the next creation cycle.
   const editorFactory = (tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => {
     const editor = new HandoffAutocompleteEditor(tui, theme, keybindings, {
+      indexPath,
       getCurrentSessionPath: () => ctx.sessionManager.getSessionFile(),
       getCurrentCwd: () => ctx.cwd,
       setAutocompleteStatus: (text: string | undefined) => {
@@ -313,9 +299,11 @@ function installStandaloneHandoffAutocomplete(ctx: ExtensionContext): InstalledH
 async function tryPowerlineHandoffAutocomplete(
   ctx: ExtensionContext,
   events: EventBus,
+  indexPath: string,
 ): Promise<InstalledHandoffAutocomplete | null> {
   const connection = await connectPowerlineHandoffAutocomplete(events, {
     extension: { id: POWERLINE_EXTENSION_ID },
+    indexPath,
     getCurrentSessionPath: () => ctx.sessionManager.getSessionFile(),
     getCurrentCwd: () => ctx.cwd,
     pingTimeoutMs: POWERLINE_AUTOCOMPLETE_TIMEOUT_MS,

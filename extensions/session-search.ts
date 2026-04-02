@@ -3,7 +3,6 @@ import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import {
   buildSearchSessionsQuery,
-  getDefaultIndexPath,
   getIndexStatus,
   INDEX_SCHEMA_VERSION,
   openIndexDatabase,
@@ -11,6 +10,7 @@ import {
   type SearchSessionsParams,
   type SessionIndexStatus,
 } from "./session-search/db.js";
+import { loadSettings } from "./shared/settings.js";
 
 interface SessionSearchToolParams {
   query?: string;
@@ -33,6 +33,8 @@ interface SessionSearchToolDetails {
 }
 
 export default function sessionSearchExtension(pi: ExtensionAPI): void {
+  const settings = loadSettings();
+
   pi.registerTool({
     name: "session_search",
     label: "Session Search",
@@ -82,13 +84,14 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
         };
       }
 
-      const status = getIndexStatus();
+      const indexPath = settings.index.path;
+      const status = getIndexStatus(indexPath);
       if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
         return {
           content: [
             {
               type: "text",
-              text: `Session index missing or incompatible at ${getDefaultIndexPath()}. Run /session-index and press r to rebuild it.`,
+              text: `Session index missing or incompatible at ${indexPath}. Run /session-index and press r to rebuild it.`,
             },
           ],
           details: { error: true, status, results: [] } satisfies SessionSearchToolDetails,

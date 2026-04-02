@@ -1,5 +1,4 @@
 import { existsSync, mkdirSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
 import {
@@ -250,24 +249,14 @@ interface SearchResultAccumulator {
   evidenceKeys: Set<string>;
 }
 
-export function getDefaultIndexDir(): string {
-  return (
-    process.env.PI_SESSIONS_INDEX_DIR ?? path.join(os.homedir(), ".pi", "agent", "pi-sessions")
-  );
-}
-
-export function getDefaultIndexPath(): string {
-  return path.join(getDefaultIndexDir(), "index.sqlite");
-}
-
-export function ensureIndexDir(dir: string = getDefaultIndexDir()): string {
+export function ensureIndexDir(dir: string): string {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
   return dir;
 }
 
-export function createTempIndexPath(finalPath: string = getDefaultIndexPath()): string {
+export function createTempIndexPath(finalPath: string): string {
   const dir = path.dirname(finalPath);
   const baseName = path.basename(finalPath, path.extname(finalPath));
   ensureIndexDir(dir);
@@ -612,7 +601,7 @@ export function insertSessionFileTouch(db: SessionIndexDatabase, row: SessionFil
   );
 }
 
-export function getIndexStatus(dbPath: string = getDefaultIndexPath()): SessionIndexStatus {
+export function getIndexStatus(dbPath: string): SessionIndexStatus {
   if (!existsSync(dbPath)) {
     return { dbPath, exists: false };
   }

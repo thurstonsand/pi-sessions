@@ -12,6 +12,7 @@ import {
 
 export interface SessionHandoffPowerlineBindingOptions {
   extension: { id: string };
+  indexPath: string;
   getCurrentSessionPath: () => string | undefined;
   getCurrentCwd: () => string | undefined;
   pingTimeoutMs?: number | undefined;
@@ -47,6 +48,7 @@ export async function connectPowerlineHandoffAutocomplete(
         enhance(baseProvider) {
           return new HandoffAutocompleteProvider({
             baseProvider,
+            indexPath: options.indexPath,
             getCurrentSessionPath: options.getCurrentSessionPath,
             getCurrentCwd: options.getCurrentCwd,
           });

@@ -12,7 +12,6 @@ import { createTestFilesystem } from "./test-helpers.js";
 const testFs = createTestFilesystem("pi-sessions-handoff-refs-");
 
 afterEach(() => {
-  delete process.env.PI_SESSIONS_INDEX_DIR;
   testFs.cleanup();
 });
 
@@ -38,7 +37,7 @@ describe("session handoff refs", () => {
       },
     ]);
 
-    const result = resolveSessionReference(sessionPath);
+    const result = resolveSessionReference(sessionPath, { indexPath: "/unused/index.sqlite" });
 
     expect(result.error).toBeUndefined();
     expect(result.resolved).toMatchObject({
@@ -53,7 +52,6 @@ describe("session handoff refs", () => {
     const root = testFs.createTempDir();
     const indexDir = testFs.ensureDir(path.join(root, "index"));
     const dbPath = path.join(indexDir, "index.sqlite");
-    process.env.PI_SESSIONS_INDEX_DIR = indexDir;
 
     const db = openIndexDatabase(dbPath, { create: true });
     initializeSchema(db);
@@ -93,8 +91,8 @@ describe("session handoff refs", () => {
     );
     db.close();
 
-    const byId = resolveSessionReference("child-session-5678");
-    const byRef = resolveSessionReference("@handoff/child-session-5678");
+    const byId = resolveSessionReference("child-session-5678", { indexPath: dbPath });
+    const byRef = resolveSessionReference("@handoff/child-session-5678", { indexPath: dbPath });
 
     expect(byId.error).toBeUndefined();
     expect(byId.resolved).toMatchObject({
@@ -115,7 +113,6 @@ describe("session handoff refs", () => {
     const root = testFs.createTempDir();
     const indexDir = testFs.ensureDir(path.join(root, "index"));
     const dbPath = path.join(indexDir, "index.sqlite");
-    process.env.PI_SESSIONS_INDEX_DIR = indexDir;
 
     const db = openIndexDatabase(dbPath, { create: true });
     initializeSchema(db);
@@ -152,7 +149,7 @@ describe("session handoff refs", () => {
     );
     db.close();
 
-    const result = resolveSessionReference("@handoff/shared-prefix");
+    const result = resolveSessionReference("@handoff/shared-prefix", { indexPath: dbPath });
 
     expect(result.resolved).toBeUndefined();
     expect(result.error).toContain("No session found");

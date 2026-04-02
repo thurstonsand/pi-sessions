@@ -1,6 +1,5 @@
 import path from "node:path";
 import {
-  getDefaultIndexPath,
   getIndexStatus,
   getLineageAutocompleteSessions,
   getRecentAutocompleteSessions,
@@ -29,7 +28,7 @@ export interface ListHandoffAutocompleteCandidatesOptions {
   currentCwd?: string | undefined;
   prefix: string;
   includeAll: boolean;
-  indexPath?: string | undefined;
+  indexPath: string;
   limit?: number | undefined;
 }
 
@@ -42,7 +41,7 @@ export interface HandoffAutocompleteQueryResult {
 export function listHandoffAutocompleteCandidates(
   options: ListHandoffAutocompleteCandidatesOptions,
 ): HandoffAutocompleteQueryResult {
-  const status = getIndexStatus(options.indexPath ?? getDefaultIndexPath());
+  const status = getIndexStatus(options.indexPath);
   if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
     return { candidates: [], mode: options.includeAll ? "all" : "default" };
   }

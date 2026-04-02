@@ -3,12 +3,28 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Pi session search, ask, handoff, and indexing tools",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/thurstonsand/pi-sessions.git"
+  },
+  "homepage": "https://github.com/thurstonsand/pi-sessions#readme",
+  "bugs": {
+    "url": "https://github.com/thurstonsand/pi-sessions/issues"
+  },
   "keywords": [
     "pi-package"
   ],
+  "files": [
+    "extensions"
+  ],
   "pi": {
     "extensions": [
-      "./extensions"
+      "./extensions/session-ask.ts",
+      "./extensions/session-handoff.ts",
+      "./extensions/session-hooks.ts",
+      "./extensions/session-index.ts",
+      "./extensions/session-search.ts"
     ]
   },
   "scripts": {
@@ -16,7 +32,8 @@
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "biome check . && tsc --noEmit && vitest run"
+    "check": "biome check . && tsc --noEmit && vitest run",
+    "prepare": "husky"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.6",
@@ -25,6 +42,8 @@
     "@mariozechner/pi-tui": "^0.63.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.3.5",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
   },
@@ -37,5 +56,8 @@
     "@mariozechner/pi-coding-agent": ">=0.63.0",
     "@mariozechner/pi-tui": ">=0.63.0",
     "@sinclair/typebox": ">=0.34.0"
+  },
+  "lint-staged": {
+    "*.{js,cjs,mjs,jsx,ts,tsx,json,jsonc}": "biome check --write --no-errors-on-unmatched"
   }
 }

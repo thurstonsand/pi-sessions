@@ -7,10 +7,13 @@ import {
 import { type Focusable, matchesKey, visibleWidth } from "@mariozechner/pi-tui";
 import { getIndexStatus, type SessionIndexStatus } from "./session-search/db.js";
 import { type ReindexResult, rebuildSessionIndex } from "./session-search/reindex.js";
+import { loadSettings } from "./shared/settings.js";
 
 type SessionIndexAction = "reindex" | undefined;
 
 export default function sessionIndexExtension(pi: ExtensionAPI): void {
+  const settings = loadSettings();
+
   pi.registerCommand("session-index", {
     description: "Open the session index control panel",
     handler: async (_args, ctx) => {
@@ -19,7 +22,8 @@ export default function sessionIndexExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const status = getIndexStatus();
+      const indexPath = settings.index.path;
+      const status = getIndexStatus(indexPath);
       const action = await ctx.ui.custom<SessionIndexAction>(
         (_tui, theme, _keybindings, done) => new SessionIndexPanel(theme, status, done),
         {
@@ -45,7 +49,7 @@ export default function sessionIndexExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const result = await runReindexWithLoader(ctx);
+      const result = await runReindexWithLoader(ctx, indexPath);
       if (!result) {
         ctx.ui.notify("Reindex cancelled.", "info");
         return;
@@ -124,14 +128,17 @@ class SessionIndexPanel implements Focusable {
   }
 }
 
-async function runReindexWithLoader(ctx: ExtensionCommandContext): Promise<ReindexResult | null> {
+async function runReindexWithLoader(
+  ctx: ExtensionCommandContext,
+  indexPath: string,
+): Promise<ReindexResult | null> {
   return ctx.ui.custom<ReindexResult | null>((tui, theme, _keybindings, done) => {
     const loader = new BorderedLoader(tui, theme, "Rebuilding session index...");
     loader.onAbort = () => done(null);
 
     void (async () => {
       try {
-        const result = await rebuildSessionIndex();
+        const result = await rebuildSessionIndex({ indexPath });
         done(result);
       } catch (error) {
         ctx.ui.notify(`Reindex failed: ${String(error)}`, "error");

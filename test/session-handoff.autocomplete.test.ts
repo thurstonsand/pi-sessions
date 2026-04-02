@@ -78,6 +78,7 @@ describe("session handoff autocomplete", () => {
     const provider = new HandoffAutocompleteProvider(
       {
         baseProvider,
+        indexPath: "/tmp/index.sqlite",
         getCurrentSessionPath: () => "/tmp/current.jsonl",
         getCurrentCwd: () => "/repo/app",
       },
@@ -92,6 +93,7 @@ describe("session handoff autocomplete", () => {
     );
 
     expect(listCandidates).toHaveBeenCalledWith({
+      indexPath: "/tmp/index.sqlite",
       currentSessionPath: "/tmp/current.jsonl",
       currentCwd: "/repo/app",
       prefix: "2dc8",
@@ -149,6 +151,7 @@ describe("session handoff autocomplete", () => {
       EDITOR_THEME,
       createFakeKeybindings(),
       {
+        indexPath: "/tmp/index.sqlite",
         getCurrentSessionPath: () => "/tmp/current.jsonl",
         getCurrentCwd: () => "/repo/app",
         setAutocompleteStatus,
@@ -180,6 +183,7 @@ describe("session handoff autocomplete", () => {
     );
     expect(afterToggle?.items[0]?.value).toBe("@session:all-session");
     expect(listCandidates).toHaveBeenLastCalledWith({
+      indexPath: "/tmp/index.sqlite",
       currentSessionPath: "/tmp/current.jsonl",
       currentCwd: "/repo/app",
       prefix: "",
@@ -209,6 +213,7 @@ describe("session handoff autocomplete", () => {
       EDITOR_THEME,
       createFakeKeybindings(),
       {
+        indexPath: "/tmp/index.sqlite",
         getCurrentSessionPath: () => "/tmp/current.jsonl",
         getCurrentCwd: () => "/repo/app",
         setAutocompleteStatus,
@@ -265,6 +270,7 @@ describe("session handoff autocomplete", () => {
     const provider = new HandoffAutocompleteProvider(
       {
         baseProvider: createBaseProvider(),
+        indexPath: "/tmp/index.sqlite",
         getCurrentSessionPath: () => "/tmp/current.jsonl",
         getCurrentCwd: () => "/repo/app",
       },
@@ -295,19 +301,27 @@ describe("session handoff autocomplete", () => {
     const received: { force: boolean | undefined; signal: AbortSignal | undefined }[] = [];
     const signal = new AbortController().signal;
     const baseProvider: AutocompleteProvider = {
-      getSuggestions: vi.fn().mockImplementation(
-        async (_lines, _cursorLine, _cursorCol, options: { signal: AbortSignal; force?: boolean }) => {
-          received.push({ force: options.force, signal: options.signal });
-          return {
-            items: [{ value: "session-not-active", label: "session-not-active" }],
-            prefix: "session-not-active",
-          };
-        },
-      ),
+      getSuggestions: vi
+        .fn()
+        .mockImplementation(
+          async (
+            _lines,
+            _cursorLine,
+            _cursorCol,
+            options: { signal: AbortSignal; force?: boolean },
+          ) => {
+            received.push({ force: options.force, signal: options.signal });
+            return {
+              items: [{ value: "session-not-active", label: "session-not-active" }],
+              prefix: "session-not-active",
+            };
+          },
+        ),
       applyCompletion: vi.fn(),
     };
     const provider = new HandoffAutocompleteProvider({
       baseProvider,
+      indexPath: "/tmp/index.sqlite",
       getCurrentSessionPath: () => "/tmp/current.jsonl",
       getCurrentCwd: () => "/repo/app",
     });

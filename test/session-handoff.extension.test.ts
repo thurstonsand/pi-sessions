@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const mockReadSessionHandoffSettings = vi.fn();
+const mockLoadSettings = vi.fn();
 const mockConnectPowerlineHandoffAutocomplete = vi.fn();
 
-vi.mock("../extensions/session-handoff/settings.js", () => ({
-  readSessionHandoffSettings: mockReadSessionHandoffSettings,
+vi.mock("../extensions/shared/settings.js", () => ({
+  loadSettings: mockLoadSettings,
 }));
 
 vi.mock("../extensions/session-handoff/powerline.js", () => ({
@@ -14,9 +14,9 @@ vi.mock("../extensions/session-handoff/powerline.js", () => ({
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  mockReadSessionHandoffSettings.mockReturnValue({
-    editorHost: "auto",
-    powerlineConfigured: false,
+  mockLoadSettings.mockReturnValue({
+    handoff: { editorMode: "standalone" },
+    index: { dir: "/tmp/pi-sessions", path: "/tmp/pi-sessions/index.sqlite" },
   });
   mockConnectPowerlineHandoffAutocomplete.mockResolvedValue(null);
 });
@@ -72,10 +72,10 @@ describe("session handoff extension", () => {
     });
   });
 
-  it("registers through the Powerline bridge when auto mode detects Powerline", async () => {
-    mockReadSessionHandoffSettings.mockReturnValue({
-      editorHost: "auto",
-      powerlineConfigured: true,
+  it("registers through the Powerline bridge when powerline mode is enabled", async () => {
+    mockLoadSettings.mockReturnValue({
+      handoff: { editorMode: "powerline" },
+      index: { dir: "/tmp/pi-sessions", path: "/tmp/pi-sessions/index.sqlite" },
     });
     const disconnect = vi.fn();
     mockConnectPowerlineHandoffAutocomplete.mockResolvedValue({
@@ -118,5 +118,47 @@ describe("session handoff extension", () => {
     expect(onTerminalInput).toHaveBeenCalledTimes(1);
     expect(setEditorComponent).not.toHaveBeenCalled();
     expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("fails loudly when powerline mode is enabled but the bridge is unavailable", async () => {
+    mockLoadSettings.mockReturnValue({
+      handoff: { editorMode: "powerline" },
+      index: { dir: "/tmp/pi-sessions", path: "/tmp/pi-sessions/index.sqlite" },
+    });
+    mockConnectPowerlineHandoffAutocomplete.mockResolvedValue(null);
+
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = {
+      events: { emit: vi.fn(), on: vi.fn() },
+      registerCommand: vi.fn(),
+      on(event: string, handler: (event: unknown, ctx?: unknown) => Promise<unknown>) {
+        handlers.set(event, handler);
+      },
+    };
+
+    sessionHandoffExtension(pi as never);
+
+    const sessionStartHandler = handlers.get("session_start");
+    const setEditorComponent = vi.fn();
+    const setWidget = vi.fn();
+    const notify = vi.fn();
+    const onTerminalInput = vi.fn();
+    const editorContext = {
+      cwd: "/repo/app",
+      hasUI: true,
+      ui: { setEditorComponent, setWidget, notify, onTerminalInput },
+      sessionManager: { getSessionFile: () => "/tmp/current.jsonl" },
+    };
+
+    await sessionStartHandler?.({}, editorContext);
+
+    expect(mockConnectPowerlineHandoffAutocomplete).toHaveBeenCalledTimes(1);
+    expect(setEditorComponent).not.toHaveBeenCalled();
+    expect(onTerminalInput).not.toHaveBeenCalled();
+    expect(notify).toHaveBeenCalledWith(
+      'sessions.handoff.editor is set to "powerline", but the Powerline autocomplete bridge is unavailable.',
+      "error",
+    );
   });
 });

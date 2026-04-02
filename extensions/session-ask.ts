@@ -2,7 +2,6 @@ import { complete, type Message } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import {
-  getDefaultIndexPath,
   getIndexStatus,
   getSessionById,
   INDEX_SCHEMA_VERSION,
@@ -10,6 +9,7 @@ import {
   type SessionLineageRow,
 } from "./session-search/db.js";
 import { type RenderedSessionTree, renderSessionTreeMarkdown } from "./session-search/extract.js";
+import { loadSettings } from "./shared/settings.js";
 
 const SESSION_ASK_SYSTEM_PROMPT = `You are analyzing a Pi coding session transcript. The transcript includes the entire session tree, including abandoned branches and summaries.
 
@@ -26,6 +26,8 @@ interface TextContentBlock {
 }
 
 export default function sessionAskExtension(pi: ExtensionAPI): void {
+  const settings = loadSettings();
+
   pi.registerTool({
     name: "session_ask",
     label: "Session Ask",
@@ -66,7 +68,7 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         };
       }
 
-      const resolvedTarget = resolveSessionAskTarget(sessionId);
+      const resolvedTarget = resolveSessionAskTarget(sessionId, settings.index.path);
       if (!resolvedTarget.resolved) {
         return {
           content: [
@@ -212,7 +214,10 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
   });
 }
 
-function resolveSessionAskTarget(sessionId: string): {
+function resolveSessionAskTarget(
+  sessionId: string,
+  indexPath: string,
+): {
   resolved?: SessionLineageRow | undefined;
   error?: string | undefined;
 } {
@@ -223,10 +228,10 @@ function resolveSessionAskTarget(sessionId: string): {
     };
   }
 
-  const status = getIndexStatus();
+  const status = getIndexStatus(indexPath);
   if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
     return {
-      error: `Session index missing or incompatible at ${getDefaultIndexPath()}. Run /session-index and press r to rebuild it.`,
+      error: `Session index missing or incompatible at ${indexPath}. Run /session-index and press r to rebuild it.`,
     };
   }
 

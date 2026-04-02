@@ -2,7 +2,6 @@ import { renameSync } from "node:fs";
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import {
   createTempIndexPath,
-  getDefaultIndexPath,
   initializeSchema,
   insertSession,
   insertSessionFileTouch,
@@ -15,7 +14,7 @@ import {
 import { extractSessionRecord, type SearchTextChunk, type SessionFileTouch } from "./extract.js";
 
 export interface ReindexOptions {
-  indexPath?: string;
+  indexPath: string;
 }
 
 export interface ReindexResult {
@@ -24,8 +23,8 @@ export interface ReindexResult {
   indexPath: string;
 }
 
-export async function rebuildSessionIndex(options?: ReindexOptions): Promise<ReindexResult> {
-  const finalIndexPath = options?.indexPath ?? getDefaultIndexPath();
+export async function rebuildSessionIndex(options: ReindexOptions): Promise<ReindexResult> {
+  const finalIndexPath = options.indexPath;
   const tempIndexPath = createTempIndexPath(finalIndexPath);
   const sessionFiles = (await SessionManager.listAll()).map((session) => session.path);
 

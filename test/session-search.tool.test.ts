@@ -1,3 +1,4 @@
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,9 +12,14 @@ import sessionSearchExtension from "../extensions/session-search.js";
 import { createTestFilesystem } from "./test-helpers.js";
 
 const testFs = createTestFilesystem("pi-sessions-search-tool-");
+const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 afterEach(() => {
-  delete process.env.PI_SESSIONS_INDEX_DIR;
+  if (originalAgentDir === undefined) {
+    delete process.env.PI_CODING_AGENT_DIR;
+  } else {
+    process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+  }
   testFs.cleanup();
 });
 
@@ -50,8 +56,14 @@ describe("session_search tool", () => {
   });
 
   it("formats visible output grouped by cwd without path or updated fields", async () => {
+    const agentDir = testFs.createTempDir();
+    const cwd = testFs.createTempDir();
     const dir = testFs.createTempDir();
-    process.env.PI_SESSIONS_INDEX_DIR = dir;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    writeFileSync(
+      path.join(agentDir, "settings.json"),
+      `${JSON.stringify({ sessions: { index: { dir } } }, null, 2)}\n`,
+    );
     const dbPath = path.join(dir, "index.sqlite");
 
     const db = openIndexDatabase(dbPath, { create: true });
@@ -95,7 +107,7 @@ describe("session_search tool", () => {
       { cwd: "/repo" },
       undefined,
       undefined,
-      undefined as never,
+      createToolContext(cwd),
     );
     const text = (result.content[0] as { text: string }).text;
 
@@ -123,4 +135,8 @@ function registerSessionSearchTool() {
   }
 
   return registeredTool;
+}
+
+function createToolContext(cwd: string) {
+  return { cwd } as never;
 }

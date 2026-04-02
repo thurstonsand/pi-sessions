@@ -49,6 +49,8 @@ extensions/                  # All source code
   session-handoff/           # Handoff implementation
     extract.ts               # Structured extraction and draft assembly
     review.ts                # Preview overlay and review flow
+  shared/
+    settings.ts              # Strongly typed global settings loader
 ```
 
 Entry points are thin wrappers that register tools/commands with the Pi extension
@@ -169,7 +171,15 @@ Patterns used in this codebase:
   `@mariozechner/pi-tui`, `@sinclair/typebox` — provided by the Pi host
 - **Dev**: Biome, TypeScript, Vitest, type packages
 
-## Environment
+## Settings
 
-- `PI_SESSIONS_INDEX_DIR` overrides the default index directory
-  (`~/.pi/agent/pi-sessions/index.sqlite`)
+Global settings live under `sessions.*`.
+
+- `sessions.index.dir` overrides the default index directory
+  - default DB path: `~/.pi/agent/pi-sessions/index.sqlite`
+  - must be an absolute path or start with `~/`
+  - read from global settings only
+- `sessions.handoff.editor`
+  - values: `standalone | powerline`
+  - default: `standalone`
+  - read from global settings only

@@ -42,10 +42,10 @@ Expected:
 
 ## 4. Verify follow-up analysis
 
-Take one returned `sessionPath` and ask:
+Take one returned session id and ask:
 
 ```text
-Use session_ask on /path/to/session.jsonl and answer what decisions were made.
+Use session_ask with session "<session-uuid>" and answer what decisions were made.
 ```
 
 Expected:
@@ -143,3 +143,13 @@ Expected:
 
 - historical sessions are restored to the sidecar index
 - search works again without query-time repair behavior
+
+## 9. Verify auto-titling
+
+In a fresh unnamed session:
+
+- send a substantive first prompt
+- confirm a descriptive session title appears after the turn finishes
+- continue until the refresh threshold is crossed and confirm the title only changes when it meaningfully improves
+- run `/name Manual Smoke Title` and confirm future automatic retitles stop
+- run `/retitle` and confirm the session gets a fresh generated title again

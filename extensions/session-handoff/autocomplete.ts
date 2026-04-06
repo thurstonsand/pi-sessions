@@ -7,13 +7,19 @@ import {
   matchesKey,
   type TUI,
 } from "@mariozechner/pi-tui";
-import type { PowerlineEnhancedAutocompleteProvider } from "pi-powerline-footer";
-import { type HandoffAutocompleteCandidate, listHandoffAutocompleteCandidates } from "./query.js";
+import type {
+  PowerlineAutocompleteInactiveReason,
+  PowerlineAutocompleteProvider,
+} from "pi-powerline-footer";
+import {
+  type HandoffAutocompleteCandidate,
+  listHandoffAutocompleteCandidates,
+  SESSION_TOKEN_PREFIX,
+} from "./query.js";
 
 type HandoffAutocompleteMode = "default" | "all";
 
 const SESSION_PREFIX_RE = /(?:^|[\s([{"'])@session(?::([0-9a-fA-F-]*))?$/;
-const SESSION_TOKEN_PREFIX = "@session:";
 const DEFAULT_AUTOCOMPLETE_LIMIT = 8;
 const TOGGLE_SCOPE_ACTION_ID = "alt+a";
 
@@ -81,7 +87,9 @@ export function isCanonicalSessionToken(text: string): boolean {
   return text.startsWith(SESSION_TOKEN_PREFIX);
 }
 
-export class HandoffAutocompleteProvider implements PowerlineEnhancedAutocompleteProvider {
+export class HandoffAutocompleteProvider
+  implements PowerlineAutocompleteProvider<HandoffAutocompleteRefreshData>
+{
   private readonly baseProvider: AutocompleteProvider;
   private readonly indexPath: string;
   private readonly getCurrentSessionPath: () => string | undefined;
@@ -158,12 +166,12 @@ export class HandoffAutocompleteProvider implements PowerlineEnhancedAutocomplet
     this.resetHandoffState();
   }
 
-  setPowerlineAutocompleteData(data: unknown): void {
-    const nextData = data as HandoffAutocompleteRefreshData;
-    this.includeAllSessions = nextData.includeAllSessions === true;
+  refresh(data: HandoffAutocompleteRefreshData | undefined): boolean {
+    this.includeAllSessions = data?.includeAllSessions === true;
+    return true;
   }
 
-  clearPowerlineAutocompleteState(): void {
+  deactivate(_reason: PowerlineAutocompleteInactiveReason): void {
     this.resetHandoffState();
   }
 
@@ -179,7 +187,7 @@ export class HandoffAutocompleteProvider implements PowerlineEnhancedAutocomplet
     return this.defaultScopeLabel;
   }
 
-  getPowerlineAutocompleteHint(): string | undefined {
+  getHint(): string | undefined {
     if (!this.hasActiveHandoffSuggestions) {
       return undefined;
     }
@@ -281,13 +289,8 @@ export class HandoffAutocompleteEditor extends CustomEditor {
   }
 
   override handleInput(data: string): void {
-    if (
-      this.handoffProvider &&
-      this.isShowingAutocomplete() &&
-      this.handoffProvider.isShowingHandoffSuggestions() &&
-      matchesKey(data, TOGGLE_SCOPE_ACTION_ID)
-    ) {
-      this.handoffProvider.toggleIncludeAllSessions();
+    if (this.isHandoffAutocompleteActive() && matchesKey(data, TOGGLE_SCOPE_ACTION_ID)) {
+      this.handoffProvider?.toggleIncludeAllSessions();
       refreshAutocomplete(this);
       this.syncAutocompleteStatus();
       return;
@@ -302,13 +305,16 @@ export class HandoffAutocompleteEditor extends CustomEditor {
     this.syncAutocompleteStatus();
   }
 
-  private syncAutocompleteStatus(): void {
-    const hint =
-      this.handoffProvider &&
+  private isHandoffAutocompleteActive(): boolean {
+    return (
+      this.handoffProvider !== undefined &&
       this.isShowingAutocomplete() &&
       this.handoffProvider.isShowingHandoffSuggestions()
-        ? this.handoffProvider.getPowerlineAutocompleteHint()
-        : undefined;
+    );
+  }
+
+  private syncAutocompleteStatus(): void {
+    const hint = this.isHandoffAutocompleteActive() ? this.handoffProvider?.getHint() : undefined;
     this.options.setAutocompleteStatus(hint);
   }
 }

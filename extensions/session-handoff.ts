@@ -4,6 +4,7 @@ import type {
   ExtensionCommandContext,
   ExtensionContext,
   KeybindingsManager,
+  SessionManager,
 } from "@mariozechner/pi-coding-agent";
 import { buildSessionContext } from "@mariozechner/pi-coding-agent";
 import { type EditorTheme, Key, matchesKey, type TUI } from "@mariozechner/pi-tui";
@@ -11,41 +12,24 @@ import { HandoffAutocompleteEditor } from "./session-handoff/autocomplete.js";
 import { generateHandoffDraft, type HandoffDraftResult } from "./session-handoff/extract.js";
 import {
   createHandoffSessionMetadata,
+  createPendingSendConsumedEntry,
+  getPendingInitialPromptFromEntries,
   HANDOFF_METADATA_CUSTOM_TYPE,
+  PENDING_SEND_CONSUMED_CUSTOM_TYPE,
 } from "./session-handoff/metadata.js";
 import { connectPowerlineHandoffAutocomplete } from "./session-handoff/powerline.js";
 import { renderStrongModal, reviewHandoffDraft } from "./session-handoff/review.js";
-import { clearPendingChildOrigin, queuePendingChildOrigin } from "./session-search/hooks.js";
 import { loadSettings, type SessionSettings } from "./shared/settings.js";
 
 const AUTOCOMPLETE_HINT_KEY = "pi-sessions.session-autocomplete";
 const POWERLINE_AUTOCOMPLETE_TIMEOUT_MS = 150;
+const POWERLINE_AUTOCOMPLETE_ATTACH_TIMEOUT_MS = 10_000;
 const POWERLINE_EXTENSION_ID = "pi-sessions";
-
-interface HandoffCommandDependencies {
-  generateDraft: (
-    ctx: ExtensionCommandContext,
-    goal: string,
-    signal?: AbortSignal,
-  ) => Promise<HandoffDraftResult | undefined>;
-  reviewDraft: (ctx: ExtensionCommandContext, draft: string) => Promise<string | undefined>;
-  runWithLoader: <T>(
-    ctx: ExtensionCommandContext,
-    label: string,
-    task: (signal: AbortSignal) => Promise<T>,
-  ) => Promise<T | undefined>;
-}
 
 interface InstalledHandoffAutocomplete {
   mode: "standalone" | "powerline";
   dispose(): void;
 }
-
-const defaultDependencies: HandoffCommandDependencies = {
-  generateDraft: generateHandoffDraft,
-  reviewDraft: reviewHandoffDraft,
-  runWithLoader: runWithLoader,
-};
 
 let installedAutocomplete: InstalledHandoffAutocomplete | undefined;
 
@@ -54,19 +38,99 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
 
   pi.registerCommand("handoff", {
     description: "Transfer context to a new focused session",
-    handler: createSessionHandoffCommandHandler(pi),
+    handler: async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
+      if (!ctx.hasUI) {
+        ctx.ui.notify("handoff requires interactive mode", "error");
+        return;
+      }
+
+      if (!ctx.model) {
+        ctx.ui.notify("No model selected", "error");
+        return;
+      }
+
+      const goal = args.trim();
+      if (!goal) {
+        ctx.ui.notify("Usage: /handoff <goal for new thread>", "error");
+        return;
+      }
+
+      const sessionContext = buildSessionContext(
+        ctx.sessionManager.getEntries(),
+        ctx.sessionManager.getLeafId(),
+      );
+      if (sessionContext.messages.length === 0) {
+        ctx.ui.notify("No conversation to hand off", "error");
+        return;
+      }
+
+      let generatedDraft: HandoffDraftResult | undefined;
+      try {
+        generatedDraft = await runWithLoader(
+          ctx,
+          "Generating handoff draft...",
+          async (signal: AbortSignal) => generateHandoffDraft(ctx, goal, signal),
+        );
+      } catch (error) {
+        ctx.ui.notify(formatHandoffError(error), "error");
+        return;
+      }
+
+      if (!generatedDraft) {
+        ctx.ui.notify("Cancelled", "info");
+        return;
+      }
+
+      const approvedDraft = await reviewHandoffDraft(ctx, generatedDraft.draft);
+      if (!approvedDraft) {
+        ctx.ui.notify("Cancelled", "info");
+        return;
+      }
+
+      const parentSession = ctx.sessionManager.getSessionFile();
+
+      const handoffMetadata = createHandoffSessionMetadata(
+        goal,
+        generatedDraft.context.nextTask,
+        approvedDraft,
+      );
+      const writeMetadata = async (sm: SessionManager) => {
+        sm.appendCustomEntry(HANDOFF_METADATA_CUSTOM_TYPE, handoffMetadata);
+      };
+      const newSessionResult = parentSession
+        ? await ctx.newSession({ parentSession, setup: writeMetadata })
+        : await ctx.newSession({ setup: writeMetadata });
+
+      if (newSessionResult.cancelled) {
+        ctx.ui.notify("New session cancelled", "info");
+        return;
+      }
+
+      ctx.ui.notify("Handoff started in a new session.", "info");
+    },
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    await installHandoffAutocomplete(ctx, pi.events, settings);
-  });
+    void installHandoffAutocomplete(ctx, pi.events, settings).catch((error: unknown) => {
+      if (!ctx.hasUI) {
+        return;
+      }
 
-  pi.on("session_switch", async (_event, ctx) => {
-    await installHandoffAutocomplete(ctx, pi.events, settings);
-  });
+      ctx.ui.notify(formatHandoffError(error), "error");
+    });
 
-  pi.on("session_fork", async (_event, ctx) => {
-    await installHandoffAutocomplete(ctx, pi.events, settings);
+    const sessionFile = ctx.sessionManager.getSessionFile();
+    const pending = getPendingInitialPromptFromEntries(ctx.sessionManager.getEntries());
+
+    if (!sessionFile || !pending) {
+      return;
+    }
+
+    pi.appendEntry(
+      PENDING_SEND_CONSUMED_CUSTOM_TYPE,
+      createPendingSendConsumedEntry(pending.initial_prompt_nonce),
+    );
+    pi.sendUserMessage(pending.initial_prompt);
   });
 
   pi.on("session_shutdown", async () => {
@@ -80,85 +144,6 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         "When the user references @session:<uuid>, treat it as a session token. If you call session_ask, pass only the UUID value, not the @session: prefix.",
     };
   });
-}
-
-export function createSessionHandoffCommandHandler(
-  pi: ExtensionAPI,
-  dependencies: HandoffCommandDependencies = defaultDependencies,
-): (args: string, ctx: ExtensionCommandContext) => Promise<void> {
-  return async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
-    if (!ctx.hasUI) {
-      ctx.ui.notify("handoff requires interactive mode", "error");
-      return;
-    }
-
-    if (!ctx.model) {
-      ctx.ui.notify("No model selected", "error");
-      return;
-    }
-
-    const goal = args.trim();
-    if (!goal) {
-      ctx.ui.notify("Usage: /handoff <goal for new thread>", "error");
-      return;
-    }
-
-    const sessionContext = buildSessionContext(
-      ctx.sessionManager.getEntries(),
-      ctx.sessionManager.getLeafId(),
-    );
-    if (sessionContext.messages.length === 0) {
-      ctx.ui.notify("No conversation to hand off", "error");
-      return;
-    }
-
-    let generatedDraft: HandoffDraftResult | undefined;
-    try {
-      generatedDraft = await dependencies.runWithLoader(
-        ctx,
-        "Generating handoff draft...",
-        async (signal: AbortSignal) => dependencies.generateDraft(ctx, goal, signal),
-      );
-    } catch (error) {
-      ctx.ui.notify(formatHandoffError(error), "error");
-      return;
-    }
-
-    if (!generatedDraft) {
-      ctx.ui.notify("Cancelled", "info");
-      return;
-    }
-
-    const approvedDraft = await dependencies.reviewDraft(ctx, generatedDraft.draft);
-    if (!approvedDraft) {
-      ctx.ui.notify("Cancelled", "info");
-      return;
-    }
-
-    const parentSession = ctx.sessionManager.getSessionFile();
-    if (parentSession) {
-      queuePendingChildOrigin(parentSession, "handoff");
-    }
-
-    const handoffMetadata = createHandoffSessionMetadata(goal, generatedDraft.context.nextTask);
-    const writeMetadata = async (sm: { appendCustomEntry(type: string, data: unknown): void }) => {
-      sm.appendCustomEntry(HANDOFF_METADATA_CUSTOM_TYPE, handoffMetadata);
-    };
-    const newSessionResult = parentSession
-      ? await ctx.newSession({ parentSession, setup: writeMetadata })
-      : await ctx.newSession({ setup: writeMetadata });
-
-    if (newSessionResult.cancelled) {
-      if (parentSession) {
-        clearPendingChildOrigin(parentSession);
-      }
-      ctx.ui.notify("New session cancelled", "info");
-      return;
-    }
-
-    pi.sendUserMessage(approvedDraft);
-    ctx.ui.notify("Handoff started in a new session.", "info");
-  };
 }
 
 export async function installHandoffAutocomplete(
@@ -268,7 +253,9 @@ function installStandaloneHandoffAutocomplete(
           return;
         }
 
-        ctx.ui.setWidget(AUTOCOMPLETE_HINT_KEY, [text], { placement: "belowEditor" });
+        ctx.ui.setWidget(AUTOCOMPLETE_HINT_KEY, [text], {
+          placement: "belowEditor",
+        });
       },
     });
     const originalHandleInput = editor.handleInput.bind(editor);
@@ -307,6 +294,7 @@ async function tryPowerlineHandoffAutocomplete(
     getCurrentSessionPath: () => ctx.sessionManager.getSessionFile(),
     getCurrentCwd: () => ctx.cwd,
     pingTimeoutMs: POWERLINE_AUTOCOMPLETE_TIMEOUT_MS,
+    attachTimeoutMs: POWERLINE_AUTOCOMPLETE_ATTACH_TIMEOUT_MS,
   });
 
   if (!connection) {

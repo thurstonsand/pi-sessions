@@ -1,5 +1,8 @@
 import type { EventBus } from "@mariozechner/pi-coding-agent";
-import type { PowerlineAutocompleteInteractionHandle } from "pi-powerline-footer";
+import type {
+  PowerlineAutocompleteInteractionHandle,
+  PowerlineAutocompleteRegistration,
+} from "pi-powerline-footer";
 import {
   connectPowerlineAutocompleteExtension,
   createPowerlineAutocompleteInteractionHandle,
@@ -10,12 +13,15 @@ import {
   type HandoffAutocompleteRefreshData,
 } from "./autocomplete.js";
 
+const DEFAULT_PING_TIMEOUT_MS = 150;
+
 export interface SessionHandoffPowerlineBindingOptions {
   extension: { id: string };
   indexPath: string;
   getCurrentSessionPath: () => string | undefined;
   getCurrentCwd: () => string | undefined;
   pingTimeoutMs?: number | undefined;
+  attachTimeoutMs: number;
 }
 
 export interface SessionHandoffPowerlineBinding {
@@ -27,16 +33,15 @@ export async function connectPowerlineHandoffAutocomplete(
   events: EventBus,
   options: SessionHandoffPowerlineBindingOptions,
 ): Promise<SessionHandoffPowerlineBinding | null> {
-  const timeoutMs = options.pingTimeoutMs ?? 150;
+  const timeoutMs = options.pingTimeoutMs ?? DEFAULT_PING_TIMEOUT_MS;
+  const attachTimeoutMs = options.attachTimeoutMs;
   let interaction:
     | PowerlineAutocompleteInteractionHandle<HandoffAutocompleteRefreshData>
     | undefined;
   let resolveInitial: ((value: SessionHandoffPowerlineBinding | null) => void) | null = null;
-  let rejectInitial: ((reason?: unknown) => void) | null = null;
 
-  const initialResult = new Promise<SessionHandoffPowerlineBinding | null>((resolve, reject) => {
+  const initialResult = new Promise<SessionHandoffPowerlineBinding | null>((resolve) => {
     resolveInitial = resolve;
-    rejectInitial = reject;
   });
 
   const dispose = connectPowerlineAutocompleteExtension(events, {
@@ -56,12 +61,12 @@ export async function connectPowerlineHandoffAutocomplete(
       },
     ],
     pingTimeoutMs: timeoutMs,
-    onRegistered(installedIds) {
-      const firstId = installedIds[0];
-      if (resolveInitial && firstId) {
+    onRegistered(registrations: PowerlineAutocompleteRegistration[]) {
+      const firstRegistration = registrations[0];
+      if (resolveInitial && firstRegistration) {
         interaction = createPowerlineAutocompleteInteractionHandle<HandoffAutocompleteRefreshData>(
           events,
-          firstId,
+          firstRegistration.installedId,
         );
         const binding: SessionHandoffPowerlineBinding = {
           disconnect() {
@@ -72,27 +77,24 @@ export async function connectPowerlineHandoffAutocomplete(
         };
         resolveInitial(binding);
         resolveInitial = null;
-        rejectInitial = null;
       }
     },
-    onSyncError(error) {
-      if (rejectInitial) {
-        rejectInitial(error);
-        resolveInitial = null;
-        rejectInitial = null;
-      }
+    onSyncError(_error) {
+      // Powerline may emit its ready broadcast slightly later during session_start.
+      // Keep listening so a later ready event can retry registration instead of
+      // treating the first startup timeout as a permanent failure.
     },
   });
 
-  // If the initial ping times out, connectPowerlineAutocompleteExtension calls onSyncError
-  // with a timeout error. Give it time to settle before declaring absence.
-  const timeoutFallback = setTimeout(() => {
-    if (resolveInitial) {
-      resolveInitial(null);
-      resolveInitial = null;
-      rejectInitial = null;
-    }
-  }, timeoutMs + 50);
+  const timeoutFallback = setTimeout(
+    () => {
+      if (resolveInitial) {
+        resolveInitial(null);
+        resolveInitial = null;
+      }
+    },
+    Math.max(timeoutMs + 50, attachTimeoutMs),
+  );
 
   const binding = await initialResult;
   clearTimeout(timeoutFallback);

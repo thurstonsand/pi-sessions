@@ -11,17 +11,11 @@ import {
   openIndexDatabase,
   rebuildSessionLineageRelations,
 } from "../extensions/session-search/db.js";
-import {
-  clearPendingChildOrigin,
-  consumePendingChildOrigin,
-  queuePendingChildOrigin,
-} from "../extensions/session-search/hooks.js";
 import { createTestFilesystem } from "./test-helpers.js";
 
 const testFs = createTestFilesystem("pi-sessions-handoff-lineage-");
 
 afterEach(() => {
-  clearPendingChildOrigin("/tmp/root.jsonl");
   testFs.cleanup();
 });
 
@@ -127,14 +121,5 @@ describe("session handoff lineage", () => {
       lineage.find((session) => session.sessionId === "root" && session.relation === "ancestor")
         ?.distance,
     ).toBe(2);
-  });
-
-  it("queues and consumes pending child origins", () => {
-    queuePendingChildOrigin("/tmp/root.jsonl", "handoff");
-    queuePendingChildOrigin("/tmp/root.jsonl", "handoff");
-
-    expect(consumePendingChildOrigin("/tmp/root.jsonl")).toBe("handoff");
-    expect(consumePendingChildOrigin("/tmp/root.jsonl")).toBe("handoff");
-    expect(consumePendingChildOrigin("/tmp/root.jsonl")).toBeUndefined();
   });
 });

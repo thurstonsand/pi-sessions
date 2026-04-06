@@ -284,7 +284,7 @@ describe("session handoff autocomplete", () => {
       createAutocompleteOptions(),
     );
     expect(suggestions?.items[0]?.value).toBe("@session:lineage-session");
-    expect(provider.getPowerlineAutocompleteHint()).toBe("Alt+A: show all sessions");
+    expect(provider.getHint()).toBe("Alt+A: show all sessions");
     provider.toggleIncludeAllSessions();
 
     const toggledSuggestions = await provider.getSuggestions(
@@ -294,7 +294,19 @@ describe("session handoff autocomplete", () => {
       createAutocompleteOptions(),
     );
     expect(toggledSuggestions?.items[0]?.value).toBe("@session:all-session");
-    expect(provider.getPowerlineAutocompleteHint()).toBe("Alt+A: show current repo sessions");
+    expect(provider.getHint()).toBe("Alt+A: show current repo sessions");
+    expect(provider.refresh({ includeAllSessions: false })).toBe(true);
+
+    const refreshedSuggestions = await provider.getSuggestions(
+      ["Use @session:"],
+      0,
+      13,
+      createAutocompleteOptions(),
+    );
+    expect(refreshedSuggestions?.items[0]?.value).toBe("@session:lineage-session");
+    expect(provider.isShowingAllSessions()).toBe(false);
+    provider.deactivate("autocomplete_closed");
+    expect(provider.getHint()).toBeUndefined();
   });
 
   it("preserves force and signal when delegating to the wrapped provider", async () => {

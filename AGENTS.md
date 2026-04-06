@@ -2,9 +2,7 @@
 
 ## Project Overview
 
-Pi extension package providing session search (FTS5), session ask (LLM-powered Q&A),
-command-driven session handoff, and session index management. TypeScript, ES modules,
-SQLite via better-sqlite3.
+Pi extension package providing session search (FTS5), session ask (LLM-powered Q&A), command-driven session handoff, automatic session titling, and session index management. TypeScript, ES modules, SQLite via better-sqlite3.
 
 ## Commands
 
@@ -28,8 +26,7 @@ npm test -- test/session-search.extract.test.ts
 npm test -- --watch
 ```
 
-No build/compile step — `noEmit: true` in tsconfig. The Pi framework loads
-extensions directly from TypeScript source.
+No build/compile step — `noEmit: true` in tsconfig. The Pi framework loads extensions directly from TypeScript source.
 
 ## Project Structure
 
@@ -40,6 +37,7 @@ extensions/                  # All source code
   session-index.ts           # "session-index" command entry point
   session-hooks.ts           # Hook registration entry point
   session-handoff.ts         # "/handoff" command entry point
+  session-auto-title.ts      # Auto-titling extension entry point
   session-search/            # Search/index implementation
     db.ts                    # SQLite schema, queries, CRUD, search ranking
     extract.ts               # JSONL parsing, tree rendering, file-touch extraction
@@ -47,18 +45,33 @@ extensions/                  # All source code
     normalize.ts             # Path normalization and repo-root derivation
     hooks.ts                 # Hook controller and sync logic
   session-handoff/           # Handoff implementation
+    autocomplete.ts          # @session autocomplete provider
     extract.ts               # Structured extraction and draft assembly
+    metadata.ts              # Session metadata resolution
+    powerline.ts             # Powerline bridge for editor integration
+    query.ts                 # Session query helpers
+    refs.ts                  # @session ref resolution
     review.ts                # Preview overlay and review flow
+  session-auto-title/        # Auto-titling implementation
+    context.ts               # Conversation context extraction for title generation
+    controller.ts            # Turn-counting trigger logic and state machine
+    model.ts                 # Model resolution for title generation
+    prompt.ts                # System and user prompts, title normalization
+    state.ts                 # Persisted state schema
   shared/
     settings.ts              # File-backed config loading and resolved runtime settings
     typebox.ts               # Shared TypeBox validation helpers
 ```
 
-Entry points are thin wrappers that register tools/commands with the Pi extension
-API via default exports. Business logic lives in `extensions/session-search/` and
-`extensions/session-handoff/`.
+Entry points are thin wrappers that register tools/commands with the Pi extension API via default exports. Business logic lives in `extensions/session-search/` and `extensions/session-handoff/`.
 
 ## Code Style
+
+## Compatibility Policy
+
+- Backward compatibility is not a goal in this repo unless the user explicitly asks for it
+- Prefer conforming code to the current desired architecture and runtime contract over preserving legacy behavior
+- Do not add compatibility shims, fallback aliases, or dual old/new codepaths unless explicitly requested
 
 ### Formatting
 
@@ -105,7 +118,8 @@ Run `npm run format` to auto-fix. Biome config is in `biome.json`.
 - Define types for any JSON or external data before using it
 - Prefer narrow types over broad ones (`string` literals over `string` where possible)
 - Use the real/named existing type by default, over utility-type derivations
-- Avoid `Pick`, `Omit`, `Partial`, `ReturnType`, etc. unless they are clearly justified
+- Avoid `Pick`, `Omit`, `Partial`, `ReturnType`, indexed-access type derivations like `Foo["bar"]`, etc. unless they are clearly justified
+- If a type already has a clear named subtype or alias, use that directly instead of deriving it inline
 - Exception: deriving TypeScript types from TypeBox schemas is preferred for TypeBox-owned runtime shapes
 - Only introduce a smaller interface for a real runtime boundary, not field-trimming convenience
 - Do not change production types to make tests easier; mock the real type instead
@@ -165,12 +179,14 @@ Patterns used in this codebase:
 - Mocking with `vi.mock()` and `vi.fn()`
 - Direct imports of source functions under test
 - No snapshot tests
+- Do not compromise production-code cleanliness for tests
+- Prefer pushing setup complexity into tests and mocks rather than introducing production abstractions purely for test convenience
+- Dependency injection is acceptable as a narrow test seam
 
 ## Dependencies
 
 - **Runtime**: `better-sqlite3` (SQLite driver)
-- **Peer**: `@mariozechner/pi-ai`, `@mariozechner/pi-coding-agent`,
-  `@mariozechner/pi-tui`, `@sinclair/typebox` — provided by the Pi host
+- **Peer**: `@mariozechner/pi-ai`, `@mariozechner/pi-coding-agent`, `@mariozechner/pi-tui`, `@sinclair/typebox` — provided by the Pi host
 - **Dev**: Biome, TypeScript, Vitest, type packages
 
 ## Settings
@@ -184,4 +200,12 @@ Global settings live under `sessions.*`.
 - `sessions.handoff.editor`
   - values: `standalone | powerline`
   - default: `standalone`
+  - read from global settings only
+- `sessions.autoTitle.refreshTurns`
+  - minimum `1`, default `4`
+  - number of turns between automatic title refreshes
+  - read from global settings only
+- `sessions.autoTitle.model`
+  - format: `provider/modelId`
+  - optional; when unset, prefer internal cheap fallback models and then the active session model
   - read from global settings only

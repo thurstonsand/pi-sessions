@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import sessionAskExtension from "../extensions/session-ask.js";
 import {
@@ -252,10 +252,10 @@ describe("session_ask tool", () => {
 });
 
 function registerSessionAskTool() {
-  let registeredTool: Parameters<ExtensionAPI["registerTool"]>[0] | undefined;
+  let registeredTool: ToolDefinition | undefined;
 
   sessionAskExtension({
-    registerTool(tool: Parameters<ExtensionAPI["registerTool"]>[0]) {
+    registerTool(tool: ToolDefinition) {
       registeredTool = tool;
     },
   } as unknown as ExtensionAPI);

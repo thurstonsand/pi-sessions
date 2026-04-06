@@ -22,7 +22,7 @@ beforeEach(() => {
 });
 
 describe("session handoff extension", () => {
-  it("registers standalone prompt-editor integration on session lifecycle events by default", async () => {
+  it("registers standalone prompt-editor integration on session_start by default", async () => {
     const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const registerCommand = vi.fn();
@@ -42,12 +42,8 @@ describe("session handoff extension", () => {
     );
 
     const sessionStartHandler = handlers.get("session_start");
-    const sessionSwitchHandler = handlers.get("session_switch");
-    const sessionForkHandler = handlers.get("session_fork");
     const beforeAgentStartHandler = handlers.get("before_agent_start");
     expect(sessionStartHandler).toBeDefined();
-    expect(sessionSwitchHandler).toBeDefined();
-    expect(sessionForkHandler).toBeDefined();
     expect(beforeAgentStartHandler).toBeDefined();
 
     const setEditorComponent = vi.fn();
@@ -57,11 +53,17 @@ describe("session handoff extension", () => {
       cwd: "/repo/app",
       hasUI: true,
       ui: { setEditorComponent, setWidget, onTerminalInput },
-      sessionManager: { getSessionFile: () => "/tmp/current.jsonl" },
+      sessionManager: { getSessionFile: () => "/tmp/current.jsonl", getEntries: () => [] },
     };
-    await sessionStartHandler?.({}, editorContext);
-    await sessionSwitchHandler?.({}, editorContext);
-    await sessionForkHandler?.({}, editorContext);
+    await sessionStartHandler?.({ reason: "startup" }, editorContext);
+    await sessionStartHandler?.(
+      { reason: "new", previousSessionFile: "/tmp/previous.jsonl" },
+      editorContext,
+    );
+    await sessionStartHandler?.(
+      { reason: "fork", previousSessionFile: "/tmp/previous.jsonl" },
+      editorContext,
+    );
     expect(setEditorComponent).toHaveBeenCalledTimes(3);
     expect(setWidget).toHaveBeenCalledWith("pi-sessions.session-autocomplete", undefined);
     expect(mockConnectPowerlineHandoffAutocomplete).not.toHaveBeenCalled();
@@ -109,7 +111,7 @@ describe("session handoff extension", () => {
       cwd: "/repo/app",
       hasUI: true,
       ui: { setEditorComponent, setWidget, notify, onTerminalInput },
-      sessionManager: { getSessionFile: () => "/tmp/current.jsonl" },
+      sessionManager: { getSessionFile: () => "/tmp/current.jsonl", getEntries: () => [] },
     };
 
     await sessionStartHandler?.({}, editorContext);
@@ -148,10 +150,11 @@ describe("session handoff extension", () => {
       cwd: "/repo/app",
       hasUI: true,
       ui: { setEditorComponent, setWidget, notify, onTerminalInput },
-      sessionManager: { getSessionFile: () => "/tmp/current.jsonl" },
+      sessionManager: { getSessionFile: () => "/tmp/current.jsonl", getEntries: () => [] },
     };
 
     await sessionStartHandler?.({}, editorContext);
+    await Promise.resolve();
 
     expect(mockConnectPowerlineHandoffAutocomplete).toHaveBeenCalledTimes(1);
     expect(setEditorComponent).not.toHaveBeenCalled();

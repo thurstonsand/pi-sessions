@@ -8,6 +8,8 @@ Pi package for historical session discovery, follow-up questioning, deliberate s
 - `session_ask` — ask questions about one chosen session by reading the **entire session tree**
 - `/handoff <goal>` — generate a structured handoff draft, review it, and start a fresh child session
 - `/session-index` — small control panel for index status and explicit full reindex
+- `/retitle` — regenerate the current session title on demand
+- automatic session titling — generates and refreshes titles every N turns using a lightweight LLM call
 - hook-driven freshness for future sessions after the first full reindex
 
 ## Current model
@@ -109,6 +111,27 @@ Use:
 - `r` — request a full rebuild
 - `Enter` / `Esc` — close
 
+## Auto-titling
+
+Sessions are automatically titled and retitled as the conversation progresses.
+
+- A lightweight LLM call generates a short, descriptive title from the active branch conversation
+- Titles refresh every N turns (default 4), configurable via `sessions.autoTitle.refreshTurns`
+- `sessions.autoTitle.model` can pin a specific `provider/modelId`; otherwise `pi-sessions` prefers a small cheap fallback list before using the current session model
+- If you manually rename the session, automatic refresh pauses until you run `/retitle`
+- Run `/retitle` to regenerate the title on demand and resume automation
+
+```json
+{
+  "sessions": {
+    "autoTitle": {
+      "refreshTurns": 4,
+      "model": "anthropic/claude-haiku-4-5"
+    }
+  }
+}
+```
+
 ## Hook-maintained future sessions
 
 After the first full reindex, future sessions stay current through hooks.
@@ -116,7 +139,7 @@ After the first full reindex, future sessions stay current through hooks.
 The package currently updates on these events:
 
 - `session_start`
-- `session_switch`
+  - handles startup, reload, new, resume, and fork lifecycle transitions
 - `tool_call`
 - `tool_result`
 - `turn_end`

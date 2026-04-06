@@ -12,7 +12,7 @@ import {
 } from "../session-search/db.js";
 import { deriveRepoRootForPath } from "../session-search/normalize.js";
 
-const SESSION_TOKEN_PREFIX = "@session:";
+export const SESSION_TOKEN_PREFIX = "@session:";
 
 export interface HandoffAutocompleteCandidate {
   value: string;

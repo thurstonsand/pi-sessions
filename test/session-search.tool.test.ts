@@ -1,6 +1,6 @@
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   initializeSchema,
@@ -122,10 +122,10 @@ describe("session_search tool", () => {
 });
 
 function registerSessionSearchTool() {
-  let registeredTool: Parameters<ExtensionAPI["registerTool"]>[0] | undefined;
+  let registeredTool: ToolDefinition | undefined;
 
   sessionSearchExtension({
-    registerTool(tool: Parameters<ExtensionAPI["registerTool"]>[0]) {
+    registerTool(tool: ToolDefinition) {
       registeredTool = tool;
     },
   } as unknown as ExtensionAPI);

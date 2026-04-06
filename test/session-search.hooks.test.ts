@@ -379,6 +379,8 @@ describe("session-search hooks", () => {
           origin: "handoff",
           goal: "Finish the handoff",
           nextTask: "Implement autocomplete",
+          initial_prompt: "Finish the handoff",
+          initial_prompt_nonce: "handoff-nonce-2",
         },
       },
     ]);

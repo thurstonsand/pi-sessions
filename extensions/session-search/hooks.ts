@@ -23,35 +23,6 @@ import { type ExtractedSessionRecord, extractSessionRecord } from "./extract.js"
 
 const TOOL_RESULT_TEXT_LIMIT = 500;
 
-const pendingChildOrigins = new Map<string, SessionOrigin[]>();
-
-export function queuePendingChildOrigin(
-  parentSessionPath: string,
-  sessionOrigin: SessionOrigin,
-): void {
-  const queue = pendingChildOrigins.get(parentSessionPath) ?? [];
-  queue.push(sessionOrigin);
-  pendingChildOrigins.set(parentSessionPath, queue);
-}
-
-export function clearPendingChildOrigin(parentSessionPath: string): void {
-  pendingChildOrigins.delete(parentSessionPath);
-}
-
-export function consumePendingChildOrigin(parentSessionPath: string): SessionOrigin | undefined {
-  const queue = pendingChildOrigins.get(parentSessionPath);
-  if (!queue || queue.length === 0) {
-    return undefined;
-  }
-
-  const sessionOrigin = queue.shift();
-  if (queue.length === 0) {
-    pendingChildOrigins.delete(parentSessionPath);
-  }
-
-  return sessionOrigin;
-}
-
 type TrackedToolName = "read" | "edit" | "write";
 
 export interface PendingToolCall {
@@ -349,9 +320,7 @@ function summarizeToolResultText(
   content: Array<TextContent | ImageContent>,
 ): string {
   const text = content
-    .filter((part): part is { type: "text"; text: string } => {
-      return part.type === "text" && typeof part.text === "string";
-    })
+    .filter((part): part is TextContent => part.type === "text" && typeof part.text === "string")
     .map((part) => part.text)
     .join("\n")
     .trim();

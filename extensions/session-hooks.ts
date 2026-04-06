@@ -1,36 +1,32 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { consumePendingChildOrigin, createSessionHookController } from "./session-search/hooks.js";
+import { createSessionHookController } from "./session-search/hooks.js";
 import { loadSettings } from "./shared/settings.js";
+
+interface SessionStartLifecycleEvent {
+  reason?: "startup" | "reload" | "new" | "resume" | "fork";
+  previousSessionFile?: string;
+}
 
 export default function sessionHooksExtension(pi: ExtensionAPI): void {
   const settings = loadSettings();
   const controller = createSessionHookController({ indexPath: settings.index.path });
 
-  pi.on("session_start", async (_event, ctx) => {
-    await controller.handleSessionStart(ctx.sessionManager.getSessionFile(), ctx.cwd);
-  });
-
-  pi.on("session_switch", async (event, ctx) => {
+  pi.on("session_start", async (event, ctx) => {
+    const { reason, previousSessionFile } = event as SessionStartLifecycleEvent;
     const sessionFile = ctx.sessionManager.getSessionFile();
-    const sessionOrigin =
-      event.reason === "new" && event.previousSessionFile
-        ? consumePendingChildOrigin(event.previousSessionFile)
-        : undefined;
 
-    await controller.handleSessionSwitch(
-      event.previousSessionFile,
-      sessionFile,
-      ctx.cwd,
-      sessionOrigin,
-    );
-  });
-
-  pi.on("session_fork", async (event, ctx) => {
-    await controller.handleSessionFork(
-      event.previousSessionFile,
-      ctx.sessionManager.getSessionFile(),
-      ctx.cwd,
-    );
+    switch (reason) {
+      case "new":
+      case "resume":
+        await controller.handleSessionSwitch(previousSessionFile, sessionFile, ctx.cwd);
+        break;
+      case "fork":
+        await controller.handleSessionFork(previousSessionFile, sessionFile, ctx.cwd);
+        break;
+      default:
+        await controller.handleSessionStart(sessionFile, ctx.cwd);
+        break;
+    }
   });
 
   pi.on("tool_call", async (event, ctx) => {

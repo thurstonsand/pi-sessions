@@ -5,6 +5,7 @@ import { type Static, Type } from "@sinclair/typebox";
 import { parseTypeBoxValue } from "./typebox.js";
 
 const DEFAULT_HANDOFF_EDITOR_MODE = "standalone" as const;
+export const DEFAULT_AUTO_TITLE_REFRESH_TURNS = 4;
 const SESSION_HANDOFF_EDITOR_MODE_SCHEMA = Type.Union([
   Type.Literal("standalone"),
   Type.Literal("powerline"),
@@ -20,12 +21,34 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
       dir: Type.Optional(Type.String()),
     }),
   ),
+  autoTitle: Type.Optional(
+    Type.Object({
+      refreshTurns: Type.Optional(Type.Integer({ minimum: 1 })),
+      model: Type.Optional(Type.String()),
+    }),
+  ),
 });
 const ROOT_SETTINGS_SCHEMA = Type.Object({
   sessions: Type.Optional(SESSION_FILE_SETTINGS_SCHEMA),
 });
 
 export type SessionHandoffEditorMode = Static<typeof SESSION_HANDOFF_EDITOR_MODE_SCHEMA>;
+
+export class ModelReference {
+  constructor(
+    readonly provider: string,
+    readonly modelId: string,
+  ) {}
+
+  toString(): string {
+    return `${this.provider}/${this.modelId}`;
+  }
+}
+
+export interface AutoTitleSettings {
+  refreshTurns: number;
+  model: ModelReference | undefined;
+}
 
 export interface SessionSettings {
   handoff: {
@@ -34,6 +57,7 @@ export interface SessionSettings {
   index: {
     path: string;
   };
+  autoTitle: AutoTitleSettings;
 }
 
 type SessionFileSettings = Static<typeof SESSION_FILE_SETTINGS_SCHEMA>;
@@ -76,6 +100,20 @@ function normalizeIndexDir(value: string | undefined): string {
   return path.normalize(expanded);
 }
 
+function parseModelReference(value: string | undefined): ModelReference | undefined {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const slashIndex = trimmed.indexOf("/");
+  if (slashIndex <= 0 || slashIndex === trimmed.length - 1) {
+    return undefined;
+  }
+
+  return new ModelReference(trimmed.slice(0, slashIndex), trimmed.slice(slashIndex + 1));
+}
+
 function loadSessionFileSettings(): SessionFileSettings {
   const globalSettings = SettingsManager.create(undefined, getAgentDir()).getGlobalSettings();
   const parsed = parseTypeBoxValue(ROOT_SETTINGS_SCHEMA, globalSettings, "Invalid settings");
@@ -91,6 +129,10 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
     },
     index: {
       path: path.join(indexDir, "index.sqlite"),
+    },
+    autoTitle: {
+      refreshTurns: fileSettings.autoTitle?.refreshTurns ?? DEFAULT_AUTO_TITLE_REFRESH_TURNS,
+      model: parseModelReference(fileSettings.autoTitle?.model),
     },
   };
 }

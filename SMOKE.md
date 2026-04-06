@@ -152,4 +152,4 @@ In a fresh unnamed session:
 - confirm a descriptive session title appears after the turn finishes
 - continue until the refresh threshold is crossed and confirm the title only changes when it meaningfully improves
 - run `/name Manual Smoke Title` and confirm future automatic retitles stop
-- run `/retitle` and confirm the session gets a fresh generated title again
+- run `/title this` and confirm the session gets a fresh generated title again

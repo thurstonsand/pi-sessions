@@ -8,7 +8,7 @@ Pi package for historical session discovery, follow-up questioning, deliberate s
 - `session_ask` — ask questions about one chosen session by reading the **entire session tree**
 - `/handoff <goal>` — generate a structured handoff draft, review it, and start a fresh child session
 - `/session-index` — small control panel for index status and explicit full reindex
-- `/retitle` — regenerate the current session title on demand
+- `/title` — generate titles for this session, a folder, or all of Pi
 - automatic session titling — generates and refreshes titles every N turns using a lightweight LLM call
 - hook-driven freshness for future sessions after the first full reindex
 
@@ -118,8 +118,11 @@ Sessions are automatically titled and retitled as the conversation progresses.
 - A lightweight LLM call generates a short, descriptive title from the active branch conversation
 - Titles refresh every N turns (default 4), configurable via `sessions.autoTitle.refreshTurns`
 - `sessions.autoTitle.model` can pin a specific `provider/modelId`; otherwise `pi-sessions` prefers a small cheap fallback list before using the current session model
-- If you manually rename the session, automatic refresh pauses until you run `/retitle`
-- Run `/retitle` to regenerate the title on demand and resume automation
+- If you manually rename the session, automatic refresh pauses until you run `/title`
+- `/title` — open an interactive wizard to retitle the current session, a folder, or all of Pi
+- `/title this` — regenerate the current session title immediately
+- `/title folder` / `/title pi` — backfill untitled sessions in the current folder or globally
+- Add `-f` to skip the confirmation wizard (e.g. `/title folder -f`)
 
 ```json
 {

@@ -51,9 +51,9 @@ describe("session auto-title extension", () => {
     sessionAutoTitleExtension(pi as never);
 
     const sessionStart = handlers.get("session_start");
-    const retitle = commands.get("retitle");
+    const title = commands.get("title");
     expect(sessionStart).toBeDefined();
-    expect(retitle).toBeDefined();
+    expect(title).toBeDefined();
 
     const currentModel = { provider: "openai", id: "gpt-5.4-mini" };
     const ctx = createRetitleContext({
@@ -66,7 +66,7 @@ describe("session auto-title extension", () => {
     });
 
     await sessionStart?.({}, ctx as never);
-    await retitle?.("", ctx as never);
+    await title?.("", ctx as never);
 
     expect(completeSimpleMock).toHaveBeenCalledTimes(1);
     expect(completeSimpleMock.mock.calls[0]?.[0]).toEqual(currentModel);
@@ -82,9 +82,9 @@ describe("session auto-title extension", () => {
     sessionAutoTitleExtension(pi as never);
 
     const sessionStart = handlers.get("session_start");
-    const retitle = commands.get("retitle");
+    const title = commands.get("title");
     expect(sessionStart).toBeDefined();
-    expect(retitle).toBeDefined();
+    expect(title).toBeDefined();
 
     const configuredModel = { provider: "google", id: "gemini-flash-lite-latest" };
     const currentModel = { provider: "openai", id: "gpt-5.4-mini" };
@@ -98,7 +98,7 @@ describe("session auto-title extension", () => {
     });
 
     await sessionStart?.({}, ctx as never);
-    await retitle?.("", ctx as never);
+    await title?.("", ctx as never);
 
     expect(completeSimpleMock).toHaveBeenCalledTimes(1);
     expect(completeSimpleMock.mock.calls[0]?.[0]).toEqual(configuredModel);

@@ -2,14 +2,16 @@ import { describe, expect, it } from "vitest";
 import { resolveAutoTitleModel } from "../extensions/session-auto-title/model.js";
 import { ModelReference } from "../extensions/shared/settings.js";
 
-function createModel(provider: string, id: string) {
+interface TestModel {
+  provider: string;
+  id: string;
+}
+
+function createModel(provider: string, id: string): TestModel {
   return { provider, id };
 }
 
-function createContext(options?: {
-  currentModel?: ReturnType<typeof createModel>;
-  availableModels?: ReturnType<typeof createModel>[];
-}) {
+function createContext(options?: { currentModel?: TestModel; availableModels?: TestModel[] }) {
   const state = {
     currentModel: options?.currentModel,
     availableModels: options?.availableModels ?? [],

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createSessionAutoTitleController } from "../extensions/session-auto-title/controller.js";
 import {
   AUTO_TITLE_STATE_CUSTOM_TYPE,
+  type AutoTitlePersistedState,
   createAutoTitleState,
 } from "../extensions/session-auto-title/state.js";
 
@@ -25,7 +26,7 @@ function createMessageEntry(
   };
 }
 
-function createCustomStateEntry(data: ReturnType<typeof createAutoTitleState>) {
+function createCustomStateEntry(data: AutoTitlePersistedState) {
   return {
     type: "custom",
     id: "custom-state-1",

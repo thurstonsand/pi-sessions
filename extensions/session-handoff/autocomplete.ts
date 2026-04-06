@@ -4,6 +4,8 @@ import {
   type AutocompleteProvider,
   type AutocompleteSuggestions,
   type EditorTheme,
+  isKeyRelease,
+  isKeyRepeat,
   matchesKey,
   type TUI,
 } from "@mariozechner/pi-tui";
@@ -22,7 +24,6 @@ type HandoffAutocompleteMode = "default" | "all";
 const SESSION_PREFIX_RE = /(?:^|[\s([{"'])@session(?::([0-9a-fA-F-]*))?$/;
 const DEFAULT_AUTOCOMPLETE_LIMIT = 8;
 const TOGGLE_SCOPE_ACTION_ID = "alt+a";
-
 interface HandoffAutocompleteDeps {
   listCandidates: typeof listHandoffAutocompleteCandidates;
 }
@@ -85,6 +86,10 @@ export function detectHandoffPrefix(
 
 export function isCanonicalSessionToken(text: string): boolean {
   return text.startsWith(SESSION_TOKEN_PREFIX);
+}
+
+export function isToggleScopeInput(data: string): boolean {
+  return matchesKey(data, TOGGLE_SCOPE_ACTION_ID) && !isKeyRepeat(data) && !isKeyRelease(data);
 }
 
 export class HandoffAutocompleteProvider
@@ -289,7 +294,7 @@ export class HandoffAutocompleteEditor extends CustomEditor {
   }
 
   override handleInput(data: string): void {
-    if (this.isHandoffAutocompleteActive() && matchesKey(data, TOGGLE_SCOPE_ACTION_ID)) {
+    if (this.isHandoffAutocompleteActive() && isToggleScopeInput(data)) {
       this.handoffProvider?.toggleIncludeAllSessions();
       refreshAutocomplete(this);
       this.syncAutocompleteStatus();

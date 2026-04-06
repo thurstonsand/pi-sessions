@@ -14,6 +14,21 @@ import { deriveRepoRootForPath } from "../session-search/normalize.js";
 
 export const SESSION_TOKEN_PREFIX = "@session:";
 
+const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", {
+  numeric: "always",
+  style: "narrow",
+});
+
+const RELATIVE_TIME_UNITS = [
+  ["year", 60 * 60 * 24 * 365],
+  ["month", 60 * 60 * 24 * 30],
+  ["week", 60 * 60 * 24 * 7],
+  ["day", 60 * 60 * 24],
+  ["hour", 60 * 60],
+  ["minute", 60],
+  ["second", 1],
+] as const;
+
 export interface HandoffAutocompleteCandidate {
   value: string;
   label: string;
@@ -56,11 +71,12 @@ export function listHandoffAutocompleteCandidates(
     const lineageRows = currentSession
       ? getLineageAutocompleteSessions(db, currentSession.sessionId, options.prefix)
       : [];
-    const defaultScopeLabel = currentRepoRoot
-      ? "current repo"
-      : currentCwd
-        ? "current cwd"
-        : undefined;
+    let defaultScopeLabel: string | undefined;
+    if (currentRepoRoot) {
+      defaultScopeLabel = "current repo";
+    } else if (currentCwd) {
+      defaultScopeLabel = "current cwd";
+    }
     const recentRows = getRecentAutocompleteSessions(db, options.prefix, undefined, {
       excludeSessionId: currentSession?.sessionId,
     });
@@ -70,12 +86,7 @@ export function listHandoffAutocompleteCandidates(
     const rows = combinePinnedRows(lineageRows, scopedRows);
 
     return {
-      candidates: rows.map((row) =>
-        buildHandoffAutocompleteCandidate(row, {
-          includeAll: options.includeAll,
-          currentCwd,
-        }),
-      ),
+      candidates: rows.map((row) => buildHandoffAutocompleteCandidate(row)),
       mode: options.includeAll ? "all" : "default",
       defaultScopeLabel,
     };
@@ -86,11 +97,10 @@ export function listHandoffAutocompleteCandidates(
 
 function buildHandoffAutocompleteCandidate(
   row: SessionLineageRow | SessionRelatedSessionRow,
-  options: { includeAll: boolean; currentCwd?: string | undefined },
 ): HandoffAutocompleteCandidate {
   const relation = getRelation(row);
   const distance = getDistance(row);
-  const label = buildCandidateLabel(row, relation, distance, options);
+  const label = buildCandidateLabel(row);
   const description = buildCandidateDescription(row);
 
   return {
@@ -103,55 +113,18 @@ function buildHandoffAutocompleteCandidate(
   };
 }
 
-function buildCandidateLabel(
-  row: SessionLineageRow,
-  relation: SessionLineageRelation | undefined,
-  distance: number | undefined,
-  options: { includeAll: boolean; currentCwd?: string | undefined },
-): string {
-  const parts: string[] = [];
-  const firstSegment = buildScopeSegment(row, relation, distance, options);
-  if (firstSegment) {
-    parts.push(firstSegment);
-  }
-
-  const sessionTitle = normalizeDisplayText(row.sessionName);
-  if (sessionTitle) {
-    parts.push(sessionTitle);
-  }
-
-  parts.push(shortSessionId(row.sessionId));
-  return parts.join(" - ");
+function buildCandidateLabel(row: SessionLineageRow): string {
+  return buildRepoLabel(row) ?? shortSessionId(row.sessionId);
 }
 
 function buildCandidateDescription(row: SessionLineageRow): string | undefined {
-  const fallback = getCandidateContextText(row);
-  if (!fallback) {
-    return undefined;
-  }
+  const parts = [
+    getCandidateContextText(row),
+    shortSessionId(row.sessionId),
+    formatRelativeModifiedAt(row.modifiedAt),
+  ].filter((part): part is string => Boolean(part));
 
-  const sessionTitle = normalizeDisplayText(row.sessionName);
-  return fallback === sessionTitle ? undefined : fallback;
-}
-
-function formatRelationLabel(
-  relation: SessionLineageRelation,
-  distance: number | undefined,
-): string {
-  switch (relation) {
-    case "parent":
-      return "parent";
-    case "child":
-      return "child";
-    case "sibling":
-      return "sibling";
-    case "ancestor":
-      return distance && distance > 1 ? `ancestor (${distance})` : "ancestor";
-    case "descendant":
-      return distance && distance > 1 ? `descendant (${distance})` : "descendant";
-    case "ancestor_sibling":
-      return distance && distance > 1 ? `ancestor sibling (${distance})` : "ancestor sibling";
-  }
+  return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
 function normalizeDisplayText(value?: string): string | undefined {
@@ -167,41 +140,49 @@ function getCandidateContextText(row: SessionLineageRow): string | undefined {
   return (
     normalizeDisplayText(row.handoffNextTask) ??
     normalizeDisplayText(row.handoffGoal) ??
+    normalizeDisplayText(row.sessionName) ??
     normalizeDisplayText(row.firstUserPrompt)
   );
 }
 
-function buildScopeSegment(
-  row: SessionLineageRow,
-  relation: SessionLineageRelation | undefined,
-  distance: number | undefined,
-  options: { includeAll: boolean; currentCwd?: string | undefined },
-): string | undefined {
-  const relationLabel = relation ? formatRelationLabel(relation, distance) : undefined;
-  const locationHint = buildLocationHint(row.cwd);
-  if (!options.includeAll) {
-    return relationLabel ?? locationHint;
+function buildRepoLabel(row: SessionLineageRow): string | undefined {
+  for (const repoRoot of row.repoRoots) {
+    const normalized = normalizeDisplayText(repoRoot);
+    if (normalized) {
+      return path.basename(normalized) || normalized;
+    }
   }
 
-  if (relationLabel && locationHint) {
-    return `${relationLabel} (${locationHint})`;
-  }
-
-  return relationLabel ?? locationHint;
-}
-
-function buildLocationHint(cwd: string): string | undefined {
-  const normalizedCwd = normalizeDisplayText(cwd);
+  const normalizedCwd = normalizeDisplayText(row.cwd);
   if (!normalizedCwd) {
     return undefined;
   }
 
-  const baseName = path.basename(normalizedCwd);
-  return baseName || normalizedCwd;
+  return path.basename(normalizedCwd) || normalizedCwd;
 }
 
 function shortSessionId(sessionId: string): string {
   return sessionId.slice(0, 8);
+}
+
+function formatRelativeModifiedAt(modifiedAt: string): string | undefined {
+  const modifiedAtMs = Date.parse(modifiedAt);
+  if (Number.isNaN(modifiedAtMs)) {
+    return undefined;
+  }
+
+  const diffSeconds = Math.round((modifiedAtMs - Date.now()) / 1000);
+  const absDiffSeconds = Math.abs(diffSeconds);
+
+  for (const [unit, secondsPerUnit] of RELATIVE_TIME_UNITS) {
+    if (absDiffSeconds >= secondsPerUnit || unit === "second") {
+      const value =
+        absDiffSeconds < secondsPerUnit
+          ? 0
+          : Math.sign(diffSeconds) * Math.floor(absDiffSeconds / secondsPerUnit);
+      return RELATIVE_TIME_FORMATTER.format(value, unit);
+    }
+  }
 }
 
 function combinePinnedRows(

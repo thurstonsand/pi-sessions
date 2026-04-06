@@ -8,7 +8,7 @@ import type {
 } from "@mariozechner/pi-coding-agent";
 import { buildSessionContext } from "@mariozechner/pi-coding-agent";
 import { type EditorTheme, Key, matchesKey, type TUI } from "@mariozechner/pi-tui";
-import { HandoffAutocompleteEditor } from "./session-handoff/autocomplete.js";
+import { HandoffAutocompleteEditor, isToggleScopeInput } from "./session-handoff/autocomplete.js";
 import { generateHandoffDraft, type HandoffDraftResult } from "./session-handoff/extract.js";
 import {
   createHandoffSessionMetadata,
@@ -309,7 +309,7 @@ async function tryPowerlineHandoffAutocomplete(
   });
 
   const unsubscribeInput = ctx.ui.onTerminalInput((data: string) => {
-    if (!matchesKey(data, "alt+a") || !connection.interaction.isActive()) {
+    if (!isToggleScopeInput(data) || !connection.interaction.isActive()) {
       return undefined;
     }
 

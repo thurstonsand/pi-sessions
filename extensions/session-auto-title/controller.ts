@@ -27,8 +27,15 @@ export interface AutoTitleTurnEndResult {
   persistedState: AutoTitlePersistedState | undefined;
 }
 
+export interface AutoRetitleStatus {
+  mode: AutoTitleMode;
+  userTurnCount: number;
+  turnsUntilAutoRetitle: number | undefined;
+}
+
 export interface SessionAutoTitleController {
   getState(): SessionAutoTitleStateSnapshot;
+  getAutoRetitleStatus(ctx: ExtensionContext): AutoRetitleStatus;
   handleSessionStart(ctx: ExtensionContext): AutoTitlePersistedState | undefined;
   handleSessionShutdown(): void;
   handleTurnEnd(ctx: ExtensionContext): AutoTitleTurnEndResult;
@@ -54,6 +61,34 @@ export function createSessionAutoTitleController(
     getState() {
       return state.snapshot();
     },
+    getAutoRetitleStatus(ctx) {
+      state.ensureAttached(ctx);
+      pauseForManualOverrideIfNeeded(state, ctx);
+
+      const userTurnCount = countUserTurns(
+        buildSessionContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getLeafId())
+          .messages,
+      );
+      if (state.persistedState.mode === "paused_manual") {
+        return {
+          mode: state.persistedState.mode,
+          userTurnCount,
+          turnsUntilAutoRetitle: undefined,
+        };
+      }
+
+      const status = resolveAutoRetitleStatus(
+        settings.refreshTurns,
+        userTurnCount,
+        ctx.sessionManager.getSessionName(),
+        state.persistedState,
+      );
+      return {
+        mode: state.persistedState.mode,
+        userTurnCount,
+        turnsUntilAutoRetitle: status.turnsUntilAutoRetitle,
+      };
+    },
     handleSessionStart(ctx) {
       state.restore(ctx);
       return pauseForManualOverrideIfNeeded(state, ctx);
@@ -73,18 +108,18 @@ export function createSessionAutoTitleController(
         ctx.sessionManager.getLeafId(),
       );
       const userTurnCount = countUserTurns(sessionContext.messages);
-      const reason = resolveAutoTriggerReason(
+      const status = resolveAutoRetitleStatus(
         settings.refreshTurns,
         userTurnCount,
         ctx.sessionManager.getSessionName(),
         state.persistedState,
       );
-      if (!reason) {
+      if (!status.reason) {
         return { plan: undefined, persistedState };
       }
 
       return {
-        plan: buildTriggerPlan(ctx, reason, userTurnCount),
+        plan: buildTriggerPlan(ctx, status.reason, userTurnCount),
         persistedState,
       };
     },
@@ -153,42 +188,49 @@ function pauseForManualOverrideIfNeeded(
 
   const currentTitle = ctx.sessionManager.getSessionName();
   const lastAutoTitle = state.persistedState.lastAutoTitle;
-
-  if (lastAutoTitle === undefined) {
-    if (!currentTitle) {
-      return undefined;
-    }
-  } else if (currentTitle === lastAutoTitle) {
+  const titleMatchesOrBothEmpty =
+    lastAutoTitle === undefined ? !currentTitle : currentTitle === lastAutoTitle;
+  if (titleMatchesOrBothEmpty) {
     return undefined;
   }
 
   state.persistedState = createAutoTitleState({
     mode: "paused_manual",
-    ...(lastAutoTitle ? { lastAutoTitle } : {}),
-    ...(state.persistedState.lastAppliedUserTurnCount
-      ? { lastAppliedUserTurnCount: state.persistedState.lastAppliedUserTurnCount }
-      : {}),
-    ...(state.persistedState.lastTrigger ? { lastTrigger: state.persistedState.lastTrigger } : {}),
+    ...(lastAutoTitle && { lastAutoTitle }),
+    ...(state.persistedState.lastAppliedUserTurnCount && {
+      lastAppliedUserTurnCount: state.persistedState.lastAppliedUserTurnCount,
+    }),
+    ...(state.persistedState.lastTrigger && { lastTrigger: state.persistedState.lastTrigger }),
   });
   return state.persistedState;
 }
 
-function resolveAutoTriggerReason(
+function resolveAutoRetitleStatus(
   refreshTurns: number,
   userTurnCount: number,
   currentTitle: string | undefined,
   persistedState: AutoTitlePersistedState,
-): AutoTitleTrigger | undefined {
+): { reason: AutoTitleTrigger | undefined; turnsUntilAutoRetitle: number } {
   if (!currentTitle && !persistedState.lastAutoTitle && userTurnCount === 1) {
-    return "initial";
+    return {
+      reason: "initial",
+      turnsUntilAutoRetitle: 0,
+    };
   }
 
   const lastAppliedUserTurnCount = persistedState.lastAppliedUserTurnCount ?? 0;
-  if (userTurnCount - lastAppliedUserTurnCount < refreshTurns) {
-    return undefined;
+  const turnsSinceLastRetitle = userTurnCount - lastAppliedUserTurnCount;
+  if (turnsSinceLastRetitle < refreshTurns) {
+    return {
+      reason: undefined,
+      turnsUntilAutoRetitle: refreshTurns - turnsSinceLastRetitle,
+    };
   }
 
-  return "periodic";
+  return {
+    reason: "periodic",
+    turnsUntilAutoRetitle: 0,
+  };
 }
 
 function buildTriggerPlan(
@@ -204,13 +246,5 @@ function buildTriggerPlan(
 }
 
 function countUserTurns(messages: Array<{ role: string }>): number {
-  let userTurnCount = 0;
-
-  for (const message of messages) {
-    if (message.role === "user") {
-      userTurnCount += 1;
-    }
-  }
-
-  return userTurnCount;
+  return messages.filter((message) => message.role === "user").length;
 }

@@ -1,10 +1,4 @@
-import {
-  type Api,
-  completeSimple,
-  type Model,
-  type TextContent,
-  type UserMessage,
-} from "@mariozechner/pi-ai";
+import type { Api, Model } from "@mariozechner/pi-ai";
 import type {
   ExtensionAPI,
   ExtensionCommandContext,
@@ -12,57 +6,76 @@ import type {
   SessionStartEvent,
   TurnEndEvent,
 } from "@mariozechner/pi-coding-agent";
-import { buildAutoTitleContext } from "./session-auto-title/context.js";
 import {
-  type AutoTitleTriggerPlan,
+  createSessionAutoTitleCommandHandler,
+  getRetitleArgumentCompletions,
+  type RetitleCommandInvocation,
+  type RetitleCommandOutcome,
+} from "./session-auto-title/command.js";
+import {
   createSessionAutoTitleController,
   type SessionAutoTitleController,
 } from "./session-auto-title/controller.js";
 import { resolveAutoTitleModel } from "./session-auto-title/model.js";
 import {
-  AUTO_TITLE_SYSTEM_PROMPT,
-  buildAutoTitlePrompt,
-  normalizeGeneratedAutoTitle,
-} from "./session-auto-title/prompt.js";
-import {
-  AUTO_TITLE_STATE_CUSTOM_TYPE,
-  type AutoTitlePersistedState,
-} from "./session-auto-title/state.js";
+  buildRetitleScopeScan,
+  notifyBulkRetitleResult,
+  persistAutoTitleState,
+  runBulkRetitle,
+  runRetitlePlan,
+} from "./session-auto-title/retitle.js";
+import { showRetitleWizard } from "./session-auto-title/wizard.js";
 import { loadSettings } from "./shared/settings.js";
 
-const AUTO_TITLE_REQUEST_TIMEOUT_MS = 15_000;
-const AUTO_TITLE_MAX_TOKENS = 64;
+export {
+  createSessionAutoTitleCommandHandler,
+  getRetitleArgumentCompletions,
+  parseRetitleCommand,
+  TITLE_USAGE,
+} from "./session-auto-title/command.js";
+
+interface TitleRunState {
+  controller: SessionAutoTitleController;
+  getSessionEpoch: () => number;
+  setInFlight: (work: Promise<void>) => void;
+  clearInFlight: () => void;
+}
 
 export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
   const settings = loadSettings();
   const controller = createSessionAutoTitleController(settings.autoTitle);
   let sessionEpoch = 0;
-  let retitleInFlight: Promise<boolean> | undefined;
+  let titleWorkInFlight: Promise<void> | undefined;
   let resolvedModel: Model<Api> | undefined;
 
-  pi.registerCommand("retitle", {
-    description: "Regenerate the current session title from the active branch",
-    handler: createSessionAutoTitleCommandHandler(async (ctx) => {
-      if (retitleInFlight) {
-        await retitleInFlight;
-      }
+  pi.registerCommand("title", {
+    description: "Generate titles for this session, this folder, or all of Pi",
+    getArgumentCompletions: getRetitleArgumentCompletions,
+    handler: createSessionAutoTitleCommandHandler(
+      async (invocation, ctx): Promise<RetitleCommandOutcome> => {
+        if (titleWorkInFlight) {
+          await titleWorkInFlight;
+        }
 
-      const work = runRetitlePlan(
-        pi,
-        controller,
-        ctx,
-        resolvedModel,
-        true,
-        undefined,
-        () => sessionEpoch,
-      )
-        .catch(() => false)
-        .finally(() => {
-          retitleInFlight = undefined;
-        });
-      retitleInFlight = work;
-      return work;
-    }),
+        const model = resolvedModel ?? resolveAutoTitleModel(ctx, settings.autoTitle.model)?.model;
+        return handleTitleInvocation(
+          pi,
+          {
+            controller,
+            getSessionEpoch: () => sessionEpoch,
+            setInFlight: (work) => {
+              titleWorkInFlight = work;
+            },
+            clearInFlight: () => {
+              titleWorkInFlight = undefined;
+            },
+          },
+          ctx,
+          model,
+          invocation,
+        );
+      },
+    ),
   });
 
   pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
@@ -75,155 +88,104 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
     const result = controller.handleTurnEnd(ctx);
     persistAutoTitleState(pi, result.persistedState);
 
-    if (!result.plan || retitleInFlight) {
+    if (!result.plan || titleWorkInFlight) {
       return;
     }
 
-    retitleInFlight = runRetitlePlan(
+    titleWorkInFlight = runRetitlePlan({
       pi,
       controller,
       ctx,
-      resolvedModel,
-      false,
-      result.plan,
-      () => sessionEpoch,
-    )
-      .catch(() => false)
+      model: resolvedModel,
+      isManual: false,
+      existingPlan: result.plan,
+      getSessionEpoch: () => sessionEpoch,
+      notifyOnSuccess: false,
+    })
+      .then(
+        () => {},
+        () => {},
+      )
       .finally(() => {
-        retitleInFlight = undefined;
+        titleWorkInFlight = undefined;
       });
   });
 
   pi.on("session_shutdown", async () => {
     sessionEpoch += 1;
     controller.handleSessionShutdown();
-    retitleInFlight = undefined;
+    titleWorkInFlight = undefined;
     resolvedModel = undefined;
   });
 }
 
-export function createSessionAutoTitleCommandHandler(
-  runRetitle: (ctx: ExtensionCommandContext) => Promise<boolean>,
-): (args: string, ctx: ExtensionCommandContext) => Promise<void> {
-  return async (args: string, ctx: ExtensionCommandContext): Promise<void> => {
-    if (args.trim()) {
-      ctx.ui.notify("Usage: /retitle", "error");
-      return;
-    }
-
-    await ctx.waitForIdle();
-
-    const didRetitle = await runRetitle(ctx);
-    if (!didRetitle) {
-      ctx.ui.notify("Session retitle failed.", "error");
-    }
-  };
-}
-
-async function runRetitlePlan(
+async function handleTitleInvocation(
   pi: ExtensionAPI,
-  controller: SessionAutoTitleController,
-  ctx: ExtensionContext,
+  state: TitleRunState,
+  ctx: ExtensionCommandContext,
   model: Model<Api> | undefined,
-  isManual: boolean,
-  existingPlan?: AutoTitleTriggerPlan,
-  getSessionEpoch?: () => number,
-): Promise<boolean> {
-  const plan = existingPlan ?? controller.handleManualRetitle(ctx);
-  if (!plan || !model) {
-    return false;
-  }
-
-  const currentEpoch = getSessionEpoch?.();
-  const generatedTitle = await generateAutoTitle(ctx, plan, model);
-  if (!generatedTitle) {
-    return false;
-  }
-
-  if (currentEpoch !== undefined && currentEpoch !== getSessionEpoch?.()) {
-    return false;
-  }
-
-  if (ctx.sessionManager.getSessionName() !== generatedTitle) {
-    pi.setSessionName(generatedTitle);
-  }
-
-  persistAutoTitleState(pi, controller.handleTitleApplied(generatedTitle, plan));
-
-  if (isManual && ctx.hasUI) {
-    ctx.ui.notify(`Retitled session: ${generatedTitle}`, "info");
-  }
-
-  return true;
-}
-
-function persistAutoTitleState(pi: ExtensionAPI, state: AutoTitlePersistedState | undefined): void {
-  if (!state) {
-    return;
-  }
-
-  pi.appendEntry(AUTO_TITLE_STATE_CUSTOM_TYPE, state);
-}
-
-async function generateAutoTitle(
-  ctx: ExtensionContext,
-  plan: AutoTitleTriggerPlan,
-  model: Model<Api>,
-): Promise<string | undefined> {
-  const titleContext = buildAutoTitleContext(
-    ctx.sessionManager.getEntries(),
-    ctx.sessionManager.getLeafId(),
-    {
-      cwd: ctx.cwd,
-      currentTitle: plan.currentTitle,
-    },
-  );
-  if (!titleContext.conversationText) {
-    return undefined;
-  }
-
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-  if (!auth.ok) {
-    return undefined;
-  }
-
-  const message: UserMessage = {
-    role: "user",
-    content: [{ type: "text", text: buildAutoTitlePrompt(titleContext, plan.reason) }],
-    timestamp: Date.now(),
+  invocation: RetitleCommandInvocation,
+): Promise<RetitleCommandOutcome> {
+  const retitleOpts = {
+    pi,
+    controller: state.controller,
+    ctx,
+    model,
+    isManual: true,
+    getSessionEpoch: state.getSessionEpoch,
   };
 
-  const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), AUTO_TITLE_REQUEST_TIMEOUT_MS);
+  const retitleCurrentSession = async (): Promise<RetitleCommandOutcome> =>
+    (await runRetitlePlan(retitleOpts)) ? "success" : "failed";
+
+  if (invocation.kind === "open-pane") {
+    if (!ctx.hasUI) {
+      return retitleCurrentSession();
+    }
+
+    return showRetitleWizard(pi, state.controller, ctx, model, state.getSessionEpoch);
+  }
+
+  if (invocation.scope === "this") {
+    return runWithInFlightTracking(state, retitleCurrentSession);
+  }
+
+  if (ctx.hasUI && !invocation.force) {
+    return showRetitleWizard(pi, state.controller, ctx, model, state.getSessionEpoch, {
+      initialInvocation: {
+        scope: invocation.scope,
+        mode: invocation.mode ?? "backfill",
+      },
+    });
+  }
+
+  const scan = await buildRetitleScopeScan(ctx, invocation.scope);
+  const mode = invocation.mode ?? "backfill";
+  return runWithInFlightTracking(state, async () => {
+    const result = await runBulkRetitle(
+      pi,
+      state.controller,
+      ctx,
+      model,
+      scan,
+      mode,
+      state.getSessionEpoch,
+    );
+    notifyBulkRetitleResult(ctx, scan, mode, result);
+    return "success";
+  });
+}
+
+async function runWithInFlightTracking(
+  state: TitleRunState,
+  work: () => Promise<RetitleCommandOutcome>,
+): Promise<RetitleCommandOutcome> {
+  const outcomePromise = work().catch(() => "failed" as const);
+  state.setInFlight(outcomePromise.then(() => {}));
 
   try {
-    const response = await completeSimple(
-      model,
-      {
-        systemPrompt: AUTO_TITLE_SYSTEM_PROMPT,
-        messages: [message],
-      },
-      {
-        ...(auth.apiKey ? { apiKey: auth.apiKey } : {}),
-        ...(auth.headers ? { headers: auth.headers } : {}),
-        maxTokens: AUTO_TITLE_MAX_TOKENS,
-        signal: abortController.signal,
-      },
-    );
-
-    if (response.stopReason === "error" || response.stopReason === "aborted") {
-      return undefined;
-    }
-
-    const responseText = response.content
-      .filter((part): part is TextContent => part.type === "text")
-      .map((part) => part.text)
-      .join("\n");
-
-    return normalizeGeneratedAutoTitle(responseText);
-  } catch {
-    return undefined;
+    return await outcomePromise;
   } finally {
-    clearTimeout(timeoutId);
+    state.clearInFlight();
   }
 }

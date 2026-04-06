@@ -6,6 +6,7 @@ import {
   detectHandoffPrefix,
   HandoffAutocompleteEditor,
   HandoffAutocompleteProvider,
+  isToggleScopeInput,
 } from "../extensions/session-handoff/autocomplete.js";
 import { listHandoffAutocompleteCandidates } from "../extensions/session-handoff/query.js";
 import {
@@ -42,6 +43,7 @@ const EDITOR_THEME: EditorTheme = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   testFs.cleanup();
 });
 
@@ -114,6 +116,13 @@ describe("session handoff autocomplete", () => {
 
     expect(completion.lines).toEqual(["Use @session:2dc89501-5e75-4c75-bc71-15c499d850b2"]);
     expect(completion.cursorCol).toBe(49);
+  });
+
+  it("treats only alt+a press events as scope toggles", () => {
+    expect(isToggleScopeInput("\x1ba")).toBe(true);
+    expect(isToggleScopeInput("\x1b[97;3u")).toBe(true);
+    expect(isToggleScopeInput("\x1b[97;3:2u")).toBe(false);
+    expect(isToggleScopeInput("\x1b[97;3:3u")).toBe(false);
   });
 
   it("toggles all-session mode with alt+a while handoff autocomplete is open", async () => {
@@ -192,6 +201,88 @@ describe("session handoff autocomplete", () => {
     });
 
     editor.handleInput("\x1ba");
+  });
+
+  it("ignores alt+a repeat and release events while handoff autocomplete is open", async () => {
+    const listCandidates = vi.fn().mockImplementation((options: { includeAll: boolean }) => {
+      return options.includeAll
+        ? {
+            mode: "all",
+            defaultScopeLabel: "current repo",
+            candidates: [
+              {
+                value: "@session:all-session",
+                label: "All session - all-sess",
+                description: "Other task",
+                sessionId: "all-session",
+              },
+            ],
+          }
+        : {
+            mode: "default",
+            defaultScopeLabel: "current repo",
+            candidates: [
+              {
+                value: "@session:lineage-session",
+                label: "parent - Lineage session - lineage-",
+                description: "Continue current work",
+                sessionId: "lineage-session",
+              },
+            ],
+          };
+    });
+
+    const setAutocompleteStatus = vi.fn();
+    const editor = new TestHandoffAutocompleteEditor(
+      createFakeTui(),
+      EDITOR_THEME,
+      createFakeKeybindings(),
+      {
+        indexPath: "/tmp/index.sqlite",
+        getCurrentSessionPath: () => "/tmp/current.jsonl",
+        getCurrentCwd: () => "/repo/app",
+        setAutocompleteStatus,
+      },
+      { listCandidates },
+    );
+    editor.setAutocompleteProvider(createBaseProvider());
+    editor.setText("Use @session:");
+    editor.setAutocompleteVisible(true);
+
+    const provider = editor.getProvider() ?? fail("missing provider");
+    await provider.getSuggestions(
+      editor.getLines(),
+      0,
+      editor.getCursor().col,
+      createAutocompleteOptions(),
+    );
+    editor.handleInput("\x1ba");
+
+    let suggestions = await provider.getSuggestions(
+      editor.getLines(),
+      0,
+      editor.getCursor().col,
+      createAutocompleteOptions(),
+    );
+    expect(suggestions?.items[0]?.value).toBe("@session:all-session");
+
+    editor.handleInput("\x1b[97;3:2u");
+    suggestions = await provider.getSuggestions(
+      editor.getLines(),
+      0,
+      editor.getCursor().col,
+      createAutocompleteOptions(),
+    );
+    expect(suggestions?.items[0]?.value).toBe("@session:all-session");
+
+    editor.handleInput("\x1b[97;3:3u");
+    suggestions = await provider.getSuggestions(
+      editor.getLines(),
+      0,
+      editor.getCursor().col,
+      createAutocompleteOptions(),
+    );
+    expect(suggestions?.items[0]?.value).toBe("@session:all-session");
   });
 
   it("uses the current scope label when toggling back from all sessions", async () => {
@@ -347,7 +438,47 @@ describe("session handoff autocomplete", () => {
     expect(received).toEqual([{ force: false, signal }]);
   });
 
+  it("prefers the session title over the first user prompt when no handoff metadata exists", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-23T01:32:00.000Z"));
+    const dir = testFs.createTempDir();
+    const dbPath = path.join(dir, "index.sqlite");
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+
+    insertSession(
+      db,
+      {
+        sessionId: "55555555-5555-4555-8555-555555555555",
+        sessionPath: "/tmp/titled.jsonl",
+        sessionName: "Investigate autocomplete flicker",
+        firstUserPrompt: "Look into why the session picker flashes",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-23T01:20:00.000Z",
+        modifiedAt: "2026-03-23T01:30:00.000Z",
+        messageCount: 3,
+        entryCount: 4,
+      },
+      "full_reindex",
+    );
+    db.close();
+
+    const candidates = listHandoffAutocompleteCandidates({
+      prefix: "",
+      includeAll: true,
+      indexPath: dbPath,
+    });
+
+    expect(candidates.candidates[0]).toMatchObject({
+      label: "repo",
+      description: "Investigate autocomplete flicker · 55555555 · 2m ago",
+    });
+  });
+
   it("lists lineage candidates with durable goal and next-task labels", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-23T01:32:00.000Z"));
     const dir = testFs.createTempDir();
     const dbPath = path.join(dir, "index.sqlite");
     const currentSessionPath = "/tmp/current.jsonl";
@@ -452,16 +583,16 @@ describe("session handoff autocomplete", () => {
       "@session:44444444-4444-4444-8444-444444444444",
     ]);
     expect(lineageCandidates.candidates[0]).toMatchObject({
-      label: "parent - Parent session - 11111111",
-      description: "Implement autocomplete",
+      label: "repo",
+      description: "Implement autocomplete · 11111111 · 1h ago",
     });
     expect(lineageCandidates.candidates[1]).toMatchObject({
-      label: "sibling - Sibling session - 33333333",
-      description: "Triage edge cases",
+      label: "repo",
+      description: "Triage edge cases · 33333333 · 42m ago",
     });
     expect(lineageCandidates.candidates[2]).toMatchObject({
-      label: "other - 44444444",
-      description: "Unrelated goal",
+      label: "repo",
+      description: "Unrelated goal · 44444444 · 22m ago",
     });
 
     expect(allCandidates.mode).toBe("all");
@@ -471,16 +602,16 @@ describe("session handoff autocomplete", () => {
       "@session:44444444-4444-4444-8444-444444444444",
     ]);
     expect(allCandidates.candidates[0]).toMatchObject({
-      label: "parent (app) - Parent session - 11111111",
-      description: "Implement autocomplete",
+      label: "repo",
+      description: "Implement autocomplete · 11111111 · 1h ago",
     });
     expect(allCandidates.candidates[1]).toMatchObject({
-      label: "sibling (app) - Sibling session - 33333333",
-      description: "Triage edge cases",
+      label: "repo",
+      description: "Triage edge cases · 33333333 · 42m ago",
     });
     expect(allCandidates.candidates[2]).toMatchObject({
-      label: "other - 44444444",
-      description: "Unrelated goal",
+      label: "repo",
+      description: "Unrelated goal · 44444444 · 22m ago",
     });
   });
 });

@@ -53,17 +53,20 @@ extensions/                  # All source code
     refs.ts                  # @session ref resolution
     review.ts                # Preview overlay and review flow
   session-auto-title/        # Auto-titling implementation
+    command.ts               # /title command parsing, completions, handler wrapper
     context.ts               # Conversation context extraction for title generation
     controller.ts            # Turn-counting trigger logic and state machine
     model.ts                 # Model resolution for title generation
     prompt.ts                # System and user prompts, title normalization
+    retitle.ts               # Single and bulk retitle execution, scope scanning
     state.ts                 # Persisted state schema
+    wizard.ts                # Interactive TUI wizard for multi-scope retitling
   shared/
     settings.ts              # File-backed config loading and resolved runtime settings
     typebox.ts               # Shared TypeBox validation helpers
 ```
 
-Entry points are thin wrappers that register tools/commands with the Pi extension API via default exports. Business logic lives in `extensions/session-search/` and `extensions/session-handoff/`.
+Entry points are thin wrappers that register tools/commands with the Pi extension API via default exports. Business logic lives in the corresponding subdirectories (`session-search/`, `session-handoff/`, `session-auto-title/`).
 
 ## Code Style
 

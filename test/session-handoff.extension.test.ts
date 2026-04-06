@@ -122,6 +122,62 @@ describe("session handoff extension", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 
+  it("ignores alt+a repeat and release events in powerline mode", async () => {
+    mockLoadSettings.mockReturnValue({
+      handoff: { editorMode: "powerline" },
+      index: { path: "/tmp/pi-sessions/index.sqlite" },
+    });
+    const requestRefresh = vi.fn();
+    let terminalListener: ((data: string) => unknown) | undefined;
+    mockConnectPowerlineHandoffAutocomplete.mockResolvedValue({
+      disconnect: vi.fn(),
+      interaction: {
+        isActive: vi.fn().mockReturnValue(true),
+        requestRefresh,
+        subscribe: vi.fn().mockReturnValue(() => {}),
+        disconnect: vi.fn(),
+      },
+    });
+
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = {
+      events: { emit: vi.fn(), on: vi.fn() },
+      registerCommand: vi.fn(),
+      on(event: string, handler: (event: unknown, ctx?: unknown) => Promise<unknown>) {
+        handlers.set(event, handler);
+      },
+    };
+
+    sessionHandoffExtension(pi as never);
+
+    const sessionStartHandler = handlers.get("session_start");
+    const editorContext = {
+      cwd: "/repo/app",
+      hasUI: true,
+      ui: {
+        setEditorComponent: vi.fn(),
+        setWidget: vi.fn(),
+        notify: vi.fn(),
+        onTerminalInput: vi.fn().mockImplementation((listener) => {
+          terminalListener = listener;
+          return () => {};
+        }),
+      },
+      sessionManager: { getSessionFile: () => "/tmp/current.jsonl", getEntries: () => [] },
+    };
+
+    await sessionStartHandler?.({}, editorContext);
+
+    expect(terminalListener).toBeDefined();
+    expect(terminalListener?.("\x1b[97;3u")).toEqual({ consume: true });
+    expect(requestRefresh).toHaveBeenNthCalledWith(1, { includeAllSessions: true });
+
+    expect(terminalListener?.("\x1b[97;3:2u")).toBeUndefined();
+    expect(terminalListener?.("\x1b[97;3:3u")).toBeUndefined();
+    expect(requestRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it("fails loudly when powerline mode is enabled but the bridge is unavailable", async () => {
     mockLoadSettings.mockReturnValue({
       handoff: { editorMode: "powerline" },

@@ -8,7 +8,7 @@ import {
   insertSession,
   openIndexDatabase,
   setMetadata,
-} from "../extensions/session-search/db.js";
+} from "../extensions/shared/session-index/index.js";
 import { createTestFilesystem } from "./test-helpers.js";
 
 const { completeMock } = vi.hoisted(() => ({

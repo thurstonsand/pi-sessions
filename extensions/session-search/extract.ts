@@ -15,8 +15,8 @@ import {
   type HandoffSessionMetadata,
   parseHandoffSessionMetadata,
 } from "../session-handoff/metadata.js";
+import type { SessionOrigin } from "../shared/session-index/index.js";
 import { safeParseTypeBoxValue } from "../shared/typebox.js";
-import type { SessionOrigin } from "./db.js";
 import {
   deriveSessionRepoRoots,
   type FileTouchOp,

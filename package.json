@@ -49,8 +49,7 @@
     "vitest": "^4.1.2"
   },
   "dependencies": {
-    "better-sqlite3": "^12.8.0",
-    "pi-powerline-footer": "file:../pi-powerline-footer"
+    "better-sqlite3": "^12.8.0"
   },
   "peerDependencies": {
     "@mariozechner/pi-ai": ">=0.65.0",

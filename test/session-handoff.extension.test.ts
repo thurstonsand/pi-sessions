@@ -1,34 +1,43 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockLoadSettings = vi.fn();
-const mockConnectPowerlineHandoffAutocomplete = vi.fn();
+const mockOpenSessionReferencePicker = vi.fn();
 
 vi.mock("../extensions/shared/settings.js", () => ({
   loadSettings: mockLoadSettings,
 }));
 
-vi.mock("../extensions/session-handoff/powerline.js", () => ({
-  connectPowerlineHandoffAutocomplete: mockConnectPowerlineHandoffAutocomplete,
+vi.mock("../extensions/session-handoff/picker.js", () => ({
+  openSessionReferencePicker: mockOpenSessionReferencePicker,
 }));
 
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   mockLoadSettings.mockReturnValue({
-    handoff: { editorMode: "standalone" },
+    handoff: { pickerShortcut: "alt+o" },
     index: { path: "/tmp/pi-sessions/index.sqlite" },
+    autoTitle: { refreshTurns: 4, model: undefined },
   });
-  mockConnectPowerlineHandoffAutocomplete.mockResolvedValue(null);
+  mockOpenSessionReferencePicker.mockResolvedValue({ kind: "cancel" });
 });
 
 describe("session handoff extension", () => {
-  it("registers standalone prompt-editor integration on session_start by default", async () => {
+  it("registers the picker shortcut and keeps the session token system prompt note", async () => {
     const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
     const registerCommand = vi.fn();
     const pi = {
-      events: { emit: vi.fn(), on: vi.fn() },
+      appendEntry: vi.fn(),
+      sendUserMessage: vi.fn(),
       registerCommand,
+      registerShortcut: vi.fn(
+        (shortcut: string, definition: { handler: (ctx: unknown) => Promise<void> }) => {
+          shortcuts.set(shortcut, definition);
+        },
+      ),
+      events: { emit: vi.fn(), on: vi.fn() },
       on(event: string, handler: (event: unknown, ctx?: unknown) => Promise<unknown>) {
         handlers.set(event, handler);
       },
@@ -40,184 +49,110 @@ describe("session handoff extension", () => {
       "handoff",
       expect.objectContaining({ description: "Transfer context to a new focused session" }),
     );
+    expect(shortcuts.has("alt+o")).toBe(true);
 
-    const sessionStartHandler = handlers.get("session_start");
     const beforeAgentStartHandler = handlers.get("before_agent_start");
-    expect(sessionStartHandler).toBeDefined();
-    expect(beforeAgentStartHandler).toBeDefined();
-
-    const setEditorComponent = vi.fn();
-    const setWidget = vi.fn();
-    const onTerminalInput = vi.fn();
-    const editorContext = {
-      cwd: "/repo/app",
-      hasUI: true,
-      ui: { setEditorComponent, setWidget, onTerminalInput },
-      sessionManager: { getSessionFile: () => "/tmp/current.jsonl", getEntries: () => [] },
-    };
-    await sessionStartHandler?.({ reason: "startup" }, editorContext);
-    await sessionStartHandler?.(
-      { reason: "new", previousSessionFile: "/tmp/previous.jsonl" },
-      editorContext,
-    );
-    await sessionStartHandler?.(
-      { reason: "fork", previousSessionFile: "/tmp/previous.jsonl" },
-      editorContext,
-    );
-    expect(setEditorComponent).toHaveBeenCalledTimes(3);
-    expect(setWidget).toHaveBeenCalledWith("pi-sessions.session-autocomplete", undefined);
-    expect(mockConnectPowerlineHandoffAutocomplete).not.toHaveBeenCalled();
-
     await expect(beforeAgentStartHandler?.({})).resolves.toEqual({
       systemPrompt:
         "When the user references @session:<uuid>, treat it as a session token. If you call session_ask, pass only the UUID value, not the @session: prefix.",
     });
   });
 
-  it("registers through the Powerline bridge when powerline mode is enabled", async () => {
-    mockLoadSettings.mockReturnValue({
-      handoff: { editorMode: "powerline" },
-      index: { path: "/tmp/pi-sessions/index.sqlite" },
-    });
-    const disconnect = vi.fn();
-    mockConnectPowerlineHandoffAutocomplete.mockResolvedValue({
-      disconnect,
-      interaction: {
-        isActive: vi.fn().mockReturnValue(false),
-        requestRefresh: vi.fn(),
-        subscribe: vi.fn().mockReturnValue(() => {}),
-        disconnect: vi.fn(),
-      },
+  it("opens the picker from alt+o and pastes the canonical token", async () => {
+    mockOpenSessionReferencePicker.mockResolvedValue({
+      kind: "insert-session-token",
+      sessionId: "88171ce4-9021-4464-8cab-f49d04a82815",
     });
 
     const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
-    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
     const pi = {
-      events: { emit: vi.fn(), on: vi.fn() },
+      appendEntry: vi.fn(),
+      sendUserMessage: vi.fn(),
       registerCommand: vi.fn(),
-      on(event: string, handler: (event: unknown, ctx?: unknown) => Promise<unknown>) {
-        handlers.set(event, handler);
-      },
+      registerShortcut: vi.fn(
+        (shortcut: string, definition: { handler: (ctx: unknown) => Promise<void> }) => {
+          shortcuts.set(shortcut, definition);
+        },
+      ),
+      events: { emit: vi.fn(), on: vi.fn() },
+      on: vi.fn(),
     };
 
     sessionHandoffExtension(pi as never);
 
-    const sessionStartHandler = handlers.get("session_start");
-    const setEditorComponent = vi.fn();
-    const setWidget = vi.fn();
-    const notify = vi.fn();
-    const onTerminalInput = vi.fn().mockReturnValue(() => {});
-    const editorContext = {
-      cwd: "/repo/app",
+    const pasteToEditor = vi.fn();
+    await shortcuts.get("alt+o")?.handler({
       hasUI: true,
-      ui: { setEditorComponent, setWidget, notify, onTerminalInput },
-      sessionManager: { getSessionFile: () => "/tmp/current.jsonl", getEntries: () => [] },
-    };
-
-    await sessionStartHandler?.({}, editorContext);
-
-    expect(mockConnectPowerlineHandoffAutocomplete).toHaveBeenCalledTimes(1);
-    expect(onTerminalInput).toHaveBeenCalledTimes(1);
-    expect(setEditorComponent).not.toHaveBeenCalled();
-    expect(notify).not.toHaveBeenCalled();
-  });
-
-  it("ignores alt+a repeat and release events in powerline mode", async () => {
-    mockLoadSettings.mockReturnValue({
-      handoff: { editorMode: "powerline" },
-      index: { path: "/tmp/pi-sessions/index.sqlite" },
-    });
-    const requestRefresh = vi.fn();
-    let terminalListener: ((data: string) => unknown) | undefined;
-    mockConnectPowerlineHandoffAutocomplete.mockResolvedValue({
-      disconnect: vi.fn(),
-      interaction: {
-        isActive: vi.fn().mockReturnValue(true),
-        requestRefresh,
-        subscribe: vi.fn().mockReturnValue(() => {}),
-        disconnect: vi.fn(),
-      },
+      cwd: "/repo/app",
+      ui: { pasteToEditor },
+      sessionManager: { getSessionFile: () => "/tmp/current.jsonl" },
     });
 
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
-    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
-    const pi = {
-      events: { emit: vi.fn(), on: vi.fn() },
-      registerCommand: vi.fn(),
-      on(event: string, handler: (event: unknown, ctx?: unknown) => Promise<unknown>) {
-        handlers.set(event, handler);
-      },
-    };
-
-    sessionHandoffExtension(pi as never);
-
-    const sessionStartHandler = handlers.get("session_start");
-    const editorContext = {
-      cwd: "/repo/app",
-      hasUI: true,
-      ui: {
-        setEditorComponent: vi.fn(),
-        setWidget: vi.fn(),
-        notify: vi.fn(),
-        onTerminalInput: vi.fn().mockImplementation((listener) => {
-          terminalListener = listener;
-          return () => {};
-        }),
-      },
-      sessionManager: { getSessionFile: () => "/tmp/current.jsonl", getEntries: () => [] },
-    };
-
-    await sessionStartHandler?.({}, editorContext);
-
-    expect(terminalListener).toBeDefined();
-    expect(terminalListener?.("\x1b[97;3u")).toEqual({ consume: true });
-    expect(requestRefresh).toHaveBeenNthCalledWith(1, { includeAllSessions: true });
-
-    expect(terminalListener?.("\x1b[97;3:2u")).toBeUndefined();
-    expect(terminalListener?.("\x1b[97;3:3u")).toBeUndefined();
-    expect(requestRefresh).toHaveBeenCalledTimes(1);
-  });
-
-  it("fails loudly when powerline mode is enabled but the bridge is unavailable", async () => {
-    mockLoadSettings.mockReturnValue({
-      handoff: { editorMode: "powerline" },
-      index: { path: "/tmp/pi-sessions/index.sqlite" },
-    });
-    mockConnectPowerlineHandoffAutocomplete.mockResolvedValue(null);
-
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
-    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
-    const pi = {
-      events: { emit: vi.fn(), on: vi.fn() },
-      registerCommand: vi.fn(),
-      on(event: string, handler: (event: unknown, ctx?: unknown) => Promise<unknown>) {
-        handlers.set(event, handler);
-      },
-    };
-
-    sessionHandoffExtension(pi as never);
-
-    const sessionStartHandler = handlers.get("session_start");
-    const setEditorComponent = vi.fn();
-    const setWidget = vi.fn();
-    const notify = vi.fn();
-    const onTerminalInput = vi.fn();
-    const editorContext = {
-      cwd: "/repo/app",
-      hasUI: true,
-      ui: { setEditorComponent, setWidget, notify, onTerminalInput },
-      sessionManager: { getSessionFile: () => "/tmp/current.jsonl", getEntries: () => [] },
-    };
-
-    await sessionStartHandler?.({}, editorContext);
-    await Promise.resolve();
-
-    expect(mockConnectPowerlineHandoffAutocomplete).toHaveBeenCalledTimes(1);
-    expect(setEditorComponent).not.toHaveBeenCalled();
-    expect(onTerminalInput).not.toHaveBeenCalled();
-    expect(notify).toHaveBeenCalledWith(
-      'sessions.handoff.editor is set to "powerline", but the Powerline autocomplete bridge is unavailable.',
-      "error",
+    expect(mockOpenSessionReferencePicker).toHaveBeenCalledWith(
+      expect.objectContaining({ cwd: "/repo/app" }),
+      "/tmp/pi-sessions/index.sqlite",
+      "alt+o",
     );
+    expect(pasteToEditor).toHaveBeenCalledWith("@session:88171ce4-9021-4464-8cab-f49d04a82815");
+  });
+
+  it("respects a custom picker shortcut", async () => {
+    mockLoadSettings.mockReturnValue({
+      handoff: { pickerShortcut: "alt+p" },
+      index: { path: "/tmp/pi-sessions/index.sqlite" },
+      autoTitle: { refreshTurns: 4, model: undefined },
+    });
+
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
+    const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
+    const pi = {
+      appendEntry: vi.fn(),
+      sendUserMessage: vi.fn(),
+      registerCommand: vi.fn(),
+      registerShortcut: vi.fn(
+        (shortcut: string, definition: { handler: (ctx: unknown) => Promise<void> }) => {
+          shortcuts.set(shortcut, definition);
+        },
+      ),
+      events: { emit: vi.fn(), on: vi.fn() },
+      on: vi.fn(),
+    };
+
+    sessionHandoffExtension(pi as never);
+
+    expect(shortcuts.has("alt+p")).toBe(true);
+    expect(shortcuts.has("alt+o")).toBe(false);
+  });
+
+  it("does nothing when the picker is cancelled", async () => {
+    mockOpenSessionReferencePicker.mockResolvedValue({ kind: "cancel" });
+
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
+    const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
+    const pi = {
+      appendEntry: vi.fn(),
+      sendUserMessage: vi.fn(),
+      registerCommand: vi.fn(),
+      registerShortcut: vi.fn(
+        (shortcut: string, definition: { handler: (ctx: unknown) => Promise<void> }) => {
+          shortcuts.set(shortcut, definition);
+        },
+      ),
+      events: { emit: vi.fn(), on: vi.fn() },
+      on: vi.fn(),
+    };
+
+    sessionHandoffExtension(pi as never);
+
+    const pasteToEditor = vi.fn();
+    await shortcuts.get("alt+o")?.handler({
+      hasUI: true,
+      cwd: "/repo/app",
+      ui: { pasteToEditor },
+      sessionManager: { getSessionFile: () => "/tmp/current.jsonl" },
+    });
+
+    expect(pasteToEditor).not.toHaveBeenCalled();
   });
 });

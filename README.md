@@ -86,16 +86,13 @@ Behavior:
 
 The new session is created through `ctx.newSession({ parentSession })`, so the child session keeps native Pi parent linkage.
 
-### Handoff autocomplete
+### Session reference picker
 
 Behavior:
 
-- type `@session` in the editor to browse prior sessions
-- the default view pins lineage-linked sessions first, then shows recent sessions from the current repo or current cwd
-- `Alt+A` widens the list to all indexed sessions while still pinning lineage-linked sessions at the top
-- the list is scrollable rather than capped to a tiny fixed slice
-- selecting a suggestion inserts `@session:<session-id>`
-- the model sees `@session:<uuid>` tokens directly; when calling `session_ask`, it should pass only the UUID value
+- press the configured picker shortcut while drafting to open the session picker (`Alt+O` by default)
+- press the same shortcut again while the picker is focused to close it
+- find a previous session so you can insert it into your prompt for pi to reference
 
 ## `/session-index`
 
@@ -117,6 +114,7 @@ Sessions are automatically titled and retitled as the conversation progresses.
 
 - A lightweight LLM call generates a short, descriptive title from the active branch conversation
 - Titles refresh every N turns (default 4), configurable via `sessions.autoTitle.refreshTurns`
+- `sessions.handoff.pickerShortcut` can override the picker shortcut (default `alt+o`)
 - `sessions.autoTitle.model` can pin a specific `provider/modelId`; otherwise `pi-sessions` prefers a small cheap fallback list before using the current session model
 - If you manually rename the session, automatic refresh pauses until you run `/title`
 - `/title` — open an interactive wizard to retitle the current session, a folder, or all of Pi
@@ -186,7 +184,7 @@ Parameters:
 Notes:
 
 - invalid `time.after` / `time.before` values are rejected
-- `limit` defaults to `10` and must be greater than `0`
+- `limit` is optional and, when provided, must be greater than `0`
 - time filtering uses overlap with the session span from first timestamp to last timestamp
 - when called without text or file evidence, results are ordered newest-first
 - visible output is grouped by `cwd` to reduce repetition
@@ -259,7 +257,7 @@ Use session_ask with session "2dc89501-5e75-4c75-bc71-15c499d850b2" and ask what
 ### Start a focused child session
 
 ```text
-/handoff continue the session handoff autocomplete work
+/handoff continue the session reference picker work
 ```
 
 ## Development

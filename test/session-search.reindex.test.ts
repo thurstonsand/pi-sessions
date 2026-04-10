@@ -2,8 +2,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { type SessionInfo, SessionManager } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { buildSearchSessionsQuery, openIndexDatabase } from "../extensions/session-search/db.js";
 import { rebuildSessionIndex } from "../extensions/session-search/reindex.js";
+import { openIndexDatabase, searchSessions } from "../extensions/shared/session-index/index.js";
 import { createTestFilesystem } from "./test-helpers.js";
 
 const testFs = createTestFilesystem("pi-sessions-reindex-");
@@ -95,9 +95,9 @@ describe("rebuildSessionIndex", () => {
     expect(result.chunkCount).toBeGreaterThanOrEqual(3);
 
     const db = openIndexDatabase(indexPath, { create: false });
-    const sessions = buildSearchSessionsQuery(db, { limit: 10 });
-    const hits = buildSearchSessionsQuery(db, { query: "session index", limit: 10 });
-    const fileHits = buildSearchSessionsQuery(db, {
+    const sessions = searchSessions(db, { limit: 10 });
+    const hits = searchSessions(db, { query: "session index", limit: 10 });
+    const fileHits = searchSessions(db, {
       touched: ["src/index.ts"],
       repo: repoRoot,
       limit: 10,

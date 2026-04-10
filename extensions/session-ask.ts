@@ -1,14 +1,14 @@
 import { complete, type Message } from "@mariozechner/pi-ai";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
+import { type RenderedSessionTree, renderSessionTreeMarkdown } from "./session-search/extract.js";
 import {
   getIndexStatus,
   getSessionById,
   INDEX_SCHEMA_VERSION,
   openIndexDatabase,
   type SessionLineageRow,
-} from "./session-search/db.js";
-import { type RenderedSessionTree, renderSessionTreeMarkdown } from "./session-search/extract.js";
+} from "./shared/session-index/index.js";
 import { loadSettings } from "./shared/settings.js";
 
 const SESSION_ASK_SYSTEM_PROMPT = `You are analyzing a Pi coding session transcript. The transcript includes the entire session tree, including abandoned branches and summaries.

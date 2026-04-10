@@ -1,4 +1,5 @@
 import path from "node:path";
+import { parseSessionFile } from "../session-search/extract.js";
 import {
   getIndexStatus,
   getSessionById,
@@ -6,8 +7,7 @@ import {
   openIndexDatabase,
   type SessionLineageRow,
   type SessionOrigin,
-} from "../session-search/db.js";
-import { parseSessionFile } from "../session-search/extract.js";
+} from "../shared/session-index/index.js";
 
 const HANDOFF_REF_PREFIX = "@handoff/";
 const SESSION_REFERENCE_HELP =

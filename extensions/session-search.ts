@@ -2,14 +2,14 @@ import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import {
-  buildSearchSessionsQuery,
   getIndexStatus,
   INDEX_SCHEMA_VERSION,
   openIndexDatabase,
   type SearchSessionResult,
   type SearchSessionsParams,
   type SessionIndexStatus,
-} from "./session-search/db.js";
+  searchSessions,
+} from "./shared/session-index/index.js";
 import { loadSettings } from "./shared/settings.js";
 
 interface SessionSearchToolParams {
@@ -100,7 +100,7 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
 
       const db = openIndexDatabase(status.dbPath, { create: false });
       try {
-        const results = buildSearchSessionsQuery(db, buildSearchParams(params));
+        const results = searchSessions(db, buildSearchParams(params));
 
         if (results.length === 0) {
           return {

@@ -18,7 +18,7 @@ import {
   type SessionOrigin,
   setMetadata,
   upsertSession,
-} from "./db.js";
+} from "../shared/session-index/index.js";
 import { type ExtractedSessionRecord, extractSessionRecord } from "./extract.js";
 
 const TOOL_RESULT_TEXT_LIMIT = 500;

@@ -38,18 +38,24 @@ extensions/                  # All source code
   session-hooks.ts           # Hook registration entry point
   session-handoff.ts         # "/handoff" command entry point
   session-auto-title.ts      # Auto-titling extension entry point
-  session-search/            # Search/index implementation
-    db.ts                    # SQLite schema, queries, CRUD, search ranking
+  session-search/            # Session search/index implementation
     extract.ts               # JSONL parsing, tree rendering, file-touch extraction
     reindex.ts               # Bulk index rebuild
     normalize.ts             # Path normalization and repo-root derivation
     hooks.ts                 # Hook controller and sync logic
+  shared/
+    session-index/           # Shared indexed-session backend
+      common.ts              # Shared types, schemas, and search helpers
+      schema.ts              # SQLite schema and metadata/status helpers
+      store.ts               # Session/text/file-touch writes
+      lineage.ts             # Lineage queries and materialization
+      search.ts              # Search query pipeline and ranking
+      index.ts               # Barrel export for the shared session-index module
   session-handoff/           # Handoff implementation
-    autocomplete.ts          # @session autocomplete provider
     extract.ts               # Structured extraction and draft assembly
     metadata.ts              # Session metadata resolution
-    powerline.ts             # Powerline bridge for editor integration
-    query.ts                 # Session query helpers
+    picker.ts                # Session reference picker overlay
+    query.ts                 # Session picker query helpers
     refs.ts                  # @session ref resolution
     review.ts                # Preview overlay and review flow
   session-auto-title/        # Auto-titling implementation
@@ -63,12 +69,23 @@ extensions/                  # All source code
     wizard.ts                # Interactive TUI wizard for multi-scope retitling
   shared/
     settings.ts              # File-backed config loading and resolved runtime settings
+    time.ts                  # Shared compact relative-time formatting
     typebox.ts               # Shared TypeBox validation helpers
 ```
 
 Entry points are thin wrappers that register tools/commands with the Pi extension API via default exports. Business logic lives in the corresponding subdirectories (`session-search/`, `session-handoff/`, `session-auto-title/`).
 
 ## Code Style
+
+### TypeScript Approach
+
+- Write idiomatic TypeScript for this codebase, not portable pseudocode with type annotations
+- Prefer the patterns already used in nearby files over generic framework-agnostic abstractions
+- Prefer explicit named types at module boundaries; infer obvious local variable types instead of adding noise
+- Keep modules small and cohesive; prefer locality over utility dumping grounds
+- Use plain functions and objects by default; do not introduce classes unless the existing code clearly needs them
+- Add helper abstractions only when they remove real duplication or capture a real domain concept
+- Before finishing, check: type shape clarity, unnecessary abstraction, naming quality, and consistency with nearby files
 
 ## Compatibility Policy
 
@@ -91,7 +108,7 @@ Run `npm run format` to auto-fix. Biome config is in `biome.json`.
 
 - Extension entry points: `export default function extensionName(pi: ExtensionAPI)`
 - Everything else: named exports
-- No barrel/re-export files
+- Avoid barrel/re-export files unless they are the deliberate public entrypoint for a cohesive module
 - No `export default` outside entry points
 
 ### Naming
@@ -101,6 +118,7 @@ Run `npm run format` to auto-fix. Biome config is in `biome.json`.
 - `UPPER_SNAKE_CASE` for true constants (compile-time known values)
 - Prefix unused params with underscore: `(_unused, needed) => ...`
 - Boolean variables/params: use `is`, `has`, `should` prefixes
+- Use descriptive names; avoid single-letter names except in tiny callback conventions already common in the file
 - Name functions for what they return or do — `getSessionCount`, `indexSession`
 
 ### Functions
@@ -132,12 +150,14 @@ Run `npm run format` to auto-fix. Biome config is in `biome.json`.
 ### Variables & Data
 
 - `const` by default. `let` only when reassignment is necessary. No `var`.
+- Infer local variable types when obvious; do not add annotations just to decorate
 - Prefer immutable patterns: spread over mutation, `.map()` over push-loops
 - Destructure when it improves clarity; don't destructure deeply nested structures
 - No magic numbers or strings — extract to named constants
 
 ### Control Flow
 
+- Prefer straightforward control flow over cleverness
 - Early returns to reduce nesting
 - `for...of` over index-based loops when index isn't needed
 - No `for...in` on arrays
@@ -147,8 +167,9 @@ Run `npm run format` to auto-fix. Biome config is in `biome.json`.
 
 ### Error Handling
 
+- Match the surrounding module's existing error-handling conventions exactly
 - `try`/`finally` for resource cleanup (especially `db.close()`)
-- Avoid `try`/`catch` when possible — prefer result objects
+- Avoid `try`/`catch` when possible — prefer result objects or framework-level error flow
 - Empty `catch` blocks must have a comment explaining why they're empty
 - Return error status via result objects: `{ error: true, message: "..." }`
 - Graceful degradation with meaningful fallbacks over thrown exceptions
@@ -200,9 +221,8 @@ Global settings live under `sessions.*`.
   - default DB path: `~/.pi/agent/pi-sessions/index.sqlite`
   - must be an absolute path or start with `~/`
   - read from global settings only
-- `sessions.handoff.editor`
-  - values: `standalone | powerline`
-  - default: `standalone`
+- `sessions.handoff.pickerShortcut`
+  - default: `alt+o`
   - read from global settings only
 - `sessions.autoTitle.refreshTurns`
   - minimum `1`, default `4`

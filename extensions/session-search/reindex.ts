@@ -10,7 +10,7 @@ import {
   rebuildSessionLineageRelations,
   type SessionIndexDatabase,
   setMetadata,
-} from "./db.js";
+} from "../shared/session-index/index.js";
 import { extractSessionRecord, type SearchTextChunk, type SessionFileTouch } from "./extract.js";
 
 export interface ReindexOptions {

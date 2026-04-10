@@ -25,8 +25,9 @@ beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   mockLoadSettings.mockReturnValue({
-    handoff: { editorMode: "standalone" },
+    handoff: { pickerShortcut: "alt+o" },
     index: { path: "/tmp/pi-sessions/index.sqlite" },
+    autoTitle: { refreshTurns: 4, model: undefined },
   });
   mockGenerateHandoffDraft.mockResolvedValue({
     draft: "Generated handoff draft",

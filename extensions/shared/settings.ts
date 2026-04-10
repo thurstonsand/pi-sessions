@@ -1,19 +1,15 @@
 import os from "node:os";
 import path from "node:path";
 import { getAgentDir, SettingsManager } from "@mariozechner/pi-coding-agent";
+import type { KeyId } from "@mariozechner/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 import { parseTypeBoxValue } from "./typebox.js";
 
-const DEFAULT_HANDOFF_EDITOR_MODE = "standalone" as const;
 export const DEFAULT_AUTO_TITLE_REFRESH_TURNS = 4;
-const SESSION_HANDOFF_EDITOR_MODE_SCHEMA = Type.Union([
-  Type.Literal("standalone"),
-  Type.Literal("powerline"),
-]);
 const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
   handoff: Type.Optional(
     Type.Object({
-      editor: Type.Optional(SESSION_HANDOFF_EDITOR_MODE_SCHEMA),
+      pickerShortcut: Type.Optional(Type.String()),
     }),
   ),
   index: Type.Optional(
@@ -31,8 +27,6 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
 const ROOT_SETTINGS_SCHEMA = Type.Object({
   sessions: Type.Optional(SESSION_FILE_SETTINGS_SCHEMA),
 });
-
-export type SessionHandoffEditorMode = Static<typeof SESSION_HANDOFF_EDITOR_MODE_SCHEMA>;
 
 export class ModelReference {
   constructor(
@@ -52,7 +46,7 @@ export interface AutoTitleSettings {
 
 export interface SessionSettings {
   handoff: {
-    editorMode: SessionHandoffEditorMode;
+    pickerShortcut: KeyId;
   };
   index: {
     path: string;
@@ -100,6 +94,11 @@ function normalizeIndexDir(value: string | undefined): string {
   return path.normalize(expanded);
 }
 
+function normalizePickerShortcut(value: string | undefined): KeyId {
+  const trimmed = value?.trim();
+  return (trimmed ? trimmed : "alt+o") as KeyId;
+}
+
 function parseModelReference(value: string | undefined): ModelReference | undefined {
   const trimmed = value?.trim();
   if (!trimmed) {
@@ -125,7 +124,7 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
 
   return {
     handoff: {
-      editorMode: fileSettings.handoff?.editor ?? DEFAULT_HANDOFF_EDITOR_MODE,
+      pickerShortcut: normalizePickerShortcut(fileSettings.handoff?.pickerShortcut),
     },
     index: {
       path: path.join(indexDir, "index.sqlite"),

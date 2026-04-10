@@ -5,8 +5,8 @@ import {
   type Theme,
 } from "@mariozechner/pi-coding-agent";
 import { type Focusable, matchesKey, visibleWidth } from "@mariozechner/pi-tui";
-import { getIndexStatus, type SessionIndexStatus } from "./session-search/db.js";
 import { type ReindexResult, rebuildSessionIndex } from "./session-search/reindex.js";
+import { getIndexStatus, type SessionIndexStatus } from "./shared/session-index/index.js";
 import { loadSettings } from "./shared/settings.js";
 
 type SessionIndexAction = "reindex" | undefined;

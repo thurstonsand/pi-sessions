@@ -1,13 +1,13 @@
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { createSessionHookController } from "../extensions/session-search/hooks.js";
 import {
-  buildSearchSessionsQuery,
   getMetadata,
   initializeSchema,
   openIndexDatabase,
+  searchSessions,
   setMetadata,
-} from "../extensions/session-search/db.js";
-import { createSessionHookController } from "../extensions/session-search/hooks.js";
+} from "../extensions/shared/session-index/index.js";
 import { createTestFilesystem } from "./test-helpers.js";
 
 const testFs = createTestFilesystem("pi-sessions-hooks-");
@@ -263,12 +263,12 @@ describe("session-search hooks", () => {
     expect(await controller.handleSessionShutdown(sessionTwoPath, cwd)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
-    const touchedHits = buildSearchSessionsQuery(indexedDb, {
+    const touchedHits = searchSessions(indexedDb, {
       repo: repoRoot,
       touched: ["src/index.ts"],
       limit: 10,
     });
-    const recentSessions = buildSearchSessionsQuery(indexedDb, { limit: 10 });
+    const recentSessions = searchSessions(indexedDb, { limit: 10 });
     const lastHookEvent = getMetadata(indexedDb, "hook_last_event");
     indexedDb.close();
 
@@ -463,11 +463,11 @@ describe("session-search hooks", () => {
     expect(await controller.handleSessionCompact(sessionPath, cwd)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
-    const textHits = buildSearchSessionsQuery(indexedDb, {
+    const textHits = searchSessions(indexedDb, {
       query: "Compaction summary indexed",
       limit: 10,
     });
-    const fileHits = buildSearchSessionsQuery(indexedDb, {
+    const fileHits = searchSessions(indexedDb, {
       touched: ["docs/tree.md"],
       repo: repoRoot,
       limit: 10,

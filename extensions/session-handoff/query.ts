@@ -1,64 +1,78 @@
-import path from "node:path";
 import {
   getIndexStatus,
-  getLineageAutocompleteSessions,
-  getRecentAutocompleteSessions,
+  getLineageSessions,
   getSessionByPath,
   INDEX_SCHEMA_VERSION,
   openIndexDatabase,
+  type SearchSessionResult,
+  type SessionIndexDatabase,
   type SessionLineageRelation,
-  type SessionLineageRow,
-  type SessionRelatedSessionRow,
-} from "../session-search/db.js";
-import { deriveRepoRootForPath } from "../session-search/normalize.js";
+  searchSessions,
+} from "../shared/session-index/index.js";
+import { formatCompactRelativeTime } from "../shared/time.js";
 
 export const SESSION_TOKEN_PREFIX = "@session:";
 
-const RELATIVE_TIME_FORMATTER = new Intl.RelativeTimeFormat("en", {
-  numeric: "always",
-  style: "narrow",
-});
+const MAX_TREE_DEPTH = 3;
 
-const RELATIVE_TIME_UNITS = [
-  ["year", 60 * 60 * 24 * 365],
-  ["month", 60 * 60 * 24 * 30],
-  ["week", 60 * 60 * 24 * 7],
-  ["day", 60 * 60 * 24],
-  ["hour", 60 * 60],
-  ["minute", 60],
-  ["second", 1],
-] as const;
-
-export interface HandoffAutocompleteCandidate {
-  value: string;
-  label: string;
-  description?: string | undefined;
-  sessionId: string;
-  relation?: SessionLineageRelation | undefined;
-  distance?: number | undefined;
+interface SessionPickerPresentationContext {
+  currentSessionId?: string | undefined;
+  relationBySessionId: Map<string, SessionLineageRelation>;
 }
 
-export interface ListHandoffAutocompleteCandidatesOptions {
+export interface SessionPickerSessionItem {
+  kind: "session";
+  sessionId: string;
+  token: string;
+  title: string;
+  marker: string;
+  messageCount: number;
+  modifiedAtText?: string | undefined;
+  prefix: string;
+  relation?: SessionLineageRelation | "self" | undefined;
+}
+
+export interface SessionPickerNoticeItem {
+  kind: "error" | "empty";
+  title: string;
+  description?: string | undefined;
+}
+
+export type SessionPickerItem = SessionPickerSessionItem | SessionPickerNoticeItem;
+
+export interface ListSessionPickerItemsOptions {
   currentSessionPath?: string | undefined;
   currentCwd?: string | undefined;
-  prefix: string;
   includeAll: boolean;
   indexPath: string;
   limit?: number | undefined;
+  mode: "browse" | "search";
+  query?: string | undefined;
 }
 
-export interface HandoffAutocompleteQueryResult {
-  candidates: HandoffAutocompleteCandidate[];
-  mode: "default" | "all";
+export interface SessionPickerQueryResult {
+  items: SessionPickerItem[];
+  scopeMode: "default" | "all";
   defaultScopeLabel?: string | undefined;
 }
 
-export function listHandoffAutocompleteCandidates(
-  options: ListHandoffAutocompleteCandidatesOptions,
-): HandoffAutocompleteQueryResult {
+interface BrowseTreeNode {
+  result: SearchSessionResult;
+  children: BrowseTreeNode[];
+}
+
+export function listSessionPickerItems(
+  options: ListSessionPickerItemsOptions,
+): SessionPickerQueryResult {
+  const scopeMode = options.includeAll ? "all" : "default";
+  const defaultScopeLabel = options.currentCwd ? "current folder" : undefined;
   const status = getIndexStatus(options.indexPath);
   if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
-    return { candidates: [], mode: options.includeAll ? "all" : "default" };
+    return {
+      items: [buildIndexErrorItem()],
+      scopeMode,
+      defaultScopeLabel,
+    };
   }
 
   const db = openIndexDatabase(status.dbPath, { create: false });
@@ -66,28 +80,36 @@ export function listHandoffAutocompleteCandidates(
     const currentSession = options.currentSessionPath
       ? getSessionByPath(db, options.currentSessionPath)
       : undefined;
-    const currentCwd = options.currentCwd ?? currentSession?.cwd;
-    const currentRepoRoot = deriveCurrentRepoRoot(currentCwd, currentSession);
-    const lineageRows = currentSession
-      ? getLineageAutocompleteSessions(db, currentSession.sessionId, options.prefix)
-      : [];
-    let defaultScopeLabel: string | undefined;
-    if (currentRepoRoot) {
-      defaultScopeLabel = "current repo";
-    } else if (currentCwd) {
-      defaultScopeLabel = "current cwd";
+    const context = buildPresentationContext(db, currentSession?.sessionId);
+    const rankedResults = prioritizeSessionResults(
+      searchSessions(
+        db,
+        {
+          cwd: options.includeAll ? undefined : options.currentCwd,
+          query: options.mode === "search" ? options.query : undefined,
+          limit: options.limit,
+        },
+        { defaultLimit: undefined },
+      ),
+      context,
+    );
+
+    if (rankedResults.length === 0) {
+      return {
+        items: [buildEmptyResultItem(options.mode)],
+        scopeMode,
+        defaultScopeLabel,
+      };
     }
-    const recentRows = getRecentAutocompleteSessions(db, options.prefix, undefined, {
-      excludeSessionId: currentSession?.sessionId,
-    });
-    const scopedRows = options.includeAll
-      ? recentRows
-      : getScopedRecentRows(recentRows, currentRepoRoot, currentCwd);
-    const rows = combinePinnedRows(lineageRows, scopedRows);
+
+    const sessionItems =
+      options.mode === "browse"
+        ? buildBrowseSessionItems(rankedResults, context)
+        : rankedResults.map((result) => buildSessionItem(result, context));
 
     return {
-      candidates: rows.map((row) => buildHandoffAutocompleteCandidate(row)),
-      mode: options.includeAll ? "all" : "default",
+      items: sessionItems,
+      scopeMode,
       defaultScopeLabel,
     };
   } finally {
@@ -95,36 +117,146 @@ export function listHandoffAutocompleteCandidates(
   }
 }
 
-function buildHandoffAutocompleteCandidate(
-  row: SessionLineageRow | SessionRelatedSessionRow,
-): HandoffAutocompleteCandidate {
-  const relation = getRelation(row);
-  const distance = getDistance(row);
-  const label = buildCandidateLabel(row);
-  const description = buildCandidateDescription(row);
-
+function buildPresentationContext(
+  db: SessionIndexDatabase,
+  currentSessionId?: string | undefined,
+): SessionPickerPresentationContext {
   return {
-    value: `${SESSION_TOKEN_PREFIX}${row.sessionId}`,
-    label,
-    description,
-    sessionId: row.sessionId,
-    relation,
-    distance,
+    currentSessionId,
+    relationBySessionId: currentSessionId
+      ? new Map(
+          getLineageSessions(db, currentSessionId).map((row) => [row.sessionId, row.relation]),
+        )
+      : new Map<string, SessionLineageRelation>(),
   };
 }
 
-function buildCandidateLabel(row: SessionLineageRow): string {
-  return buildRepoLabel(row) ?? shortSessionId(row.sessionId);
+function prioritizeSessionResults(
+  results: SearchSessionResult[],
+  context: SessionPickerPresentationContext,
+): SearchSessionResult[] {
+  return results
+    .map((result, index) => ({ result, index }))
+    .sort((a, b) => {
+      const priorityDiff =
+        getSessionPriority(a.result, context) - getSessionPriority(b.result, context);
+      if (priorityDiff !== 0) {
+        return priorityDiff;
+      }
+
+      return a.index - b.index;
+    })
+    .map(({ result }) => result);
 }
 
-function buildCandidateDescription(row: SessionLineageRow): string | undefined {
-  const parts = [
-    getCandidateContextText(row),
-    shortSessionId(row.sessionId),
-    formatRelativeModifiedAt(row.modifiedAt),
-  ].filter((part): part is string => Boolean(part));
+function getSessionPriority(
+  result: SearchSessionResult,
+  context: SessionPickerPresentationContext,
+): number {
+  switch (getSessionRelation(result, context)) {
+    case "self":
+      return 0;
+    case "parent":
+      return 1;
+    case "child":
+      return 2;
+    case "sibling":
+      return 3;
+    case "ancestor":
+      return 4;
+    case "descendant":
+      return 5;
+    case "ancestor_sibling":
+      return 6;
+    default:
+      return 7;
+  }
+}
 
-  return parts.length > 0 ? parts.join(" · ") : undefined;
+function buildBrowseSessionItems(
+  results: SearchSessionResult[],
+  context: SessionPickerPresentationContext,
+): SessionPickerSessionItem[] {
+  const nodesById = new Map<string, BrowseTreeNode>();
+  const roots: BrowseTreeNode[] = [];
+
+  for (const result of results) {
+    nodesById.set(result.sessionId, { result, children: [] });
+  }
+
+  for (const result of results) {
+    const node = nodesById.get(result.sessionId);
+    if (!node || !result.parentSessionId) {
+      roots.push(node ?? { result, children: [] });
+      continue;
+    }
+
+    const parent = nodesById.get(result.parentSessionId);
+    if (!parent) {
+      roots.push(node);
+      continue;
+    }
+
+    parent.children.push(node);
+  }
+
+  const items: SessionPickerSessionItem[] = [];
+  roots.forEach((root, index) => {
+    flattenBrowseTree(items, root, context, 0, index === roots.length - 1);
+  });
+  return items;
+}
+
+function flattenBrowseTree(
+  items: SessionPickerSessionItem[],
+  node: BrowseTreeNode,
+  context: SessionPickerPresentationContext,
+  depth: number,
+  isLast: boolean,
+): void {
+  items.push(buildSessionItem(node.result, context, buildTreePrefix(depth, isLast)));
+
+  node.children.forEach((child, index) => {
+    flattenBrowseTree(items, child, context, depth + 1, index === node.children.length - 1);
+  });
+}
+
+function buildTreePrefix(depth: number, isLast: boolean): string {
+  if (depth <= 0) {
+    return "";
+  }
+
+  const visualDepth = Math.min(depth, MAX_TREE_DEPTH);
+  return `${"  ".repeat(Math.max(0, visualDepth - 1))}${isLast ? "└─ " : "├─ "}`;
+}
+
+function buildSessionItem(
+  result: SearchSessionResult,
+  context: SessionPickerPresentationContext,
+  prefix: string = "",
+): SessionPickerSessionItem {
+  return {
+    kind: "session",
+    sessionId: result.sessionId,
+    token: `${SESSION_TOKEN_PREFIX}${result.sessionId}`,
+    title: getSessionTitle(result),
+    marker: getSessionMarker(result, context),
+    messageCount: result.messageCount,
+    modifiedAtText: formatCompactRelativeTime(result.modifiedAt),
+    prefix,
+    relation: getSessionRelation(result, context),
+  };
+}
+
+function getSessionTitle(result: SearchSessionResult): string {
+  return (
+    normalizeDisplayText(result.sessionName) ??
+    normalizeDisplayText(result.handoffNextTask) ??
+    normalizeDisplayText(result.handoffGoal) ??
+    normalizeDisplayText(result.firstUserPrompt) ??
+    normalizeDisplayText(result.snippet) ??
+    shortSessionId(result.sessionId)
+  );
 }
 
 function normalizeDisplayText(value?: string): string | undefined {
@@ -136,110 +268,50 @@ function normalizeDisplayText(value?: string): string | undefined {
   return normalized.length > 0 ? normalized : undefined;
 }
 
-function getCandidateContextText(row: SessionLineageRow): string | undefined {
-  return (
-    normalizeDisplayText(row.handoffNextTask) ??
-    normalizeDisplayText(row.handoffGoal) ??
-    normalizeDisplayText(row.sessionName) ??
-    normalizeDisplayText(row.firstUserPrompt)
-  );
+function getSessionRelation(
+  result: SearchSessionResult,
+  context: SessionPickerPresentationContext,
+): SessionLineageRelation | "self" | undefined {
+  if (context.currentSessionId && result.sessionId === context.currentSessionId) {
+    return "self";
+  }
+
+  return context.relationBySessionId.get(result.sessionId);
 }
 
-function buildRepoLabel(row: SessionLineageRow): string | undefined {
-  for (const repoRoot of row.repoRoots) {
-    const normalized = normalizeDisplayText(repoRoot);
-    if (normalized) {
-      return path.basename(normalized) || normalized;
-    }
+function getSessionMarker(
+  result: SearchSessionResult,
+  context: SessionPickerPresentationContext,
+): string {
+  switch (getSessionRelation(result, context)) {
+    case "self":
+      return "this session";
+    case "parent":
+      return "parent";
+    case "child":
+      return "child";
+    case "sibling":
+      return "sibling";
+    default:
+      return shortSessionId(result.sessionId);
   }
-
-  const normalizedCwd = normalizeDisplayText(row.cwd);
-  if (!normalizedCwd) {
-    return undefined;
-  }
-
-  return path.basename(normalizedCwd) || normalizedCwd;
 }
 
 function shortSessionId(sessionId: string): string {
   return sessionId.slice(0, 8);
 }
 
-function formatRelativeModifiedAt(modifiedAt: string): string | undefined {
-  const modifiedAtMs = Date.parse(modifiedAt);
-  if (Number.isNaN(modifiedAtMs)) {
-    return undefined;
-  }
-
-  const diffSeconds = Math.round((modifiedAtMs - Date.now()) / 1000);
-  const absDiffSeconds = Math.abs(diffSeconds);
-
-  for (const [unit, secondsPerUnit] of RELATIVE_TIME_UNITS) {
-    if (absDiffSeconds >= secondsPerUnit || unit === "second") {
-      const value =
-        absDiffSeconds < secondsPerUnit
-          ? 0
-          : Math.sign(diffSeconds) * Math.floor(absDiffSeconds / secondsPerUnit);
-      return RELATIVE_TIME_FORMATTER.format(value, unit);
-    }
-  }
+function buildIndexErrorItem(): SessionPickerNoticeItem {
+  return {
+    kind: "error",
+    title: "Session index missing or incompatible",
+    description: "Run /session-index to rebuild it.",
+  };
 }
 
-function combinePinnedRows(
-  pinnedRows: SessionRelatedSessionRow[],
-  recentRows: SessionLineageRow[],
-): Array<SessionLineageRow | SessionRelatedSessionRow> {
-  const combined = new Map<string, SessionLineageRow | SessionRelatedSessionRow>();
-
-  for (const row of pinnedRows) {
-    combined.set(row.sessionId, row);
-  }
-
-  for (const row of recentRows) {
-    if (!combined.has(row.sessionId)) {
-      combined.set(row.sessionId, row);
-    }
-  }
-
-  return [...combined.values()];
-}
-
-function getScopedRecentRows(
-  rows: SessionLineageRow[],
-  currentRepoRoot?: string | undefined,
-  currentCwd?: string | undefined,
-): SessionLineageRow[] {
-  if (currentRepoRoot) {
-    return rows.filter((row) => row.repoRoots.includes(currentRepoRoot));
-  }
-
-  if (currentCwd) {
-    return rows.filter((row) => row.cwd === currentCwd);
-  }
-
-  return [];
-}
-
-function deriveCurrentRepoRoot(
-  currentCwd: string | undefined,
-  currentSession: SessionLineageRow | undefined,
-): string | undefined {
-  if (currentCwd) {
-    const cwdRepoRoot = deriveRepoRootForPath(currentCwd);
-    if (cwdRepoRoot) {
-      return cwdRepoRoot;
-    }
-  }
-
-  return currentSession?.repoRoots[0];
-}
-
-function getRelation(
-  row: SessionLineageRow | SessionRelatedSessionRow,
-): SessionLineageRelation | undefined {
-  return "relation" in row && typeof row.relation === "string" ? row.relation : undefined;
-}
-
-function getDistance(row: SessionLineageRow | SessionRelatedSessionRow): number | undefined {
-  return "distance" in row && typeof row.distance === "number" ? row.distance : undefined;
+function buildEmptyResultItem(mode: "browse" | "search"): SessionPickerNoticeItem {
+  return {
+    kind: "empty",
+    title: mode === "search" ? "No matches" : "No sessions",
+  };
 }

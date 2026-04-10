@@ -1,7 +1,6 @@
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  buildSearchSessionsQuery,
   clearSessionIndexedData,
   getIndexStatus,
   getMetadata,
@@ -11,9 +10,10 @@ import {
   insertSessionFileTouch,
   insertTextChunk,
   openIndexDatabase,
+  searchSessions,
   setMetadata,
   upsertSession,
-} from "../extensions/session-search/db.js";
+} from "../extensions/shared/session-index/index.js";
 import { createTestFilesystem } from "./test-helpers.js";
 
 const testFs = createTestFilesystem("pi-sessions-db-");
@@ -23,7 +23,7 @@ afterEach(() => {
 });
 
 describe("session-search db", () => {
-  it("creates schema, reports status, and filters by repo and files", () => {
+  it("creates schema, reports status, and applies repo and file filters without ranking boosts", () => {
     const dir = testFs.createTempDir();
     const dbPath = path.join(dir, "index.sqlite");
     const repoRoot = path.join(dir, "repo");
@@ -69,8 +69,8 @@ describe("session-search db", () => {
     expect(status.sessionCount).toBe(1);
 
     const searchDb = openIndexDatabase(dbPath, { create: false });
-    const repoHits = buildSearchSessionsQuery(searchDb, { repo: repoRoot, limit: 10 });
-    const fileHits = buildSearchSessionsQuery(searchDb, {
+    const repoHits = searchSessions(searchDb, { repo: repoRoot, limit: 10 });
+    const fileHits = searchSessions(searchDb, {
       touched: ["src/index.ts"],
       limit: 10,
     });
@@ -79,7 +79,8 @@ describe("session-search db", () => {
     expect(repoHits).toHaveLength(1);
     expect(fileHits).toHaveLength(1);
     expect(fileHits[0]?.matchedFiles).toEqual(["app/src/index.ts"]);
-    expect(fileHits[0]?.score).toBeGreaterThan(0);
+    expect(fileHits[0]?.score).toBe(0);
+    expect(fileHits[0]?.hitCount).toBe(0);
   });
 
   it("uses session time overlap for after/before filtering", () => {
@@ -136,16 +137,16 @@ describe("session-search db", () => {
     db.close();
 
     const searchDb = openIndexDatabase(dbPath, { create: false });
-    const overlappingHits = buildSearchSessionsQuery(searchDb, {
+    const overlappingHits = searchSessions(searchDb, {
       after: "2026-03-22T00:05:00.000Z",
       before: "2026-03-22T00:07:00.000Z",
       limit: 10,
     });
-    const afterOnlyHits = buildSearchSessionsQuery(searchDb, {
+    const afterOnlyHits = searchSessions(searchDb, {
       after: "2026-03-22T00:11:00.000Z",
       limit: 10,
     });
-    const beforeOnlyHits = buildSearchSessionsQuery(searchDb, {
+    const beforeOnlyHits = searchSessions(searchDb, {
       before: "2026-03-22T00:00:00.000Z",
       limit: 10,
     });
@@ -160,6 +161,144 @@ describe("session-search db", () => {
       "session-boundary",
     ]);
     expect(beforeOnlyHits.map((result) => result.sessionId)).toEqual(["session-overlap"]);
+  });
+
+  it("ranks UUID matches first and deduplicates canonical plus compact session-id evidence", () => {
+    const dir = testFs.createTempDir();
+    const dbPath = path.join(dir, "index.sqlite");
+    const targetId = "2dc89501-5e75-4c75-bc71-15c499d850b2";
+    const compactTargetId = targetId.replace(/-/g, "");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    insertSession(
+      db,
+      {
+        sessionId: targetId,
+        sessionPath: "/tmp/target.jsonl",
+        sessionName: "Target session",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:10:00.000Z",
+        messageCount: 3,
+        entryCount: 4,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: targetId,
+      entryId: "entry-target",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:05:00.000Z",
+      sourceKind: "assistant_text",
+      text: "autocomplete parser work",
+    });
+    insertSession(
+      db,
+      {
+        sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        sessionPath: "/tmp/other.jsonl",
+        sessionName: "Other session",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:20:00.000Z",
+        modifiedAt: "2026-03-22T00:30:00.000Z",
+        messageCount: 3,
+        entryCount: 4,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+      entryId: "entry-other",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:25:00.000Z",
+      sourceKind: "assistant_text",
+      text: "autocomplete parser work",
+    });
+    db.close();
+
+    const searchDb = openIndexDatabase(dbPath, { create: false });
+    const compactHits = searchSessions(searchDb, {
+      query: compactTargetId,
+      limit: 10,
+    });
+    const canonicalHits = searchSessions(searchDb, {
+      query: targetId,
+      limit: 10,
+    });
+    searchDb.close();
+
+    expect(compactHits[0]?.sessionId).toBe(targetId);
+    expect(compactHits[0]?.hitCount).toBe(1);
+    expect(canonicalHits[0]?.sessionId).toBe(targetId);
+    expect(canonicalHits[0]?.hitCount).toBe(1);
+  });
+
+  it("weights recency strongly for non-UUID search results", () => {
+    const dir = testFs.createTempDir();
+    const dbPath = path.join(dir, "index.sqlite");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    insertSession(
+      db,
+      {
+        sessionId: "older-session",
+        sessionPath: "/tmp/older.jsonl",
+        sessionName: "Older",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:10:00.000Z",
+        messageCount: 2,
+        entryCount: 3,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "older-session",
+      entryId: "entry-older",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:05:00.000Z",
+      sourceKind: "assistant_text",
+      text: "autocomplete parser",
+    });
+    insertSession(
+      db,
+      {
+        sessionId: "newer-session",
+        sessionPath: "/tmp/newer.jsonl",
+        sessionName: "Newer",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:20:00.000Z",
+        modifiedAt: "2026-03-22T00:30:00.000Z",
+        messageCount: 2,
+        entryCount: 3,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "newer-session",
+      entryId: "entry-newer",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:25:00.000Z",
+      sourceKind: "assistant_text",
+      text: "autocomplete parser",
+    });
+    db.close();
+
+    const searchDb = openIndexDatabase(dbPath, { create: false });
+    const hits = searchSessions(searchDb, { query: "autocomplete parser", limit: 10 });
+    searchDb.close();
+
+    expect(hits.map((result) => result.sessionId)).toEqual(["newer-session", "older-session"]);
   });
 
   it("upserts sessions and clears indexed session data", () => {

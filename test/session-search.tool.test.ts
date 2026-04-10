@@ -2,13 +2,15 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ToolDefinition } from "@mariozechner/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
+import { listSessionPickerItems } from "../extensions/session-handoff/query.js";
+import sessionSearchExtension from "../extensions/session-search.js";
 import {
   initializeSchema,
   insertSession,
+  insertTextChunk,
   openIndexDatabase,
   setMetadata,
-} from "../extensions/session-search/db.js";
-import sessionSearchExtension from "../extensions/session-search.js";
+} from "../extensions/shared/session-index/index.js";
 import { createTestFilesystem } from "./test-helpers.js";
 
 const testFs = createTestFilesystem("pi-sessions-search-tool-");
@@ -118,6 +120,96 @@ describe("session_search tool", () => {
     expect(text).not.toContain("updated:");
     expect(text).not.toContain("\n\n\n");
     expect(text).not.toContain("score:");
+  });
+
+  it("keeps autocomplete search ordering in parity with the session_search tool", async () => {
+    const agentDir = testFs.createTempDir();
+    const dir = testFs.createTempDir();
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    writeFileSync(
+      path.join(agentDir, "settings.json"),
+      `${JSON.stringify({ sessions: { index: { dir } } }, null, 2)}\n`,
+    );
+    const dbPath = path.join(dir, "index.sqlite");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    insertSession(
+      db,
+      {
+        sessionId: "older-session",
+        sessionPath: "/tmp/older.jsonl",
+        sessionName: "Older",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:10:00.000Z",
+        messageCount: 2,
+        entryCount: 2,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "older-session",
+      entryId: "entry-older",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:05:00.000Z",
+      sourceKind: "assistant_text",
+      text: "autocomplete parser",
+    });
+    insertSession(
+      db,
+      {
+        sessionId: "newer-session",
+        sessionPath: "/tmp/newer.jsonl",
+        sessionName: "Newer",
+        cwd: "/repo/app/sub",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:20:00.000Z",
+        modifiedAt: "2026-03-22T00:30:00.000Z",
+        messageCount: 2,
+        entryCount: 2,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "newer-session",
+      entryId: "entry-newer",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:25:00.000Z",
+      sourceKind: "assistant_text",
+      text: "autocomplete parser",
+    });
+    db.close();
+
+    const picker = listSessionPickerItems({
+      indexPath: dbPath,
+      currentCwd: "/repo",
+      includeAll: false,
+      mode: "search",
+      query: "autocomplete parser",
+    });
+    const autocompleteIds = picker.items.flatMap((item) =>
+      item.kind === "session" ? [item.sessionId] : [],
+    );
+
+    const tool = registerSessionSearchTool();
+    const result = await tool.execute(
+      "tool-1",
+      { cwd: "/repo", query: "autocomplete parser" },
+      undefined,
+      undefined,
+      createToolContext("/repo"),
+    );
+    const toolIds = (
+      (result.details as { results: Array<{ sessionId: string }> }).results ?? []
+    ).map((row) => row.sessionId);
+
+    expect(autocompleteIds).toEqual(["newer-session", "older-session"]);
+    expect(toolIds).toEqual(autocompleteIds);
   });
 });
 

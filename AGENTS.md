@@ -69,6 +69,7 @@ extensions/                  # All source code
     wizard.ts                # Interactive TUI wizard for multi-scope retitling
   shared/
     settings.ts              # File-backed config loading and resolved runtime settings
+    session-ui.ts            # Shared session-id and title formatting helpers for UI
     time.ts                  # Shared compact relative-time formatting
     typebox.ts               # Shared TypeBox validation helpers
 ```

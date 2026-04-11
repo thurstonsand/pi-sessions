@@ -1,4 +1,5 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import path from "node:path";
+import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-coding-agent";
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import {
@@ -10,6 +11,7 @@ import {
   type SessionIndexStatus,
   searchSessions,
 } from "./shared/session-index/index.js";
+import { formatSessionTitleOrShortId } from "./shared/session-ui.js";
 import { loadSettings } from "./shared/settings.js";
 
 interface SessionSearchToolParams {
@@ -28,9 +30,13 @@ interface SessionSearchToolParams {
 
 interface SessionSearchToolDetails {
   error: boolean;
+  params?: SessionSearchToolParams | undefined;
   results: SearchSessionResult[];
   status?: SessionIndexStatus | undefined;
 }
+
+const DEFAULT_SESSION_SEARCH_LIMIT = 6;
+const COLLAPSED_RESULT_PREVIEW_ROWS = 6;
 
 export default function sessionSearchExtension(pi: ExtensionAPI): void {
   const settings = loadSettings();
@@ -38,55 +44,93 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "session_search",
     label: "Session Search",
-    description:
-      "Search across the prebuilt Pi session index to find relevant prior sessions by text, files, repo, time, and cwd.",
+    description: "Search prior Pi sessions",
+    promptSnippet: "Use when you need to locate an earlier session to do a detailed follow-up",
+    promptGuidelines: [
+      "query is plain text only. Do not use boolean operators like OR/AND, parentheses, regex, or other search syntax",
+      "If you want alternatives, run multiple session_search calls with different queries",
+      "Once you have the right session id, switch to session_ask for questions about that session",
+    ],
     parameters: Type.Object({
       query: Type.Optional(
-        Type.String({ description: "Text to search for in indexed session content." }),
+        Type.String({
+          description: "Free-text terms to match against",
+        }),
       ),
       files: Type.Optional(
         Type.Object({
           touched: Type.Optional(
             Type.Array(
-              Type.String({ description: "Return sessions that read or changed this file path." }),
+              Type.String({
+                description: "File path touched in the session",
+              }),
             ),
           ),
         }),
       ),
       repo: Type.Optional(
-        Type.String({ description: "Limit results to sessions associated with this repo root." }),
+        Type.String({
+          description: "Git repository touched in the session",
+        }),
       ),
       cwd: Type.Optional(
-        Type.String({ description: "Limit results to sessions at or under this cwd." }),
+        Type.String({
+          description: "Directory the session was started in",
+        }),
       ),
       time: Type.Optional(
         Type.Object({
           after: Type.Optional(
             Type.String({
-              description: "Only include sessions modified on or after this ISO date/time.",
+              description: "Inclusive lower bound for session modified time, in ISO format",
             }),
           ),
           before: Type.Optional(
             Type.String({
-              description: "Only include sessions modified before this ISO date/time.",
+              description: "Inclusive upper bound for session modified time, in ISO format",
             }),
           ),
         }),
       ),
-      limit: Type.Optional(Type.Number({ description: "Maximum number of sessions to return." })),
+      limit: Type.Optional(
+        Type.Number({
+          description: "Number of matches to return",
+        }),
+      ),
     }),
-    async execute(_toolCallId, params: SessionSearchToolParams, _signal, _onUpdate, _ctx) {
+    async execute(_toolCallId, params: SessionSearchToolParams, _signal, onUpdate, ctx) {
       const validationError = validateSearchParams(params);
       if (validationError) {
+        const details: SessionSearchToolDetails = {
+          error: true,
+          params,
+          results: [],
+        };
         return {
           content: [{ type: "text", text: validationError }],
-          details: { error: true, results: [] } satisfies SessionSearchToolDetails,
+          details,
         };
       }
+
+      const progressDetails: SessionSearchToolDetails = {
+        error: false,
+        params,
+        results: [],
+      };
+      onUpdate?.({
+        content: [{ type: "text", text: "Searching sessions..." }],
+        details: progressDetails,
+      });
 
       const indexPath = settings.index.path;
       const status = getIndexStatus(indexPath);
       if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
+        const details: SessionSearchToolDetails = {
+          error: true,
+          params,
+          status,
+          results: [],
+        };
         return {
           content: [
             {
@@ -94,62 +138,80 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
               text: `Session index missing or incompatible at ${indexPath}. Run /session-index and press r to rebuild it.`,
             },
           ],
-          details: { error: true, status, results: [] } satisfies SessionSearchToolDetails,
+          details,
         };
       }
 
       const db = openIndexDatabase(status.dbPath, { create: false });
       try {
-        const results = searchSessions(db, buildSearchParams(params));
+        const results = searchSessions(db, buildSearchParams(params, ctx));
 
         if (results.length === 0) {
+          const details: SessionSearchToolDetails = {
+            error: false,
+            params,
+            status,
+            results: [],
+          };
           return {
             content: [{ type: "text", text: "No matching sessions found." }],
-            details: { error: false, status, results: [] } satisfies SessionSearchToolDetails,
+            details,
           };
         }
 
+        const details: SessionSearchToolDetails = {
+          error: false,
+          params,
+          status,
+          results,
+        };
         return {
           content: [{ type: "text", text: formatSearchResults(results) }],
-          details: { error: false, status, results } satisfies SessionSearchToolDetails,
+          details,
         };
       } finally {
         db.close();
       }
     },
-    renderResult(result, { isPartial }, theme) {
-      if (isPartial) {
-        return new Text(theme.fg("warning", "Searching sessions..."), 0, 0);
-      }
-
+    renderResult(result, { expanded, isPartial }, theme) {
       const details = result.details as SessionSearchToolDetails | undefined;
       const content = result.content[0];
       if (content?.type !== "text") {
         return new Text(theme.fg("error", "No search output"), 0, 0);
       }
 
+      if (isPartial) {
+        const lines = [theme.bold(theme.fg("warning", "Searching sessions..."))];
+        lines.push(...formatSessionSearchContextLines(details?.params, theme));
+        return new Text(lines.join("\n"), 0, 0);
+      }
+
       if (!details || details.error) {
         return new Text(theme.fg("error", content.text), 0, 0);
       }
 
+      const lines = formatSessionSearchContextLines(details.params, theme);
       if (details.results.length === 0) {
-        return new Text(theme.fg("warning", content.text), 0, 0);
+        if (lines.length > 0) lines.push("");
+        lines.push(theme.fg("warning", content.text));
+        return new Text(lines.join("\n"), 0, 0);
       }
 
-      return new Text(
-        formatSearchResults(details.results, {
-          cwd: (text) => theme.fg("accent", text),
-          primary: (text) => text,
-          secondary: (text) => theme.fg("dim", text),
-        }),
-        0,
-        0,
+      if (lines.length > 0) lines.push("");
+      lines.push(
+        ...formatSessionSearchPanelResults(details.results, details.params, expanded, theme),
       );
+      return new Text(lines.join("\n"), 0, 0);
     },
   });
 }
 
-function buildSearchParams(params: SessionSearchToolParams): SearchSessionsParams {
+function buildSearchParams(
+  params: SessionSearchToolParams,
+  ctx: ExtensionContext,
+): SearchSessionsParams {
+  const currentSessionId = ctx.sessionManager.getSessionId();
+
   return {
     query: params.query,
     touched: params.files?.touched,
@@ -157,8 +219,77 @@ function buildSearchParams(params: SessionSearchToolParams): SearchSessionsParam
     cwd: params.cwd,
     after: params.time?.after,
     before: params.time?.before,
-    limit: params.limit,
+    limit: params.limit ?? DEFAULT_SESSION_SEARCH_LIMIT,
+    excludeSessionIds: currentSessionId ? [currentSessionId] : undefined,
   };
+}
+
+function formatSessionSearchContextLines(
+  params: SessionSearchToolParams | undefined,
+  theme: Theme,
+): string[] {
+  if (!params) return [];
+
+  const lines: string[] = [];
+  if (params.query?.trim()) {
+    lines.push(theme.fg("muted", `query: ${params.query.trim()}`));
+  }
+
+  const filters: string[] = [];
+  if (params.repo?.trim()) filters.push(`repo: ${params.repo.trim()}`);
+  if (params.cwd?.trim()) filters.push(`cwd: ${params.cwd.trim()}`);
+  if (params.files?.touched?.length) filters.push(`files: ${params.files.touched.join(", ")}`);
+  if (params.time?.after?.trim()) filters.push(`after: ${params.time.after.trim()}`);
+  if (params.time?.before?.trim()) filters.push(`before: ${params.time.before.trim()}`);
+  if (params.limit !== undefined) filters.push(`limit: ${params.limit}`);
+
+  if (filters.length > 0) {
+    lines.push(theme.fg("dim", filters.join(" • ")));
+  }
+
+  if (lines.length === 0) {
+    lines.push(theme.fg("dim", "all sessions"));
+  }
+
+  return lines;
+}
+
+function formatSessionSearchPanelResults(
+  results: SearchSessionResult[],
+  params: SessionSearchToolParams | undefined,
+  expanded: boolean,
+  theme: Theme,
+): string[] {
+  const visibleResults = expanded ? results : results.slice(0, COLLAPSED_RESULT_PREVIEW_ROWS);
+  const lines = visibleResults.flatMap((result, index) => {
+    const location = formatSearchResultLocation(result.cwd);
+    const heading = `${index + 1}. ${theme.bold(formatSearchResultLabel(result))}${location ? ` ${theme.fg("dim", `(${location})`)}` : ""}`;
+    const snippet = params?.query ? formatSearchSnippet(result) : undefined;
+    return snippet ? [heading, theme.fg("dim", `  - ${snippet}`)] : [heading];
+  });
+
+  if (!expanded && results.length > visibleResults.length) {
+    lines.push(theme.fg("dim", `... ${results.length - visibleResults.length} more`));
+  }
+
+  return lines;
+}
+
+function formatSearchResultLabel(result: SearchSessionResult): string {
+  return formatSessionTitleOrShortId(result.sessionName, result.sessionId);
+}
+
+function formatSearchResultLocation(cwd: string | undefined): string | undefined {
+  if (!cwd) return undefined;
+  const base = path.basename(cwd);
+  return base || cwd;
+}
+
+function formatSearchSnippet(result: SearchSessionResult): string | undefined {
+  const snippet = result.snippet?.replace(/\s+/g, " ").trim();
+  if (!snippet) return undefined;
+  if (snippet === result.sessionName || snippet === result.cwd) return undefined;
+  return snippet;
 }
 
 interface SearchResultTextStyles {

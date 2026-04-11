@@ -94,6 +94,7 @@ describe("session auto-title extension", () => {
     });
     completeSimpleMock.mockResolvedValue({
       stopReason: "error",
+      errorMessage: "quota exceeded",
       content: [],
     });
 
@@ -103,6 +104,82 @@ describe("session auto-title extension", () => {
     expect(completeSimpleMock).toHaveBeenCalledTimes(1);
     expect(completeSimpleMock.mock.calls[0]?.[0]).toEqual(configuredModel);
     expect(ctx.ui.notify).toHaveBeenCalledWith("Session retitle failed.", "error");
+  });
+
+  it("surfaces background auto-title failures as a warning notification", async () => {
+    const { default: sessionAutoTitleExtension } = await import(
+      "../extensions/session-auto-title.js"
+    );
+    const { handlers, pi } = createExtensionApi();
+
+    sessionAutoTitleExtension(pi as never);
+
+    const sessionStart = handlers.get("session_start");
+    const turnEnd = handlers.get("turn_end");
+    expect(sessionStart).toBeDefined();
+    expect(turnEnd).toBeDefined();
+
+    const configuredModel = { provider: "google", id: "gemini-flash-lite-latest" };
+    const ctx = createRetitleContext({
+      availableModels: [configuredModel],
+      currentModel: { provider: "openai", id: "gpt-5.4-mini" },
+      hasUI: true,
+    });
+    completeSimpleMock.mockResolvedValue({
+      stopReason: "error",
+      errorMessage: "quota exceeded",
+      content: [],
+    });
+
+    await sessionStart?.({}, ctx as never);
+    await turnEnd?.({}, ctx as never);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(completeSimpleMock).toHaveBeenCalledTimes(1);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Auto-title failed: quota exceeded. Open /title for details.",
+      "warning",
+    );
+  });
+
+  it("normalizes structured provider errors into concise notifications", async () => {
+    const { default: sessionAutoTitleExtension } = await import(
+      "../extensions/session-auto-title.js"
+    );
+    const { handlers, pi } = createExtensionApi();
+
+    sessionAutoTitleExtension(pi as never);
+
+    const sessionStart = handlers.get("session_start");
+    const turnEnd = handlers.get("turn_end");
+    expect(sessionStart).toBeDefined();
+    expect(turnEnd).toBeDefined();
+
+    const configuredModel = { provider: "google", id: "gemini-flash-lite-latest" };
+    const ctx = createRetitleContext({
+      availableModels: [configuredModel],
+      currentModel: { provider: "openai", id: "gpt-5.4-mini" },
+      hasUI: true,
+    });
+    completeSimpleMock.mockResolvedValue({
+      stopReason: "error",
+      errorMessage:
+        '{"type":"error","error":{"type":"authentication_error","message":"Unauthorized: Invalid or missing API key","code":"invalid_api_key"}}',
+      content: [],
+    });
+
+    await sessionStart?.({}, ctx as never);
+    await turnEnd?.({}, ctx as never);
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Auto-title failed: authentication_error · invalid_api_key · Invalid or missing API key. Open /title for details.",
+      "warning",
+    );
   });
 });
 
@@ -129,6 +206,7 @@ function createExtensionApi() {
 function createRetitleContext(options: {
   availableModels: Array<{ provider: string; id: string }>;
   currentModel: { provider: string; id: string };
+  hasUI?: boolean;
 }) {
   const entries = [
     {
@@ -157,7 +235,7 @@ function createRetitleContext(options: {
 
   return {
     cwd: "/repo/app",
-    hasUI: false,
+    hasUI: options.hasUI ?? false,
     model: options.currentModel,
     modelRegistry: {
       getAvailable() {

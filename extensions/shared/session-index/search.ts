@@ -86,6 +86,7 @@ interface SearchFilters {
   touched: string[];
   limit: number | undefined;
   query: string | undefined;
+  excludeSessionIds: Set<string>;
 }
 
 interface FileMatchSummary {
@@ -153,6 +154,7 @@ function buildSearchFilters(params: SearchSessionsParams): SearchFilters {
     touched: sanitizeFilterValues(params.touched),
     limit: params.limit,
     query: params.query?.trim(),
+    excludeSessionIds: new Set(sanitizeFilterValues(params.excludeSessionIds)),
   };
 }
 
@@ -198,6 +200,10 @@ function applySessionFilters(
   fileMatches: Map<string, FileMatchSummary>,
 ): SessionListRow[] {
   return rows.filter((row) => {
+    if (filters.excludeSessionIds.has(row.sessionId)) {
+      return false;
+    }
+
     const repoQuery = filters.repo;
     if (
       repoQuery &&
@@ -218,7 +224,7 @@ function browseFilteredSessions(
   rows: SessionListRow[],
   fileMatches: Map<string, FileMatchSummary>,
 ): SearchSessionResult[] {
-  return rows.map((row) => buildSearchResult(row, getDefaultSearchSnippet(row), 0, 0, fileMatches));
+  return rows.map((row) => buildSearchResult(row, "", 0, 0, fileMatches));
 }
 
 function searchFilteredSessions(

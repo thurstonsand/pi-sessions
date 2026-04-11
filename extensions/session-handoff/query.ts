@@ -9,6 +9,7 @@ import {
   type SessionLineageRelation,
   searchSessions,
 } from "../shared/session-index/index.js";
+import { shortenSessionId } from "../shared/session-ui.js";
 import { formatCompactRelativeTime } from "../shared/time.js";
 
 export const SESSION_TOKEN_PREFIX = "@session:";
@@ -255,7 +256,7 @@ function getSessionTitle(result: SearchSessionResult): string {
     normalizeDisplayText(result.handoffGoal) ??
     normalizeDisplayText(result.firstUserPrompt) ??
     normalizeDisplayText(result.snippet) ??
-    shortSessionId(result.sessionId)
+    shortenSessionId(result.sessionId)
   );
 }
 
@@ -293,12 +294,8 @@ function getSessionMarker(
     case "sibling":
       return "sibling";
     default:
-      return shortSessionId(result.sessionId);
+      return shortenSessionId(result.sessionId);
   }
-}
-
-function shortSessionId(sessionId: string): string {
-  return sessionId.slice(0, 8);
 }
 
 function buildIndexErrorItem(): SessionPickerNoticeItem {

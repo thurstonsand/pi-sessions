@@ -8,12 +8,27 @@ import {
   getLatestAutoTitleState,
 } from "./state.js";
 
+export interface AutoTitleFailure {
+  at: string;
+  trigger: AutoTitleTrigger;
+  model: string;
+  message: string;
+  status?: number;
+}
+
+export function formatAutoTitleFailureSummary(failure: AutoTitleFailure): string {
+  return failure.status === undefined
+    ? failure.message
+    : `HTTP ${failure.status} · ${failure.message}`;
+}
+
 export interface SessionAutoTitleStateSnapshot {
   currentSessionFile: string | undefined;
   mode: AutoTitleMode;
   lastAutoTitle: string | undefined;
   lastAppliedUserTurnCount: number | undefined;
   lastTrigger: AutoTitleTrigger | undefined;
+  lastFailure: AutoTitleFailure | undefined;
 }
 
 export interface AutoTitleTriggerPlan {
@@ -36,16 +51,20 @@ export interface AutoRetitleStatus {
 export interface SessionAutoTitleController {
   getState(): SessionAutoTitleStateSnapshot;
   getAutoRetitleStatus(ctx: ExtensionContext): AutoRetitleStatus;
+  getLastFailure(ctx: ExtensionContext): AutoTitleFailure | undefined;
   handleSessionStart(ctx: ExtensionContext): AutoTitlePersistedState | undefined;
   handleSessionShutdown(): void;
   handleTurnEnd(ctx: ExtensionContext): AutoTitleTurnEndResult;
   handleManualRetitle(ctx: ExtensionContext): AutoTitleTriggerPlan | undefined;
   handleTitleApplied(title: string, plan: AutoTitleTriggerPlan): AutoTitlePersistedState;
+  handleTitleFailed(ctx: ExtensionContext, failure: AutoTitleFailure): boolean;
 }
 
 interface ControllerState {
   currentSessionFile: string | undefined;
   persistedState: AutoTitlePersistedState;
+  lastFailure: AutoTitleFailure | undefined;
+  lastNotifiedFailureKey: string | undefined;
   snapshot(): SessionAutoTitleStateSnapshot;
   restore(ctx: ExtensionContext): void;
   clear(): void;
@@ -88,6 +107,10 @@ export function createSessionAutoTitleController(
         userTurnCount,
         turnsUntilAutoRetitle: status.turnsUntilAutoRetitle,
       };
+    },
+    getLastFailure(ctx) {
+      state.ensureAttached(ctx);
+      return state.lastFailure;
     },
     handleSessionStart(ctx) {
       state.restore(ctx);
@@ -135,6 +158,8 @@ export function createSessionAutoTitleController(
       );
     },
     handleTitleApplied(title, plan) {
+      state.lastFailure = undefined;
+      state.lastNotifiedFailureKey = undefined;
       state.persistedState = createAutoTitleState({
         mode: "active",
         lastAutoTitle: title,
@@ -143,6 +168,18 @@ export function createSessionAutoTitleController(
       });
       return state.persistedState;
     },
+    handleTitleFailed(ctx, failure) {
+      state.ensureAttached(ctx);
+      state.lastFailure = failure;
+
+      const failureKey = formatFailureKey(failure);
+      if (failureKey === state.lastNotifiedFailureKey) {
+        return false;
+      }
+
+      state.lastNotifiedFailureKey = failureKey;
+      return true;
+    },
   };
 }
 
@@ -150,6 +187,8 @@ function createControllerState(): ControllerState {
   return {
     currentSessionFile: undefined,
     persistedState: createAutoTitleState(),
+    lastFailure: undefined,
+    lastNotifiedFailureKey: undefined,
     snapshot() {
       return {
         currentSessionFile: this.currentSessionFile,
@@ -157,16 +196,21 @@ function createControllerState(): ControllerState {
         lastAutoTitle: this.persistedState.lastAutoTitle,
         lastAppliedUserTurnCount: this.persistedState.lastAppliedUserTurnCount,
         lastTrigger: this.persistedState.lastTrigger,
+        lastFailure: this.lastFailure,
       };
     },
     restore(ctx) {
       this.currentSessionFile = ctx.sessionManager.getSessionFile();
       this.persistedState =
         getLatestAutoTitleState(ctx.sessionManager.getBranch()) ?? createAutoTitleState();
+      this.lastFailure = undefined;
+      this.lastNotifiedFailureKey = undefined;
     },
     clear() {
       this.currentSessionFile = undefined;
       this.persistedState = createAutoTitleState();
+      this.lastFailure = undefined;
+      this.lastNotifiedFailureKey = undefined;
     },
     ensureAttached(ctx) {
       if (ctx.sessionManager.getSessionFile() === this.currentSessionFile) {
@@ -247,4 +291,8 @@ function buildTriggerPlan(
 
 function countUserTurns(messages: Array<{ role: string }>): number {
   return messages.filter((message) => message.role === "user").length;
+}
+
+function formatFailureKey(failure: AutoTitleFailure): string {
+  return `${failure.model}\n${failure.status ?? ""}\n${failure.message}`;
 }

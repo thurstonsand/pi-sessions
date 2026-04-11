@@ -87,6 +87,7 @@ export interface SearchSessionsParams {
   before?: string | undefined;
   touched?: string[] | undefined;
   limit?: number | undefined;
+  excludeSessionIds?: string[] | undefined;
 }
 
 export interface SearchSessionResult {

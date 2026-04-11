@@ -1,5 +1,6 @@
 import { complete, type Message } from "@mariozechner/pi-ai";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import { type RenderedSessionTree, renderSessionTreeMarkdown } from "./session-search/extract.js";
 import {
@@ -9,15 +10,28 @@ import {
   openIndexDatabase,
   type SessionLineageRow,
 } from "./shared/session-index/index.js";
+import { formatSessionTitleOrShortId, isExactSessionId } from "./shared/session-ui.js";
 import { loadSettings } from "./shared/settings.js";
 
 const SESSION_ASK_SYSTEM_PROMPT = `You are analyzing a Pi coding session transcript. The transcript includes the entire session tree, including abandoned branches and summaries.
 
 Answer the user's question using only the session contents. Be specific and concise. Include exact file paths, decisions, and outcomes when present. If the answer is not in the session, say so clearly.`;
 
+const COLLAPSED_ANSWER_PREVIEW_ROWS = 6;
+
 interface SessionAskToolParams {
   session: string;
   question: string;
+}
+
+interface SessionAskToolDetails {
+  cancelled?: boolean | undefined;
+  error?: boolean | undefined;
+  answer?: string | undefined;
+  question?: string | undefined;
+  sessionId?: string | undefined;
+  sessionName?: string | undefined;
+  sessionPath?: string | undefined;
 }
 
 interface TextContentBlock {
@@ -31,118 +45,78 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
   pi.registerTool({
     name: "session_ask",
     label: "Session Ask",
-    description:
-      "Read an entire Pi session tree and answer a specific question about that session.",
+    description: "Interrogate a Pi session",
+    promptSnippet:
+      "Use when you have a session id and want to recall information, decisions, reasoning, etc from it",
+    promptGuidelines: ["Prefer focused follow-up questions over broad recap requests"],
     parameters: Type.Object({
       session: Type.String({
-        description: "session UUID.",
+        description: "Bare UUID for the session",
       }),
       question: Type.String({
-        description: "Question to extract from the session.",
+        description: "What to extract, verify, or explain from that session",
       }),
     }),
     async execute(_toolCallId, params: SessionAskToolParams, signal, onUpdate, ctx) {
       const sessionId = params.session.trim();
       if (!sessionId) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "session_ask requires a session id.",
-            },
-          ],
-          details: { error: true, session: params.session },
-        };
+        return errorResult("session_ask requires a session id.", { error: true });
       }
 
       const question = params.question.trim();
       if (!question) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "session_ask requires a question.",
-            },
-          ],
-          details: { error: true, session: sessionId },
-        };
+        return errorResult("session_ask requires a question.", { error: true, sessionId });
       }
 
       const resolvedTarget = resolveSessionAskTarget(sessionId, settings.index.path);
       if (!resolvedTarget.resolved) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: resolvedTarget.error ?? "Unable to resolve session id.",
-            },
-          ],
-          details: { error: true, session: sessionId, question },
-        };
+        return errorResult(resolvedTarget.error ?? "Unable to resolve session id.", {
+          error: true,
+          sessionId,
+          question,
+        });
       }
 
       if (!ctx.model) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "No active model is available for session_ask.",
-            },
-          ],
-          details: { error: true },
-        };
+        return errorResult("No active model is available for session_ask.", { error: true });
       }
 
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
       if (!auth.ok || !auth.apiKey) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `No API key is available for ${ctx.model.provider}/${ctx.model.id}.`,
-            },
-          ],
-          details: { error: true },
-        };
+        return errorResult(`No API key is available for ${ctx.model.provider}/${ctx.model.id}.`, {
+          error: true,
+        });
       }
 
+      const progressDetails: SessionAskToolDetails = {
+        question,
+        sessionId: resolvedTarget.resolved.sessionId,
+        sessionName: resolvedTarget.resolved.sessionName,
+        sessionPath: resolvedTarget.resolved.sessionPath,
+      };
       onUpdate?.({
-        content: [
-          {
-            type: "text",
-            text: [
-              `session: ${sessionId}`,
-              `session_path: ${resolvedTarget.resolved.sessionPath}`,
-              `question: ${question}`,
-            ].join("\n"),
-          },
-        ],
-        details: {
-          phase: "load",
-          sessionId: resolvedTarget.resolved.sessionId,
-        },
+        content: [{ type: "text", text: "Reading session..." }],
+        details: progressDetails,
       });
 
       let rendered: RenderedSessionTree;
       try {
         rendered = renderSessionTreeMarkdown(resolvedTarget.resolved.sessionPath);
       } catch (error) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: formatSessionAskLoadError(resolvedTarget.resolved.sessionPath, error),
-            },
-          ],
-          details: {
-            error: true,
-            session: sessionId,
-            sessionPath: resolvedTarget.resolved.sessionPath,
-            question,
-          },
-        };
+        return errorResult(formatSessionAskLoadError(resolvedTarget.resolved.sessionPath, error), {
+          error: true,
+          sessionId,
+          sessionPath: resolvedTarget.resolved.sessionPath,
+          question,
+        });
       }
 
+      const loadedDetails: SessionAskToolDetails = {
+        question,
+        sessionId: rendered.sessionId,
+        sessionName: rendered.sessionName,
+        sessionPath: resolvedTarget.resolved.sessionPath,
+      };
       onUpdate?.({
         content: [
           {
@@ -150,11 +124,7 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
             text: formatSessionAskHeader(rendered.sessionId, rendered.sessionName, question),
           },
         ],
-        details: {
-          phase: "ask",
-          sessionId: rendered.sessionId,
-          sessionName: rendered.sessionName,
-        },
+        details: loadedDetails,
       });
 
       const userMessage: Message = {
@@ -184,14 +154,18 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
       );
 
       if (response.stopReason === "aborted") {
-        return {
-          content: [{ type: "text", text: "Session ask was cancelled." }],
-          details: { cancelled: true },
-        };
+        return errorResult("Session ask was cancelled.", { cancelled: true });
       }
 
       const answer = collectTextBlocks(response.content).join("\n").trim();
 
+      const details: SessionAskToolDetails = {
+        answer,
+        sessionId: resolvedTarget.resolved.sessionId,
+        sessionName: resolvedTarget.resolved.sessionName,
+        sessionPath: resolvedTarget.resolved.sessionPath,
+        question,
+      };
       return {
         content: [
           {
@@ -202,14 +176,45 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
             ].join("\n\n"),
           },
         ],
-        details: {
-          session: sessionId,
-          sessionId: resolvedTarget.resolved.sessionId,
-          sessionName: resolvedTarget.resolved.sessionName,
-          sessionPath: resolvedTarget.resolved.sessionPath,
-          question,
-        },
+        details,
       };
+    },
+    renderResult(result, { expanded, isPartial }, theme) {
+      const details = result.details as SessionAskToolDetails | undefined;
+      const content = result.content[0];
+      if (content?.type !== "text") {
+        return new Text(theme.fg("error", "No session output"), 0, 0);
+      }
+
+      if (isPartial) {
+        const lines = [theme.bold(theme.fg("warning", "Reading session..."))];
+        if (details?.sessionId || details?.sessionName) {
+          const identity = formatSessionTitleOrShortId(details.sessionName, details.sessionId);
+          lines.push(`title: ${theme.fg("accent", identity)}`);
+        }
+        if (details?.question) {
+          lines.push(theme.fg("muted", `prompt: ${details.question}`));
+        }
+        return new Text(lines.join("\n"), 0, 0);
+      }
+
+      if (details?.cancelled) {
+        return new Text(theme.fg("warning", content.text), 0, 0);
+      }
+
+      if (details?.error) {
+        return new Text(theme.fg("error", content.text), 0, 0);
+      }
+
+      const answer = (details?.answer ?? "").trim() || "No answer generated.";
+      const identity = formatSessionTitleOrShortId(details?.sessionName, details?.sessionId);
+      const lines = [`title: ${theme.bold(identity)}`];
+      if (details?.question) {
+        lines.push(theme.fg("muted", `prompt: ${details.question}`));
+        lines.push("");
+      }
+      lines.push(...formatSessionAskAnswerPreview(answer, expanded, theme));
+      return new Text(lines.join("\n"), 0, 0);
     },
   });
 }
@@ -248,10 +253,6 @@ function resolveSessionAskTarget(
   }
 }
 
-function isExactSessionId(value: string): boolean {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-}
-
 function collectTextBlocks(content: Array<{ type: string; text?: string }>): string[] {
   return content.filter(isTextContentBlock).map((block) => block.text);
 }
@@ -262,6 +263,25 @@ function formatSessionAskHeader(sessionId: string, sessionName: string, question
     `title: ${sessionName || "[unnamed]"}`,
     `question: ${question}`,
   ].join("\n");
+}
+
+function errorResult(
+  text: string,
+  details: SessionAskToolDetails,
+): { content: Array<{ type: "text"; text: string }>; details: SessionAskToolDetails } {
+  return {
+    content: [{ type: "text", text }],
+    details,
+  };
+}
+
+function formatSessionAskAnswerPreview(answer: string, expanded: boolean, theme: Theme): string[] {
+  const lines = answer.split(/\r?\n/);
+  if (expanded || lines.length <= COLLAPSED_ANSWER_PREVIEW_ROWS) {
+    return lines;
+  }
+
+  return [...lines.slice(0, COLLAPSED_ANSWER_PREVIEW_ROWS), theme.fg("dim", "...")];
 }
 
 function formatSessionAskLoadError(sessionPath: string, error: unknown): string {

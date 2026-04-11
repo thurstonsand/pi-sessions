@@ -14,6 +14,7 @@ import {
 } from "./session-auto-title/command.js";
 import {
   createSessionAutoTitleController,
+  formatAutoTitleFailureSummary,
   type SessionAutoTitleController,
 } from "./session-auto-title/controller.js";
 import { resolveAutoTitleModel } from "./session-auto-title/model.js";
@@ -102,10 +103,20 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
       getSessionEpoch: () => sessionEpoch,
       notifyOnSuccess: false,
     })
-      .then(
-        () => {},
-        () => {},
-      )
+      .then((outcome) => {
+        if (outcome.ok) {
+          return;
+        }
+
+        const shouldNotify = controller.handleTitleFailed(ctx, outcome.failure);
+        if (shouldNotify && ctx.hasUI) {
+          ctx.ui.notify(
+            `Auto-title failed: ${formatAutoTitleFailureSummary(outcome.failure)}. Open /title for details.`,
+            "warning",
+          );
+        }
+      })
+      .catch(() => {})
       .finally(() => {
         titleWorkInFlight = undefined;
       });
@@ -135,8 +146,15 @@ async function handleTitleInvocation(
     getSessionEpoch: state.getSessionEpoch,
   };
 
-  const retitleCurrentSession = async (): Promise<RetitleCommandOutcome> =>
-    (await runRetitlePlan(retitleOpts)) ? "success" : "failed";
+  const retitleCurrentSession = async (): Promise<RetitleCommandOutcome> => {
+    const result = await runRetitlePlan(retitleOpts);
+    if (result.ok) {
+      return "success";
+    }
+
+    state.controller.handleTitleFailed(ctx, result.failure);
+    return "failed";
+  };
 
   if (invocation.kind === "open-pane") {
     if (!ctx.hasUI) {

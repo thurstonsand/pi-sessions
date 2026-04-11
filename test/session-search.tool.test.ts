@@ -122,6 +122,84 @@ describe("session_search tool", () => {
     expect(text).not.toContain("score:");
   });
 
+  it("excludes the current session from results without consuming the limit", async () => {
+    const agentDir = testFs.createTempDir();
+    const dir = testFs.createTempDir();
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    writeFileSync(
+      path.join(agentDir, "settings.json"),
+      `${JSON.stringify({ sessions: { index: { dir } } }, null, 2)}\n`,
+    );
+    const dbPath = path.join(dir, "index.sqlite");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    insertSession(
+      db,
+      {
+        sessionId: "current-session",
+        sessionPath: "/tmp/current.jsonl",
+        sessionName: "Current",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:20:00.000Z",
+        modifiedAt: "2026-03-22T00:30:00.000Z",
+        messageCount: 2,
+        entryCount: 2,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "current-session",
+      entryId: "entry-current",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:25:00.000Z",
+      sourceKind: "assistant_text",
+      text: "autocomplete parser",
+    });
+    insertSession(
+      db,
+      {
+        sessionId: "older-session",
+        sessionPath: "/tmp/older.jsonl",
+        sessionName: "Older",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:10:00.000Z",
+        messageCount: 2,
+        entryCount: 2,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "older-session",
+      entryId: "entry-older",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:05:00.000Z",
+      sourceKind: "assistant_text",
+      text: "autocomplete parser",
+    });
+    db.close();
+
+    const tool = registerSessionSearchTool();
+    const result = await tool.execute(
+      "tool-1",
+      { cwd: "/repo", query: "autocomplete parser", limit: 1 },
+      undefined,
+      undefined,
+      createToolContext("/repo", "current-session"),
+    );
+    const toolIds = (
+      (result.details as { results: Array<{ sessionId: string }> }).results ?? []
+    ).map((row) => row.sessionId);
+
+    expect(toolIds).toEqual(["older-session"]);
+  });
+
   it("keeps autocomplete search ordering in parity with the session_search tool", async () => {
     const agentDir = testFs.createTempDir();
     const dir = testFs.createTempDir();
@@ -229,6 +307,11 @@ function registerSessionSearchTool() {
   return registeredTool;
 }
 
-function createToolContext(cwd: string) {
-  return { cwd } as never;
+function createToolContext(cwd: string, sessionId = "another-session") {
+  return {
+    cwd,
+    sessionManager: {
+      getSessionId: () => sessionId,
+    },
+  } as never;
 }

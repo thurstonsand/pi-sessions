@@ -259,4 +259,36 @@ describe("session auto-title controller", () => {
       }),
     );
   });
+
+  it("tracks the latest failure and dedupes repeated notifications until success", () => {
+    const controller = createSessionAutoTitleController({
+      refreshTurns: 4,
+      model: undefined,
+    });
+    const { ctx } = createControllerContext();
+
+    const failure = {
+      at: "2026-03-23T00:00:03.000Z",
+      trigger: "periodic" as const,
+      model: "google/gemini-3-flash-preview",
+      message: "quota exceeded",
+      status: 429,
+    };
+
+    expect(controller.handleTitleFailed(ctx, failure)).toBe(true);
+    expect(controller.getLastFailure(ctx)).toEqual(failure);
+    expect(controller.getState().lastFailure).toEqual(failure);
+
+    expect(controller.handleTitleFailed(ctx, failure)).toBe(false);
+
+    const plan = controller.handleManualRetitle(ctx);
+    if (!plan) {
+      throw new Error("Expected manual retitle plan");
+    }
+
+    controller.handleTitleApplied("Recovered Title", plan);
+    expect(controller.getLastFailure(ctx)).toBeUndefined();
+
+    expect(controller.handleTitleFailed(ctx, failure)).toBe(true);
+  });
 });

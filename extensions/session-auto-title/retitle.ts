@@ -14,7 +14,11 @@ import type {
 import { SessionManager } from "@mariozechner/pi-coding-agent";
 import type { RetitleMode, RetitleScope } from "./command.js";
 import { type AutoTitleContext, buildAutoTitleContext } from "./context.js";
-import type { AutoTitleTriggerPlan, SessionAutoTitleController } from "./controller.js";
+import type {
+  AutoTitleFailure,
+  AutoTitleTriggerPlan,
+  SessionAutoTitleController,
+} from "./controller.js";
 import {
   AUTO_TITLE_SYSTEM_PROMPT,
   buildAutoTitlePrompt,
@@ -23,6 +27,7 @@ import {
 import {
   AUTO_TITLE_STATE_CUSTOM_TYPE,
   type AutoTitlePersistedState,
+  type AutoTitleTrigger,
   createAutoTitleState,
 } from "./state.js";
 
@@ -95,7 +100,7 @@ export async function runBulkRetitle(
         getSessionEpoch,
         notifyOnSuccess: false,
       });
-      result[didRetitle ? "retitled" : "failed"] += 1;
+      result[didRetitle.ok ? "retitled" : "failed"] += 1;
       continue;
     }
 
@@ -176,37 +181,68 @@ export interface RetitlePlanOptions {
   notifyOnSuccess?: boolean;
 }
 
-export async function runRetitlePlan(options: RetitlePlanOptions): Promise<boolean> {
+export type RetitlePlanResult =
+  | {
+      ok: true;
+      title: string;
+    }
+  | {
+      ok: false;
+      failure: AutoTitleFailure;
+    };
+
+export async function runRetitlePlan(options: RetitlePlanOptions): Promise<RetitlePlanResult> {
   const { pi, controller, ctx, model, isManual, existingPlan, getSessionEpoch } = options;
   const notifyOnSuccess = options.notifyOnSuccess ?? isManual;
 
   const plan = existingPlan ?? controller.handleManualRetitle(ctx);
-  if (!plan || !model) {
-    return false;
+  if (!plan) {
+    return {
+      ok: false,
+      failure: createAutoTitleFailure("manual", model, "No retitle plan available."),
+    };
+  }
+
+  if (!model) {
+    return {
+      ok: false,
+      failure: createAutoTitleFailure(
+        plan.reason,
+        model,
+        "No model available for auto-title generation.",
+      ),
+    };
   }
 
   const currentEpoch = getSessionEpoch?.();
   const generatedTitle = await generateAutoTitle(ctx, plan, model);
-  if (!generatedTitle) {
-    return false;
+  if (!generatedTitle.ok) {
+    return generatedTitle;
   }
 
   if (currentEpoch !== undefined && currentEpoch !== getSessionEpoch?.()) {
-    return false;
+    return {
+      ok: false,
+      failure: createAutoTitleFailure(
+        plan.reason,
+        model,
+        "Session changed while generating a title.",
+      ),
+    };
   }
 
-  if (ctx.sessionManager.getSessionName() !== generatedTitle) {
-    pi.setSessionName(generatedTitle);
+  if (ctx.sessionManager.getSessionName() !== generatedTitle.title) {
+    pi.setSessionName(generatedTitle.title);
   }
 
-  const persistedState = controller.handleTitleApplied(generatedTitle, plan);
+  const persistedState = controller.handleTitleApplied(generatedTitle.title, plan);
   persistAutoTitleState(pi, persistedState);
 
   if (notifyOnSuccess && isManual && ctx.hasUI) {
-    ctx.ui.notify(`Retitled session: ${generatedTitle}`, "info");
+    ctx.ui.notify(`Retitled session: ${generatedTitle.title}`, "info");
   }
 
-  return true;
+  return generatedTitle;
 }
 
 export function persistAutoTitleState(
@@ -241,24 +277,24 @@ async function retitleStoredSession(
     currentTitle,
   };
   const generatedTitle = await generateAutoTitleFromContext(ctx, plan, model, titleContext);
-  if (!generatedTitle) {
+  if (!generatedTitle.ok) {
     return "failed";
   }
 
-  if (currentTitle !== generatedTitle) {
-    sessionManager.appendSessionInfo(generatedTitle);
+  if (currentTitle !== generatedTitle.title) {
+    sessionManager.appendSessionInfo(generatedTitle.title);
   }
   sessionManager.appendCustomEntry(
     AUTO_TITLE_STATE_CUSTOM_TYPE,
     createAutoTitleState({
       mode: "active",
-      lastAutoTitle: generatedTitle,
+      lastAutoTitle: generatedTitle.title,
       lastAppliedUserTurnCount: plan.userTurnCount,
       lastTrigger: plan.reason,
     }),
   );
 
-  return currentTitle === generatedTitle ? "unchanged" : "retitled";
+  return currentTitle === generatedTitle.title ? "unchanged" : "retitled";
 }
 
 function hasSessionTitle(name: string | undefined): boolean {
@@ -269,7 +305,7 @@ async function generateAutoTitle(
   ctx: ExtensionContext,
   plan: AutoTitleTriggerPlan,
   model: Model<Api>,
-): Promise<string | undefined> {
+): Promise<RetitlePlanResult> {
   const titleContext = buildAutoTitleContext(
     ctx.sessionManager.getEntries(),
     ctx.sessionManager.getLeafId(),
@@ -286,14 +322,28 @@ async function generateAutoTitleFromContext(
   plan: AutoTitleTriggerPlan,
   model: Model<Api>,
   titleContext: AutoTitleContext,
-): Promise<string | undefined> {
+): Promise<RetitlePlanResult> {
   if (!titleContext.conversationText) {
-    return undefined;
+    return {
+      ok: false,
+      failure: createAutoTitleFailure(
+        plan.reason,
+        model,
+        "No conversation available for auto-title generation.",
+      ),
+    };
   }
 
   const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
   if (!auth.ok) {
-    return undefined;
+    return {
+      ok: false,
+      failure: createAutoTitleFailure(
+        plan.reason,
+        model,
+        "Failed to authenticate auto-title model.",
+      ),
+    };
   }
 
   const message: UserMessage = {
@@ -321,18 +371,271 @@ async function generateAutoTitleFromContext(
     );
 
     if (response.stopReason === "error" || response.stopReason === "aborted") {
-      return undefined;
+      const fallbackMessage =
+        response.stopReason === "aborted" ? "Request was aborted." : "Provider returned an error.";
+      const failureDetails = extractFailureDetails(
+        response.errorMessage || fallbackMessage,
+        response,
+      );
+      return {
+        ok: false,
+        failure: createAutoTitleFailure(
+          plan.reason,
+          model,
+          failureDetails.message,
+          failureDetails.status,
+        ),
+      };
     }
 
     const responseText = response.content
       .filter((part): part is TextContent => part.type === "text")
       .map((part) => part.text)
       .join("\n");
+    const normalizedTitle = normalizeGeneratedAutoTitle(responseText);
+    if (!normalizedTitle) {
+      return {
+        ok: false,
+        failure: createAutoTitleFailure(plan.reason, model, "Model returned an empty title."),
+      };
+    }
 
-    return normalizeGeneratedAutoTitle(responseText);
-  } catch {
-    return undefined;
+    return {
+      ok: true,
+      title: normalizedTitle,
+    };
+  } catch (error) {
+    const failureDetails = extractFailureDetails(error);
+    return {
+      ok: false,
+      failure: createAutoTitleFailure(
+        plan.reason,
+        model,
+        failureDetails.message,
+        failureDetails.status,
+      ),
+    };
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+function createAutoTitleFailure(
+  trigger: AutoTitleTrigger,
+  model: Model<Api> | undefined,
+  message: string,
+  status?: number,
+): AutoTitleFailure {
+  return {
+    at: new Date().toISOString(),
+    trigger,
+    model: formatModelLabel(model),
+    message,
+    ...(status !== undefined ? { status } : {}),
+  };
+}
+
+function formatModelLabel(model: Model<Api> | undefined): string {
+  if (!model) {
+    return "(no model resolved)";
+  }
+
+  return `${model.provider}/${model.id}`;
+}
+
+function extractFailureDetails(
+  primary: unknown,
+  secondary?: unknown,
+): { message: string; status?: number } {
+  const structured =
+    parseStructuredProviderError(primary) ??
+    parseStructuredProviderError(secondary) ??
+    parseEmbeddedErrorFromObject(primary);
+  if (structured) {
+    return structured;
+  }
+
+  const message =
+    extractStringMessage(primary) || extractStringMessage(secondary) || "Unknown provider error.";
+  const status = extractStatus(primary) ?? extractStatus(secondary);
+  return {
+    message,
+    ...(status !== undefined ? { status } : {}),
+  };
+}
+
+function parseEmbeddedErrorFromObject(
+  value: unknown,
+): { message: string; status?: number } | undefined {
+  if (!isObject(value) && !(value instanceof Error)) {
+    return undefined;
+  }
+
+  const embedded = extractStringMessage(value);
+  return embedded ? parseStructuredProviderError(embedded) : undefined;
+}
+
+function parseStructuredProviderError(
+  value: unknown,
+): { message: string; status?: number } | undefined {
+  const json = parseJsonObjectCandidate(value);
+  if (!json) {
+    return undefined;
+  }
+
+  const topError = isObject(json.error) ? json.error : undefined;
+  const status =
+    readNumericStatus(json) ??
+    readNumericStatus(topError) ??
+    (typeof topError?.code === "number" ? topError.code : undefined);
+  const rawMessage =
+    readString(topError?.message) ?? readString(json.message) ?? readString(json.errorMessage);
+  if (!rawMessage) {
+    return undefined;
+  }
+
+  const labels = collectProviderErrorLabels(json, topError);
+  return {
+    message: formatStructuredErrorMessage(labels, rawMessage),
+    ...(status !== undefined ? { status } : {}),
+  };
+}
+
+function collectProviderErrorLabels(
+  root: Record<string, unknown>,
+  nestedError: Record<string, unknown> | undefined,
+): string[] {
+  const labels: string[] = [];
+  const candidates = [
+    readString(nestedError?.status),
+    readString(nestedError?.type),
+    readString(nestedError?.code),
+    readString(root.status),
+    readString(root.type),
+    readString(root.code),
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate) {
+      continue;
+    }
+
+    const normalized = candidate.trim();
+    if (!normalized || normalized === "error") {
+      continue;
+    }
+
+    if (!labels.includes(normalized)) {
+      labels.push(normalized);
+    }
+  }
+
+  return labels;
+}
+
+function formatStructuredErrorMessage(labels: string[], rawMessage: string): string {
+  const cleanedMessage = stripRedundantErrorPrefix(rawMessage);
+  return labels.length > 0 ? `${labels.join(" · ")} · ${cleanedMessage}` : cleanedMessage;
+}
+
+function stripRedundantErrorPrefix(message: string): string {
+  return message
+    .replace(/^Unauthorized:\s*/i, "")
+    .replace(/^Authentication (?:error|failed):\s*/i, "")
+    .trim();
+}
+
+function parseJsonObjectCandidate(value: unknown): Record<string, unknown> | undefined {
+  if (isObject(value)) {
+    return value;
+  }
+
+  const text = extractStringMessage(value);
+  if (!text) {
+    return undefined;
+  }
+
+  const startIndex = text.indexOf("{");
+  const endIndex = text.lastIndexOf("}");
+  if (startIndex < 0 || endIndex <= startIndex) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(text.slice(startIndex, endIndex + 1));
+    return isObject(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function extractStringMessage(value: unknown): string | undefined {
+  if (typeof value === "string" && value.trim()) {
+    return value.trim();
+  }
+
+  if (value instanceof Error && value.message.trim()) {
+    return value.message.trim();
+  }
+
+  if (!isObject(value)) {
+    return undefined;
+  }
+
+  const directMessage = readString(value.message) ?? readString(value.errorMessage);
+  if (directMessage) {
+    return directMessage;
+  }
+
+  return undefined;
+}
+
+function extractStatus(error: unknown): number | undefined {
+  const candidates = [
+    error,
+    isObject(error) ? error.error : undefined,
+    isObject(error) ? error.response : undefined,
+    isObject(error) && isObject(error.error) ? error.error.response : undefined,
+    parseJsonObjectCandidate(error),
+  ];
+
+  for (const candidate of candidates) {
+    const status = readNumericStatus(candidate);
+    if (status !== undefined) {
+      return status;
+    }
+  }
+
+  return undefined;
+}
+
+function readNumericStatus(value: unknown): number | undefined {
+  if (!isObject(value)) {
+    return undefined;
+  }
+
+  const directStatus = value.status;
+  if (typeof directStatus === "number") {
+    return directStatus;
+  }
+
+  const statusCode = value.statusCode;
+  if (typeof statusCode === "number") {
+    return statusCode;
+  }
+
+  const code = value.code;
+  if (typeof code === "number") {
+    return code;
+  }
+
+  return undefined;
+}
+
+function readString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

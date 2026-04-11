@@ -1,9 +1,19 @@
 import type { Api, Model } from "@mariozechner/pi-ai";
-import type { ExtensionAPI, ExtensionCommandContext, Theme } from "@mariozechner/pi-coding-agent";
+import {
+  copyToClipboard,
+  type ExtensionAPI,
+  type ExtensionCommandContext,
+  type Theme,
+} from "@mariozechner/pi-coding-agent";
 import type { Focusable, TUI } from "@mariozechner/pi-tui";
-import { matchesKey, visibleWidth } from "@mariozechner/pi-tui";
+import { matchesKey, truncateToWidth, visibleWidth } from "@mariozechner/pi-tui";
 import type { RetitleCommandOutcome, RetitleMode, RetitleScope } from "./command.js";
-import type { AutoRetitleStatus, SessionAutoTitleController } from "./controller.js";
+import {
+  type AutoRetitleStatus,
+  type AutoTitleFailure,
+  formatAutoTitleFailureSummary,
+  type SessionAutoTitleController,
+} from "./controller.js";
 import {
   buildBulkRetitleMessage,
   buildRetitleScopeScan,
@@ -176,6 +186,11 @@ class RetitleWizardPanel implements Focusable {
       return;
     }
 
+    if ((data === "y" || data === "Y") && this.controller.getLastFailure(this.ctx)) {
+      void this.copyLastFailure();
+      return;
+    }
+
     if (data === "t" || data === "T") {
       void this.runCurrentSessionRetitle();
       return;
@@ -229,7 +244,7 @@ class RetitleWizardPanel implements Focusable {
     this.requestRender();
     await this.ctx.waitForIdle();
 
-    const didRetitle = await runRetitlePlan({
+    const result = await runRetitlePlan({
       pi: this.pi,
       controller: this.controller,
       ctx: this.ctx,
@@ -237,7 +252,14 @@ class RetitleWizardPanel implements Focusable {
       isManual: true,
       getSessionEpoch: this.getSessionEpoch,
     });
-    this.done(didRetitle ? "success" : "failed");
+    if (result.ok) {
+      this.done("success");
+      return;
+    }
+
+    this.controller.handleTitleFailed(this.ctx, result.failure);
+    this.step = { kind: "scope" };
+    this.requestRender();
   }
 
   private async scanScope(
@@ -296,6 +318,7 @@ class RetitleWizardPanel implements Focusable {
 
   private renderScopeStep(lines: string[], innerWidth: number): void {
     const autoRetitleStatus = this.controller.getAutoRetitleStatus(this.ctx);
+    const failure = this.controller.getLastFailure(this.ctx);
     const options: Array<{ key: string; suffix: string; selected: boolean }> = [
       {
         key: "t",
@@ -317,9 +340,7 @@ class RetitleWizardPanel implements Focusable {
       },
     ];
 
-    lines.push(
-      this.renderRow(innerWidth, ` ${this.theme.bold(this.theme.fg("accent", "Session Titles"))}`),
-    );
+    lines.push(this.renderHeaderRow(innerWidth, "Session Titles"));
     lines.push(this.renderRow(innerWidth, ""));
     for (const titleLine of formatCurrentSessionTitleLines(
       this.theme,
@@ -339,6 +360,16 @@ class RetitleWizardPanel implements Focusable {
       const label = option.selected ? this.theme.fg("accent", text) : text;
       lines.push(this.renderRow(innerWidth, ` ${prefix} ${label}`));
     }
+
+    if (failure) {
+      lines.push(this.renderRow(innerWidth, ""));
+      lines.push(
+        this.renderRow(
+          innerWidth,
+          ` ${this.theme.fg("dim", this.theme.bold("y"))}${this.theme.fg("dim", " Copy last auto-title error")}`,
+        ),
+      );
+    }
   }
 
   private renderScanStep(
@@ -346,9 +377,7 @@ class RetitleWizardPanel implements Focusable {
     innerWidth: number,
     scope: Exclude<RetitleScope, "this">,
   ): void {
-    lines.push(
-      this.renderRow(innerWidth, ` ${this.theme.bold(this.theme.fg("accent", "Session Titles"))}`),
-    );
+    lines.push(this.renderHeaderRow(innerWidth, "Session Titles"));
     lines.push(this.renderRow(innerWidth, ""));
     lines.push(this.renderRow(innerWidth, ` ${buildScopeScanMessage(scope)}`));
   }
@@ -369,9 +398,7 @@ class RetitleWizardPanel implements Focusable {
       message = `No sessions matched ${location}.`;
     }
 
-    lines.push(
-      this.renderRow(innerWidth, ` ${this.theme.bold(this.theme.fg("accent", "Session Titles"))}`),
-    );
+    lines.push(this.renderHeaderRow(innerWidth, "Session Titles"));
     lines.push(this.renderRow(innerWidth, ""));
     lines.push(this.renderRow(innerWidth, ` ${message}`));
     lines.push(this.renderRow(innerWidth, ""));
@@ -413,11 +440,42 @@ class RetitleWizardPanel implements Focusable {
   }
 
   private renderRunningStep(lines: string[], innerWidth: number, message: string): void {
-    lines.push(
-      this.renderRow(innerWidth, ` ${this.theme.bold(this.theme.fg("accent", "Session Titles"))}`),
-    );
+    lines.push(this.renderHeaderRow(innerWidth, "Session Titles"));
     lines.push(this.renderRow(innerWidth, ""));
     lines.push(this.renderRow(innerWidth, ` ${message}`));
+  }
+
+  private async copyLastFailure(): Promise<void> {
+    const failure = this.controller.getLastFailure(this.ctx);
+    if (!failure) {
+      return;
+    }
+
+    await copyToClipboard(formatFailureClipboardText(failure));
+    this.ctx.ui.notify("Copied auto-title error to clipboard.", "info");
+    this.done("success");
+  }
+
+  private renderHeaderRow(innerWidth: number, title: string): string {
+    const left = ` ${this.theme.bold(this.theme.fg("accent", title))}`;
+    const failure = this.controller.getLastFailure(this.ctx);
+    if (!failure) {
+      return this.renderRow(innerWidth, left);
+    }
+
+    const maxSummaryWidth = Math.max(0, innerWidth - visibleWidth(left) - 1);
+    if (maxSummaryWidth < 8) {
+      return this.renderRow(innerWidth, left);
+    }
+
+    const summaryText = truncateToWidth(
+      formatAutoTitleFailureSummary(failure),
+      maxSummaryWidth,
+      "…",
+    );
+    const right = ` ${this.theme.fg("dim", summaryText)}`;
+    const gap = Math.max(1, innerWidth - visibleWidth(left) - visibleWidth(right));
+    return this.renderRow(innerWidth, `${left}${" ".repeat(gap)}${right}`);
   }
 
   private renderRow(innerWidth: number, content: string): string {
@@ -460,6 +518,17 @@ function formatAutoRetitleStatusLine(theme: Theme, status: AutoRetitleStatus): s
 
   const turnLabel = status.turnsUntilAutoRetitle === 1 ? "turn" : "turns";
   return ` ${theme.fg("dim", `(Auto-update in ${status.turnsUntilAutoRetitle} ${turnLabel})`)}`;
+}
+
+function formatFailureClipboardText(failure: AutoTitleFailure): string {
+  const lines = [
+    `model: ${failure.model}`,
+    ...(failure.status !== undefined ? [`status: ${failure.status}`] : []),
+    `trigger: ${failure.trigger}`,
+    `time: ${failure.at}`,
+    `error: ${failure.message}`,
+  ];
+  return lines.join("\n");
 }
 
 function wrapText(text: string, width: number): string[] {

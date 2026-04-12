@@ -1,7 +1,14 @@
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ExtensionAPI, ToolDefinition } from "@mariozechner/pi-coding-agent";
-import { afterEach, describe, expect, it } from "vitest";
+import {
+  type ExtensionAPI,
+  initTheme,
+  type ToolDefinition,
+  ToolExecutionComponent,
+} from "@mariozechner/pi-coding-agent";
+import type { TUI } from "@mariozechner/pi-tui";
+import stripAnsi from "strip-ansi";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { listSessionPickerItems } from "../extensions/session-handoff/query.js";
 import sessionSearchExtension from "../extensions/session-search.js";
 import {
@@ -19,6 +26,10 @@ import { createTestFilesystem } from "./test-helpers.js";
 
 const testFs = createTestFilesystem("pi-sessions-search-tool-");
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+
+beforeAll(() => {
+  initTheme("dark");
+});
 
 afterEach(() => {
   if (originalAgentDir === undefined) {
@@ -179,15 +190,29 @@ describe("session_search tool", () => {
     expect(text).not.toContain(SEARCH_SNIPPET_MATCH_START);
     expect(text).not.toContain(SEARCH_SNIPPET_MATCH_END);
 
-    const panel = tool.renderResult?.(
-      result as never,
-      { expanded: true, isPartial: false },
-      createTheme(),
-    ) as { text?: string } | undefined;
+    const component = new ToolExecutionComponent(
+      tool.name,
+      "tool-1",
+      { cwd: "/repo", query: "search", limit: 1 },
+      undefined,
+      tool,
+      createFakeTui(),
+      "/repo",
+    );
+    component.updateResult(
+      {
+        content: result.content,
+        details: result.details,
+        isError: false,
+      },
+      false,
+    );
+    component.setExpanded(true);
+    const rendered = stripAnsi(component.render(120).join("\n"));
 
-    expect(panel?.text).toContain("- [search] hit");
-    expect(panel?.text).not.toContain(SEARCH_SNIPPET_MATCH_START);
-    expect(panel?.text).not.toContain(SEARCH_SNIPPET_MATCH_END);
+    expect(rendered).toContain("- [search] hit");
+    expect(rendered).not.toContain(SEARCH_SNIPPET_MATCH_START);
+    expect(rendered).not.toContain(SEARCH_SNIPPET_MATCH_END);
   });
 
   it("excludes the current session from results without consuming the limit", async () => {
@@ -384,13 +409,8 @@ function createToolContext(cwd: string, sessionId = "another-session") {
   } as never;
 }
 
-function createTheme() {
+function createFakeTui(): TUI {
   return {
-    fg(_color: string, text: string) {
-      return text;
-    },
-    bold(text: string) {
-      return text;
-    },
-  };
+    requestRender() {},
+  } as unknown as TUI;
 }

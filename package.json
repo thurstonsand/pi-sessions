@@ -16,7 +16,8 @@
     "pi-package"
   ],
   "files": [
-    "extensions"
+    "extensions",
+    "images"
   ],
   "pi": {
     "extensions": [
@@ -37,24 +38,24 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.10",
-    "@mariozechner/pi-ai": "^0.65.0",
-    "@mariozechner/pi-coding-agent": "^0.65.0",
-    "@mariozechner/pi-tui": "^0.65.0",
+    "@biomejs/biome": "^2.4.11",
+    "@mariozechner/pi-ai": "^0.66.1",
+    "@mariozechner/pi-coding-agent": "^0.66.1",
+    "@mariozechner/pi-tui": "^0.66.1",
     "@types/better-sqlite3": "^7.6.13",
-    "@types/node": "^25.5.2",
+    "@types/node": "^25.6.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
     "typescript": "^6.0.2",
-    "vitest": "^4.1.2"
+    "vitest": "^4.1.4"
   },
   "dependencies": {
     "better-sqlite3": "^12.8.0"
   },
   "peerDependencies": {
-    "@mariozechner/pi-ai": ">=0.65.0",
-    "@mariozechner/pi-coding-agent": ">=0.65.0",
-    "@mariozechner/pi-tui": ">=0.65.0",
+    "@mariozechner/pi-ai": ">=0.66.1",
+    "@mariozechner/pi-coding-agent": ">=0.66.1",
+    "@mariozechner/pi-tui": ">=0.66.1",
     "@sinclair/typebox": ">=0.34.49"
   },
   "lint-staged": {

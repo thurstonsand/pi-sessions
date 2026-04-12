@@ -1,26 +1,115 @@
 # pi-sessions
 
-Pi package for historical session discovery, follow-up questioning, deliberate session handoff, and hook-maintained indexing.
+`pi-sessions` turns your old Pi sessions into something you can actually reuse. It gives you search, follow-up Q&A, deliberate handoffs into new child sessions, automatic session titles, and a local index that keeps future sessions searchable.
 
-## What it provides
+## Screenshots
 
-- `session_search` — find relevant prior sessions by text, repo, cwd, time range, and touched files
-- `session_ask` — ask questions about one chosen session by reading the **entire session tree**
-- `/handoff <goal>` — generate a structured handoff draft, review it, and start a fresh child session
-- `/session-index` — small control panel for index status and explicit full reindex
-- `/title` — generate titles for this session, a folder, or all of Pi
-- automatic session titling — generates and refreshes titles every N turns using a lightweight LLM call
-- hook-driven freshness for future sessions after the first full reindex
+### Session lookup
 
-## Current model
+![session picker](images/session_picker.png)
 
-`pi-sessions` uses a local SQLite sidecar index at:
+### Handoffs
+
+![handoff preview](images/handoff.png)
+
+### Ask about old sessions
+
+![session_search tool](images/session_search.png)
+
+![session_ask tool](images/session_ask.png)
+
+## Install
+
+**From npm** (recommended):
+
+```bash
+pi install npm:pi-sessions
+```
+
+If you want to run directly from a local clone while developing:
+
+```bash
+pi -e /absolute/path/to/pi-sessions
+```
+
+## Quick start
+
+1. Install the package.
+2. Open Pi and run `/session-index`.
+3. Press `r` to build the index for all your prior sessions.
+4. Try the main flows:
+
+```text
+What session did I implement the db layer?
+```
+
+```text
+/handoff i want to implement the frontend component now
+```
+
+## Features
+
+| Extension          | Surface                               | What it does                                            |
+| ------------------ | ------------------------------------- | ------------------------------------------------------- |
+| Session Search     | `session_search` pi tool              | Search through old sessions                             |
+| Session Ask        | `session_ask` pi tool                 | Ask questions about old sessions                        |
+| Session Handoff    | `/handoff`, session picker shortcut   | Start a focused new session; alternative to compaction  |
+| Session Picker     | `Alt+O`                               | Reference old sessions in your prompt                   |
+| Session Index      | `/session-index` slash command        | Shows index status and rebuilds the local session index |
+| Session Auto Title | in background, `/title` slash command | Give sessions titles                                    |
+
+## Session Handoff
+
+`/handoff <goal>` starts a focused new session. Give pi a goal, and it will generate a prompt for you to review before kicking it off.
+
+Flow:
+
+- run `/handoff <goal>`
+- review the generated prompt preview
+- optionally edit the prompt to make any adjustments
+- start the new session
+
+If you do nothing, the preview autostarts after a short countdown.
+
+## Session picker
+
+Directly reference prior sessions by looking them up by contents.
+
+- shortcut: `Alt+O`
+- press `Tab` to switch between current folder and all sessions
+- type to filter results
+- press `Enter` to insert a session id into your prompt
+
+### Handoff setting
+
+If you want to override the shortcut, put this in your `~/.pi/agent/settings.json`:
+
+```json
+{
+  "sessions": {
+    "handoff": {
+      "pickerShortcut": "alt+p"
+    }
+  }
+}
+```
+
+## Session Index
+
+By default, `pi-sessions` will start indexing all conversations moving forward. If you want to backfill all prior conversations:
+
+- run `/session-index`
+- hit `r` to (re)index everything
+
+this is idempotent, so if you run into any issues, or disable pi-sessions for a while, feel free to re-index to see if that resolves anything.
+
+By default the index lives at:
 
 ```text
 ~/.pi/agent/pi-sessions/index.sqlite
 ```
 
-You can override the index directory via Pi settings:
+but you can change the location in `~/.pi/agent/settings.json`:
 
 ```json
 {
@@ -32,95 +121,35 @@ You can override the index directory via Pi settings:
 }
 ```
 
-The package has two modes of keeping that index current:
+## Session Auto Title
 
-1. **Full reindex**
-   - bootstrap for all existing sessions
-   - recovery path if indexing was interrupted or hooks were disabled
-2. **Hooks**
-   - keeps future sessions current without doing indexing work on the search path
+The auto-title extension keeps your session list readable by:
 
-Search itself only opens the DB, runs the query, and returns ranked session rows.
+- Setting a title based on initial prompt
+- Reevaluating the title every 4 turns to see if it should be updated
 
-## Install / load
+To manage existing titles, run `/title`, where you can:
 
-### Local package
+- Regenerate a title for the current session
+- Generate titles for all sessions in the folder
+- Generate titles for all sessions across pi
 
-Run Pi with the package path:
+![session title window](images/session-title.png)
 
-```bash
-pi -e ~/Develop/pi-sessions
-```
+Note that generating titles for all sessions can take some time, and will hit your configured model with the full contents of all sessions.
 
-Or add the package to your Pi package list once you decide where it should live permanently.
+Behavior notes:
 
-## First-time onboarding
+- automatic retitles run every few turns
+- if you manually rename a session with `/name`, automatic retitling pauses for that session
+- Regenerate the title for the current session to resume automatic retitling
+- if unconfigured, it will attempt to use these models in order, first one that is available:
+  - `google/gemini-flash-lite-latest`
+  - `anthropic/claude-haiku-4-5`
+  - `openai/gpt-5.4-mini`
+- your currently configured model
 
-On a fresh install, run a full reindex once.
-
-1. Start Pi with `pi-sessions` loaded
-2. Open:
-
-```text
-/session-index
-```
-
-1. Press `r`
-2. Confirm the rebuild
-
-That rebuilds the index from all sessions returned by `SessionManager.listAll()`.
-
-## `/handoff`
-
-Behavior:
-
-- run `/handoff <goal>` from an active session
-- the extension serializes the current conversation branch and asks the active model to call an internal `create_handoff_context` extraction tool
-- the final first message for the new session is assembled in code, not free-written by the model
-- a review overlay appears before switching sessions
-- if you do nothing, the draft auto-starts after 8 seconds
-- `Enter` — start the new session immediately
-- `Esc` — cancel
-- `e` — open the built-in editor for full prompt editing
-- `j` / `k` — scroll the draft preview and pause auto-start
-
-The new session is created through `ctx.newSession({ parentSession })`, so the child session keeps native Pi parent linkage.
-
-### Session reference picker
-
-Behavior:
-
-- press the configured picker shortcut while drafting to open the session picker (`Alt+O` by default)
-- press the same shortcut again while the picker is focused to close it
-- find a previous session so you can insert it into your prompt for pi to reference
-
-## `/session-index`
-
-The control panel shows:
-
-- index path or `<no index found>`
-- schema version
-- indexed session count
-- `Last full reindex`
-
-Use:
-
-- `r` — request a full rebuild
-- `Enter` / `Esc` — close
-
-## Auto-titling
-
-Sessions are automatically titled and retitled as the conversation progresses.
-
-- A lightweight LLM call generates a short, descriptive title from the active branch conversation
-- Titles refresh every N turns (default 4), configurable via `sessions.autoTitle.refreshTurns`
-- `sessions.handoff.pickerShortcut` can override the picker shortcut (default `alt+o`)
-- `sessions.autoTitle.model` can pin a specific `provider/modelId`; otherwise `pi-sessions` prefers a small cheap fallback list before using the current session model
-- If you manually rename the session, automatic refresh pauses until you run `/title`
-- `/title` — open an interactive wizard to retitle the current session, a folder, or all of Pi
-- `/title this` — regenerate the current session title immediately
-- `/title folder` / `/title pi` — backfill untitled sessions in the current folder or globally
-- Add `-f` to skip the confirmation wizard (e.g. `/title folder -f`)
+To change auto-titling settings, edit `~/.pi/agent/settings.json`:
 
 ```json
 {
@@ -133,142 +162,12 @@ Sessions are automatically titled and retitled as the conversation progresses.
 }
 ```
 
-## Hook-maintained future sessions
-
-After the first full reindex, future sessions stay current through hooks.
-
-The package currently updates on these events:
-
-- `session_start`
-  - handles startup, reload, new, resume, and fork lifecycle transitions
-- `tool_call`
-- `tool_result`
-- `turn_end`
-- `session_tree`
-- `session_compact`
-- `session_shutdown`
-
-What that means in practice:
-
-- new text and file-touch evidence becomes searchable without rerunning reindex
-- branch summaries and compaction summaries are indexed as they are created
-- repo-root membership is recomputed from touched paths during hook flushes
-
-## Failure model
-
-If the sidecar DB is missing or schema-incompatible, `session_search` fails closed and tells you to rebuild.
-
-If hooks were disabled, interrupted, or unavailable for some period, run:
-
-```text
-/session-index
-```
-
-then press `r` and confirm.
-
-That is the supported repair path. Search does **not** inspect raw session files at query time.
-
-## Search behavior
-
-### `session_search`
-
-Parameters:
-
-- `query?: string`
-- `files?: { touched?: string[] }`
-- `repo?: string`
-- `cwd?: string`
-- `time?: { after?: string; before?: string }`
-- `limit?: number`
-
-Notes:
-
-- invalid `time.after` / `time.before` values are rejected
-- `limit` is optional and, when provided, must be greater than `0`
-- time filtering uses overlap with the session span from first timestamp to last timestamp
-- when called without text or file evidence, results are ordered newest-first
-- visible output is grouped by `cwd` to reduce repetition
-
-Visible output includes a compact subset such as:
-
-- `title`
-- `session`
-- `cwd`
-- `matched_files` when applicable
-- `score / hits` when applicable
-- `snippet` when applicable
-
-### File-touch semantics
-
-`files.touched` matches sessions that either:
-
-- read the file
-- edited the file
-- wrote the file
-
-Path matching uses normalized absolute, cwd-relative, repo-relative, and basename metadata.
-
-## Follow-up behavior
-
-### `session_ask`
-
-Parameters:
-
-- `session: string`
-- `question: string`
-
-`session` must be the session UUID.
-
-Behavior:
-
-- reads and renders the **entire session tree**
-- requires a non-empty session UUID and question
-- includes the session id, title, and question in both progress updates and the final result
-- answers using only that session’s contents
-- returns a friendly error when the session id cannot be resolved
-- intended as the deep follow-up after `session_search`
-
-## Examples
-
-### Find sessions about a topic
-
-```text
-Use session_search with query "session_query" and limit 5.
-```
-
-### Find sessions in one repo that touched a file
-
-```text
-Use session_search with repo "/Users/thurstonsand/Develop/ansiblonomicon" and files.touched ["chezmoi/private_dot_pi/agent/extensions/parallel-web-tools/fetch.ts"].
-```
-
-### Restrict by cwd and time
-
-```text
-Use session_search with cwd "/Users/thurstonsand/Develop/ansiblonomicon" and time.after "2026-03-01T00:00:00Z".
-```
-
-### Ask one chosen session what happened
-
-```text
-Use session_ask with session "2dc89501-5e75-4c75-bc71-15c499d850b2" and ask what decisions were made.
-```
-
-### Start a focused child session
-
-```text
-/handoff continue the session reference picker work
-```
-
 ## Development
 
 ```bash
+npm install
 npm run check
 npm test
-npm run lint
-npm run format
 ```
 
-## End-to-end smoke test
-
-See [SMOKE.md](./SMOKE.md).
+For an end-to-end manual flow, see [SMOKE.md](./SMOKE.md).

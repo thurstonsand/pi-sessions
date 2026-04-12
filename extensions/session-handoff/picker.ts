@@ -8,9 +8,20 @@ import {
   truncateToWidth,
   visibleWidth,
 } from "@mariozechner/pi-tui";
-import { listSessionPickerItems, type SessionPickerItem } from "./query.js";
+import {
+  stripSearchSnippetMarkers,
+  transformSearchSnippetMatches,
+} from "../shared/search-snippet.js";
+import { listSessionPickerItems, normalizeDisplayText, type SessionPickerItem } from "./query.js";
 
-const MAX_VISIBLE_ROWS = 10;
+const MAX_VISIBLE_BROWSE_ROWS = 10;
+const MAX_VISIBLE_SEARCH_ROWS = 4;
+
+interface PickerRightColumnWidths {
+  marker: number;
+  messageCount: number;
+  modifiedAt: number;
+}
 
 export type SessionPickerResult =
   | { kind: "cancel" }
@@ -107,13 +118,13 @@ export class SessionReferencePickerComponent implements Focusable {
     }
 
     if (this.keybindings.matches(data, "tui.select.pageUp")) {
-      this.moveSelection(-MAX_VISIBLE_ROWS);
+      this.moveSelection(-this.getMaxVisibleRows());
       this.tui.requestRender();
       return;
     }
 
     if (this.keybindings.matches(data, "tui.select.pageDown")) {
-      this.moveSelection(MAX_VISIBLE_ROWS);
+      this.moveSelection(this.getMaxVisibleRows());
       this.tui.requestRender();
       return;
     }
@@ -150,7 +161,6 @@ export class SessionReferencePickerComponent implements Focusable {
 
     const lines = [this.theme.fg("border", `╭${"─".repeat(innerWidth)}╮`)];
     lines.push(this.renderRow(`${titleText}${" ".repeat(headerSpacing)}${scopeText}`, innerWidth));
-    lines.push(this.renderRow(this.theme.fg("muted", "plain text search"), innerWidth));
     lines.push(
       this.renderRow(
         this.theme.fg("muted", "enter add to prompt · esc cancel · tab scope"),
@@ -166,8 +176,11 @@ export class SessionReferencePickerComponent implements Focusable {
     lines.push(this.renderRow("", innerWidth));
 
     const visibleItems = this.getVisibleItems();
+    const rightWidths = this.getRightColumnWidths();
     for (const { item, index } of visibleItems) {
-      lines.push(this.renderPickerItem(item, index === this.selectedIndex, innerWidth));
+      lines.push(
+        ...this.renderPickerItem(item, index === this.selectedIndex, innerWidth, rightWidths),
+      );
     }
 
     if (visibleItems.length === 0) {
@@ -188,33 +201,87 @@ export class SessionReferencePickerComponent implements Focusable {
     return lines;
   }
 
-  private renderPickerItem(item: SessionPickerItem, selected: boolean, innerWidth: number): string {
+  private renderPickerItem(
+    item: SessionPickerItem,
+    selected: boolean,
+    innerWidth: number,
+    rightWidths: PickerRightColumnWidths,
+  ): string[] {
     if (item.kind !== "session") {
       const message = [item.title, item.description].filter(Boolean).join(" — ");
-      return this.renderRow(
-        this.theme.fg(item.kind === "error" ? "error" : "muted", message),
-        innerWidth,
-      );
+      return [
+        this.renderRow(
+          this.theme.fg(item.kind === "error" ? "error" : "muted", message),
+          innerWidth,
+        ),
+      ];
     }
 
     const cursor = selected ? `${this.theme.fg("accent", "›")} ` : "  ";
-    const right = item.modifiedAtText
-      ? `${item.marker} · ${item.messageCount} ${item.modifiedAtText}`
-      : `${item.marker} · ${item.messageCount}`;
-    const leftText = `${item.prefix}${item.title}`;
+    const right = this.renderRightMetadata(item, rightWidths);
+    const highlightedTitle = this.formatTitleHighlight(item.title, item.snippet);
+    const leftText = `${item.prefix}${highlightedTitle ?? item.title}`;
     const available = Math.max(8, innerWidth - 2 - visibleWidth(cursor) - visibleWidth(right) - 1);
     const left = truncateToWidth(leftText, available, "…", true);
     const spacing = Math.max(
       1,
       innerWidth - 2 - visibleWidth(cursor) - visibleWidth(left) - visibleWidth(right),
     );
-    const content = `${cursor}${left}${" ".repeat(spacing)}${this.theme.fg("dim", right)}`;
-    return this.renderRow(selected ? this.theme.bg("selectedBg", content) : content, innerWidth);
+    const titleLine = `${cursor}${left}${" ".repeat(spacing)}${right}`;
+    const lines = [this.renderSelectableRow(titleLine, innerWidth, selected)];
+
+    if (item.snippet && !highlightedTitle) {
+      const snippet = this.formatSnippet(
+        item.snippet,
+        Math.max(8, innerWidth - 2 - visibleWidth(cursor)),
+      );
+      if (snippet) {
+        lines.push(
+          this.renderSelectableRow(`  ${this.theme.fg("dim", snippet)}`, innerWidth, selected),
+        );
+      }
+    }
+
+    return lines;
   }
 
   private renderRow(content: string, innerWidth: number): string {
     const pad = Math.max(0, innerWidth - visibleWidth(content));
     return `${this.theme.fg("border", "│")}${content}${" ".repeat(pad)}${this.theme.fg("border", "│")}`;
+  }
+
+  private renderSelectableRow(content: string, innerWidth: number, selected: boolean): string {
+    return this.renderRow(selected ? this.theme.bg("selectedBg", content) : content, innerWidth);
+  }
+
+  private formatTitleHighlight(title: string, snippet?: string | undefined): string | undefined {
+    if (!snippet) {
+      return undefined;
+    }
+
+    const plainSnippet = normalizeDisplayText(stripSearchSnippetMarkers(snippet));
+    if (!plainSnippet || plainSnippet !== normalizeDisplayText(title)) {
+      return undefined;
+    }
+
+    return this.highlightSnippetMatches(snippet);
+  }
+
+  private formatSnippet(snippet: string, maxWidth: number): string | undefined {
+    const rendered = this.highlightSnippetMatches(snippet);
+    if (!rendered) {
+      return undefined;
+    }
+
+    return truncateToWidth(rendered, maxWidth, "…", true);
+  }
+
+  private highlightSnippetMatches(snippet: string): string | undefined {
+    return transformSearchSnippetMatches(snippet, (match) =>
+      this.theme.fg("accent", this.theme.bold(match)),
+    )
+      ?.replace(/\s+/g, " ")
+      .trim();
   }
 
   private reload(): void {
@@ -251,8 +318,40 @@ export class SessionReferencePickerComponent implements Focusable {
     this.selectedIndex = sessionIndexes[nextSessionListIndex] ?? this.selectedIndex;
   }
 
+  private renderRightMetadata(
+    item: Extract<SessionPickerItem, { kind: "session" }>,
+    widths: PickerRightColumnWidths,
+  ): string {
+    const marker = padEndToWidth(item.marker, widths.marker);
+    const messageCount = padStartToWidth(String(item.messageCount), widths.messageCount);
+    const modifiedAt = padStartToWidth(item.modifiedAtText ?? "", widths.modifiedAt);
+    const plain =
+      widths.modifiedAt > 0
+        ? `${marker} · ${messageCount} ${modifiedAt}`
+        : `${marker} · ${messageCount}`;
+    return this.theme.fg("dim", plain);
+  }
+
+  private getRightColumnWidths(): PickerRightColumnWidths {
+    const sessionItems = this.items.filter(
+      (item): item is Extract<SessionPickerItem, { kind: "session" }> => item.kind === "session",
+    );
+    return {
+      marker: Math.max(0, ...sessionItems.map((item) => visibleWidth(item.marker))),
+      messageCount: Math.max(
+        0,
+        ...sessionItems.map((item) => visibleWidth(String(item.messageCount))),
+      ),
+      modifiedAt: Math.max(
+        0,
+        ...sessionItems.map((item) => visibleWidth(item.modifiedAtText ?? "")),
+      ),
+    };
+  }
+
   private getVisibleItems(): Array<{ item: SessionPickerItem; index: number }> {
-    if (this.items.length <= MAX_VISIBLE_ROWS) {
+    const maxVisibleRows = this.getMaxVisibleRows();
+    if (this.items.length <= maxVisibleRows) {
       return this.items.map((item, index) => ({ item, index }));
     }
 
@@ -263,13 +362,13 @@ export class SessionReferencePickerComponent implements Focusable {
     const startSessionListIndex = Math.max(
       0,
       Math.min(
-        currentSessionListIndex - Math.floor(MAX_VISIBLE_ROWS / 2),
-        Math.max(0, sessionIndexes.length - MAX_VISIBLE_ROWS),
+        currentSessionListIndex - Math.floor(maxVisibleRows / 2),
+        Math.max(0, sessionIndexes.length - maxVisibleRows),
       ),
     );
     const endSessionListIndex = Math.min(
       sessionIndexes.length,
-      startSessionListIndex + MAX_VISIBLE_ROWS,
+      startSessionListIndex + maxVisibleRows,
     );
     const visibleIndexes = new Set(
       sessionIndexes.slice(startSessionListIndex, endSessionListIndex),
@@ -278,4 +377,18 @@ export class SessionReferencePickerComponent implements Focusable {
       .map((item, index) => ({ item, index }))
       .filter(({ item, index }) => item.kind !== "session" || visibleIndexes.has(index));
   }
+
+  private getMaxVisibleRows(): number {
+    return this.input.getValue().trim() ? MAX_VISIBLE_SEARCH_ROWS : MAX_VISIBLE_BROWSE_ROWS;
+  }
+}
+
+function padStartToWidth(value: string, width: number): string {
+  const pad = Math.max(0, width - visibleWidth(value));
+  return `${" ".repeat(pad)}${value}`;
+}
+
+function padEndToWidth(value: string, width: number): string {
+  const pad = Math.max(0, width - visibleWidth(value));
+  return `${value}${" ".repeat(pad)}`;
 }

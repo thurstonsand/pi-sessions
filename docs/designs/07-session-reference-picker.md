@@ -154,7 +154,7 @@ The picker should keep row markers simple.
 
 Display markers should include only:
 
-- `this session`
+- `current`
 - `parent`
 - `child`
 - `sibling`
@@ -214,16 +214,15 @@ Extract this into a small shared helper so the picker and any other session-refe
 ─────────────────────────────────────────────────────────────────────────────────────────────
 
 Add Session Reference to Prompt (Current Folder)       ◉ Current Folder | ○ All
-plain text search
 enter add to prompt · esc cancel · tab scope
 
 >
 
-  Parent session for selector and picker work                   parent · 197 24m
-  ├─ Session reference selection component notes                sibling · 125 1d
-› └─ Adversarial review of session handoff selector reuse docs  this session · 135 7m
-      └─ Unified Search and Autocomplete for Session Handoff    child · 581 11h
-  Incorporating TypeScript coding standards into AGENTS.md      8f02c1a7 · 10 1d
+  Parent session for selector and picker work                      parent  · 197 24m
+  ├─ Session reference selection component notes                   sibling · 125 1d
+› └─ Adversarial review of session handoff selector reuse docs     current  · 135 7m
+      └─ Unified Search and Autocomplete for Session Handoff       child    · 581 11h
+  Incorporating TypeScript coding standards into AGENTS.md         8f02c1a7 ·  10 1d
   (1/69)
 
 ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -235,14 +234,13 @@ enter add to prompt · esc cancel · tab scope
 ─────────────────────────────────────────────────────────────────────────────────────────────
 
 Add Session Reference to Prompt (Current Folder)       ◉ Current Folder | ○ All
-plain text search
 enter add to prompt · esc cancel · tab scope
 
 selector reuse
 
-› Session reference selection component notes                sibling · 125 1d
-  Adversarial review of session handoff selector reuse docs  this session · 135 7m
-  Parent session for selector and picker work                parent · 197 24m
+› Session reference selection component notes                   sibling · 125 1d
+  Adversarial review of session handoff selector reuse docs     current  · 135 7m
+  Parent session for selector and picker work                   parent   · 197 24m
   (1/4)
 
 ─────────────────────────────────────────────────────────────────────────────────────────────
@@ -251,6 +249,7 @@ selector reuse
 Notes:
 
 - The right-hand numeric column from `/resume` is still useful: it is `messageCount` plus compact relative modified time.
+- Search-mode rows may highlight matched text in either the title or the snippet. If the chosen snippet duplicates the title, highlight the title and omit the duplicate snippet row.
 - In browse mode, related sessions should appear in a real tree over the displayed rows rather than as isolated one-off indented rows.
 - We do not need sort toggles, delete, rename, path toggles, or other mutation hints in v1.
 - The title and legend should clearly describe adding a session reference to the prompt, not resuming.
@@ -340,7 +339,7 @@ Do not fall through to any other editor behavior.
 
 ### Current session in results
 
-If the current session appears, mark it clearly as `this session`.
+If the current session appears, mark it clearly as `current`.
 
 Insertion is still allowed.
 
@@ -412,7 +411,7 @@ Rejected because read-only insertion is the smallest correct feature.
 
 - [ ] Keep the existing indexed ranking/listing strategy
 - [ ] Adapt `extensions/session-handoff/query.ts` for picker-row shaping
-- [ ] Simplify picker-visible relation markers to `this session`, `parent`, `child`, `sibling`, or short UUID prefix
+- [ ] Simplify picker-visible relation markers to `current`, `parent`, `child`, `sibling`, or short UUID prefix
 - [ ] Extend the indexed row shape only if browse-mode threading needs additional parent/child metadata
 - [ ] Keep the canonical insertion token unchanged: `@session:<uuid>`
 - [ ] Add a shared `Intl`-based compact relative-time helper

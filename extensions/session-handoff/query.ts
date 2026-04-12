@@ -1,3 +1,4 @@
+import { stripSearchSnippetMarkers } from "../shared/search-snippet.js";
 import {
   getIndexStatus,
   getLineageSessions,
@@ -30,6 +31,7 @@ export interface SessionPickerSessionItem {
   messageCount: number;
   modifiedAtText?: string | undefined;
   prefix: string;
+  snippet?: string | undefined;
   relation?: SessionLineageRelation | "self" | undefined;
 }
 
@@ -106,7 +108,7 @@ export function listSessionPickerItems(
     const sessionItems =
       options.mode === "browse"
         ? buildBrowseSessionItems(rankedResults, context)
-        : rankedResults.map((result) => buildSessionItem(result, context));
+        : rankedResults.map((result) => buildSessionItem(result, context, "", result.snippet));
 
     return {
       items: sessionItems,
@@ -235,6 +237,7 @@ function buildSessionItem(
   result: SearchSessionResult,
   context: SessionPickerPresentationContext,
   prefix: string = "",
+  snippet?: string | undefined,
 ): SessionPickerSessionItem {
   return {
     kind: "session",
@@ -245,6 +248,7 @@ function buildSessionItem(
     messageCount: result.messageCount,
     modifiedAtText: formatCompactRelativeTime(result.modifiedAt),
     prefix,
+    snippet,
     relation: getSessionRelation(result, context),
   };
 }
@@ -255,12 +259,12 @@ function getSessionTitle(result: SearchSessionResult): string {
     normalizeDisplayText(result.handoffNextTask) ??
     normalizeDisplayText(result.handoffGoal) ??
     normalizeDisplayText(result.firstUserPrompt) ??
-    normalizeDisplayText(result.snippet) ??
+    normalizeDisplayText(stripSearchSnippetMarkers(result.snippet)) ??
     shortenSessionId(result.sessionId)
   );
 }
 
-function normalizeDisplayText(value?: string): string | undefined {
+export function normalizeDisplayText(value?: string): string | undefined {
   if (!value) {
     return undefined;
   }
@@ -286,7 +290,7 @@ function getSessionMarker(
 ): string {
   switch (getSessionRelation(result, context)) {
     case "self":
-      return "this session";
+      return "current";
     case "parent":
       return "parent";
     case "child":

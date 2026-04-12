@@ -3,6 +3,10 @@ import type { ExtensionAPI, ExtensionContext, Theme } from "@mariozechner/pi-cod
 import { Text } from "@mariozechner/pi-tui";
 import { Type } from "@sinclair/typebox";
 import {
+  stripSearchSnippetMarkers,
+  transformSearchSnippetMatches,
+} from "./shared/search-snippet.js";
+import {
   getIndexStatus,
   INDEX_SCHEMA_VERSION,
   openIndexDatabase,
@@ -286,10 +290,12 @@ function formatSearchResultLocation(cwd: string | undefined): string | undefined
 }
 
 function formatSearchSnippet(result: SearchSessionResult): string | undefined {
-  const snippet = result.snippet?.replace(/\s+/g, " ").trim();
-  if (!snippet) return undefined;
-  if (snippet === result.sessionName || snippet === result.cwd) return undefined;
-  return snippet;
+  const plainSnippet = stripSearchSnippetMarkers(result.snippet)?.replace(/\s+/g, " ").trim();
+  if (!plainSnippet) return undefined;
+  if (plainSnippet === result.sessionName || plainSnippet === result.cwd) return undefined;
+  return transformSearchSnippetMatches(result.snippet, (match) => `[${match}]`)
+    ?.replace(/\s+/g, " ")
+    .trim();
 }
 
 interface SearchResultTextStyles {
@@ -340,8 +346,9 @@ function formatSearchResult(result: SearchSessionResult, styles: SearchResultTex
     lines.push(styles.secondary(`score: ${result.score.toFixed(2)} / hits: ${result.hitCount}`));
   }
 
-  if (result.snippet && result.snippet !== result.sessionName && result.snippet !== result.cwd) {
-    lines.push(styles.secondary(`snippet: ${result.snippet}`));
+  const plainSnippet = stripSearchSnippetMarkers(result.snippet)?.replace(/\s+/g, " ").trim();
+  if (plainSnippet && plainSnippet !== result.sessionName && plainSnippet !== result.cwd) {
+    lines.push(styles.secondary(`snippet: ${plainSnippet}`));
   }
 
   return lines;

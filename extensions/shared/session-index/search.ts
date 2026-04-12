@@ -5,6 +5,11 @@ import {
   matchesRepoRoot,
   normalizeSearchPath,
 } from "../../session-search/normalize.js";
+import {
+  SEARCH_SNIPPET_ELLIPSIS,
+  SEARCH_SNIPPET_MATCH_END,
+  SEARCH_SNIPPET_MATCH_START,
+} from "../search-snippet.js";
 import { parseTypeBoxRows } from "../typebox.js";
 import {
   boostIndependentHits,
@@ -320,7 +325,7 @@ function getTextMatchRows(db: SessionIndexDatabase, filters: SearchFilters): Sea
           s.session_origin as sessionOrigin,
           s.handoff_goal as handoffGoal,
           s.handoff_next_task as handoffNextTask,
-          snippet(session_text_chunks_fts, 2, '[', ']', ' … ', 12) as snippet,
+          snippet(session_text_chunks_fts, 2, ?, ?, ?, 12) as snippet,
           bm25(session_text_chunks_fts) as rank,
           c.entry_id as entryId,
           c.source_kind as sourceKind
@@ -334,7 +339,13 @@ function getTextMatchRows(db: SessionIndexDatabase, filters: SearchFilters): Sea
         ORDER BY rank ASC, s.modified_ts DESC
       `,
       )
-      .all(match, ...getSearchFilterBindings(filters)),
+      .all(
+        SEARCH_SNIPPET_MATCH_START,
+        SEARCH_SNIPPET_MATCH_END,
+        SEARCH_SNIPPET_ELLIPSIS,
+        match,
+        ...getSearchFilterBindings(filters),
+      ),
     "Invalid text search rows",
   );
 }

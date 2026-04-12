@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { listSessionPickerItems } from "../extensions/session-handoff/query.js";
 import sessionSearchExtension from "../extensions/session-search.js";
 import {
+  SEARCH_SNIPPET_MATCH_END,
+  SEARCH_SNIPPET_MATCH_START,
+} from "../extensions/shared/search-snippet.js";
+import {
   initializeSchema,
   insertSession,
   insertTextChunk,
@@ -120,6 +124,70 @@ describe("session_search tool", () => {
     expect(text).not.toContain("updated:");
     expect(text).not.toContain("\n\n\n");
     expect(text).not.toContain("score:");
+  });
+
+  it("strips internal snippet markers from tool text and brackets them in the rendered panel", async () => {
+    const agentDir = testFs.createTempDir();
+    const dir = testFs.createTempDir();
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    writeFileSync(
+      path.join(agentDir, "settings.json"),
+      `${JSON.stringify({ sessions: { index: { dir } } }, null, 2)}\n`,
+    );
+    const dbPath = path.join(dir, "index.sqlite");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    insertSession(
+      db,
+      {
+        sessionId: "matched-session",
+        sessionPath: "/tmp/matched.jsonl",
+        sessionName: "Matched",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:10:00.000Z",
+        messageCount: 2,
+        entryCount: 2,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "matched-session",
+      entryId: "entry-matched",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:05:00.000Z",
+      sourceKind: "assistant_text",
+      text: "search hit",
+    });
+    db.close();
+
+    const tool = registerSessionSearchTool();
+    const result = await tool.execute(
+      "tool-1",
+      { cwd: "/repo", query: "search", limit: 1 },
+      undefined,
+      undefined,
+      createToolContext("/repo"),
+    );
+    const text = (result.content[0] as { text: string }).text;
+
+    expect(text).toContain("snippet: search hit");
+    expect(text).not.toContain(SEARCH_SNIPPET_MATCH_START);
+    expect(text).not.toContain(SEARCH_SNIPPET_MATCH_END);
+
+    const panel = tool.renderResult?.(
+      result as never,
+      { expanded: true, isPartial: false },
+      createTheme(),
+    ) as { text?: string } | undefined;
+
+    expect(panel?.text).toContain("- [search] hit");
+    expect(panel?.text).not.toContain(SEARCH_SNIPPET_MATCH_START);
+    expect(panel?.text).not.toContain(SEARCH_SNIPPET_MATCH_END);
   });
 
   it("excludes the current session from results without consuming the limit", async () => {
@@ -314,4 +382,15 @@ function createToolContext(cwd: string, sessionId = "another-session") {
       getSessionId: () => sessionId,
     },
   } as never;
+}
+
+function createTheme() {
+  return {
+    fg(_color: string, text: string) {
+      return text;
+    },
+    bold(text: string) {
+      return text;
+    },
+  };
 }

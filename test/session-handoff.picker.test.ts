@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionReferencePickerComponent } from "../extensions/session-handoff/picker.js";
 import { listSessionPickerItems } from "../extensions/session-handoff/query.js";
 import {
+  SEARCH_SNIPPET_MATCH_END,
+  SEARCH_SNIPPET_MATCH_START,
+} from "../extensions/shared/search-snippet.js";
+import {
   initializeSchema,
   insertSession,
   insertTextChunk,
@@ -63,7 +67,7 @@ describe("session handoff picker", () => {
         kind: "session",
         sessionId: "22222222-2222-4222-8222-222222222222",
         title: "Current session",
-        marker: "this session",
+        marker: "current",
         prefix: "├─ ",
       },
       {
@@ -140,7 +144,7 @@ describe("session handoff picker", () => {
     expect(sessionItems).toMatchObject([
       {
         sessionId: "22222222-2222-4222-8222-222222222222",
-        marker: "this session",
+        marker: "current",
         prefix: "",
       },
       {
@@ -165,6 +169,86 @@ describe("session handoff picker", () => {
       },
     ]);
   });
+
+  it("aligns right-side metadata columns across rows", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-23T02:00:00.000Z"));
+    const picker = new SessionReferencePickerComponent(
+      createFakeTui(),
+      createFakeTheme(),
+      createFakeKeybindings(),
+      vi.fn(),
+      {
+        indexPath: createPickerDb(),
+        shortcut: "alt+o",
+        getCurrentSessionPath: () => "/tmp/current.jsonl",
+        getCurrentCwd: () => "/repo/app",
+      },
+    );
+
+    const lines = picker.render(120);
+    const parentLine = lines.find((line) => line.includes("Parent session"));
+    const currentLine = lines.find((line) => line.includes("Current session"));
+    expect(parentLine).toBeDefined();
+    expect(currentLine).toBeDefined();
+    expect(parentLine?.indexOf("parent")).toBe(currentLine?.indexOf("current"));
+  });
+
+  it("renders search snippets with accent-bold matched text", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-23T02:00:00.000Z"));
+    const done = vi.fn();
+    const picker = new SessionReferencePickerComponent(
+      createFakeTui(),
+      createHighlightTheme(),
+      createFakeKeybindings(),
+      done,
+      {
+        indexPath: createPickerDb(),
+        shortcut: "alt+o",
+        getCurrentSessionPath: () => "/tmp/current.jsonl",
+        getCurrentCwd: () => "/repo/app",
+      },
+    );
+
+    for (const char of "selector") {
+      picker.handleInput(char);
+    }
+
+    const rendered = picker.render(120).join("\n");
+    expect(rendered).toContain("<accent><b>selector</b></accent>");
+    expect(rendered.match(/›/g)).toHaveLength(1);
+    expect(rendered).not.toContain(SEARCH_SNIPPET_MATCH_START);
+    expect(rendered).not.toContain(SEARCH_SNIPPET_MATCH_END);
+  });
+
+  it("highlights a matching title directly and omits the duplicate snippet row", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-03-23T02:00:00.000Z"));
+    const done = vi.fn();
+    const picker = new SessionReferencePickerComponent(
+      createFakeTui(),
+      createHighlightTheme(),
+      createFakeKeybindings(),
+      done,
+      {
+        indexPath: createTitleMatchPickerDb(),
+        shortcut: "alt+o",
+        getCurrentSessionPath: () => undefined,
+        getCurrentCwd: () => "/repo/app",
+      },
+    );
+
+    for (const char of "selector") {
+      picker.handleInput(char);
+    }
+
+    const rendered = picker.render(120).join("\n");
+    expect(rendered).toContain("<accent><b>Selector</b></accent> session title");
+    expect(rendered.match(/session title/g)).toHaveLength(1);
+    expect(rendered).not.toContain(SEARCH_SNIPPET_MATCH_START);
+    expect(rendered).not.toContain(SEARCH_SNIPPET_MATCH_END);
+  });
 });
 
 function createFakeTui(): TUI {
@@ -188,10 +272,60 @@ function createFakeTheme(): Theme {
   } as unknown as Theme;
 }
 
+function createHighlightTheme(): Theme {
+  return {
+    fg(color: string, text: string) {
+      return color === "accent" ? `<accent>${text}</accent>` : text;
+    },
+    bg(_color: string, text: string) {
+      return text;
+    },
+    bold(text: string) {
+      return `<b>${text}</b>`;
+    },
+  } as unknown as Theme;
+}
+
 function createFakeKeybindings(): KeybindingsManager {
   return {
     matches: vi.fn().mockReturnValue(false),
   } as unknown as KeybindingsManager;
+}
+
+function createTitleMatchPickerDb(): string {
+  const dir = testFs.createTempDir();
+  const dbPath = path.join(dir, "index.sqlite");
+  const db = openIndexDatabase(dbPath, { create: true });
+  initializeSchema(db);
+
+  insertSession(
+    db,
+    {
+      sessionId: "88888888-8888-4888-8888-888888888888",
+      sessionPath: "/tmp/title-match.jsonl",
+      sessionName: "Selector session title",
+      cwd: "/repo/app",
+      repoRoots: ["/repo"],
+      startedAt: "2026-03-23T00:00:00.000Z",
+      modifiedAt: "2026-03-23T00:10:00.000Z",
+      messageCount: 12,
+      entryCount: 12,
+    },
+    "full_reindex",
+  );
+  insertTextChunk(db, {
+    sessionId: "88888888-8888-4888-8888-888888888888",
+    entryId: "title-match-name",
+    entryType: "session_name",
+    role: "system",
+    ts: "2026-03-23T00:00:00.000Z",
+    sourceKind: "session_name",
+    text: "Selector session title",
+  });
+
+  rebuildSessionLineageRelations(db);
+  db.close();
+  return dbPath;
 }
 
 function createPickerDb(): string {

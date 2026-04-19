@@ -170,7 +170,8 @@ describe("session handoff command", () => {
   it("reports the created session id when split-pane launch fails", async () => {
     mockLaunchSplitHandoffSession.mockResolvedValue({
       success: false,
-      error: "Failed to launch Ghostty split: boom",
+      error:
+        "Failed to launch Ghostty split: boom. Split handoff currently supports Ghostty on macOS only.",
     });
     const { handler } = await getHandoffCommand();
     const ctx = createCommandContext();
@@ -179,7 +180,7 @@ describe("session handoff command", () => {
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining(
-        "Failed to launch Ghostty split: boom Created handoff session child-session-123; start it manually with: PI_SESSIONS_HANDOFF_BOOTSTRAP=",
+        "Failed to launch Ghostty split: boom. Split handoff currently supports Ghostty on macOS only. Created handoff session child-session-123; start it manually with: PI_SESSIONS_HANDOFF_BOOTSTRAP=",
       ),
       "error",
     );

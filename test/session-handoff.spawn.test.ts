@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createHandoffBootstrap,
   createHandoffSessionMetadata,
@@ -16,6 +16,11 @@ import {
   launchSplitHandoffSession,
   validateSplitHandoffPrerequisites,
 } from "../extensions/session-handoff/spawn.js";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  delete process.env.TERM_PROGRAM;
+});
 
 describe("session handoff spawn helpers", () => {
   it("creates a header-only child session file with parent lineage", () => {
@@ -82,11 +87,11 @@ describe("session handoff spawn helpers", () => {
     );
   });
 
-  it("fails split preflight when ghostty-nav is unavailable", async () => {
-    const previousTermProgram = process.env.TERM_PROGRAM;
+  it("fails split preflight outside macOS", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("linux");
     process.env.TERM_PROGRAM = "ghostty";
 
-    const pi = createPiApi({ code: 1, stderr: "not found" });
+    const pi = createPiApi();
     const ctx = {
       cwd: "/tmp/project",
       sessionManager: {
@@ -97,13 +102,29 @@ describe("session handoff spawn helpers", () => {
     };
 
     await expect(validateSplitHandoffPrerequisites(pi as never, ctx as never)).resolves.toBe(
-      "Split handoff requires ghostty-nav on your PATH.",
+      "Split handoff currently supports Ghostty on macOS only.",
     );
-
-    process.env.TERM_PROGRAM = previousTermProgram;
   });
 
-  it("launches ghostty-nav with focus pinned to the original pane", async () => {
+  it("fails split preflight when not running inside Ghostty", async () => {
+    vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
+
+    const pi = createPiApi();
+    const ctx = {
+      cwd: "/tmp/project",
+      sessionManager: {
+        getSessionFile() {
+          return "/tmp/project/current.jsonl";
+        },
+      },
+    };
+
+    await expect(validateSplitHandoffPrerequisites(pi as never, ctx as never)).resolves.toBe(
+      "Split handoff requires running inside Ghostty.",
+    );
+  });
+
+  it("launches Ghostty via osascript with focus pinned to the original pane", async () => {
     const pi = createPiApi({ code: 0 });
     const bootstrapValue = Buffer.from(
       JSON.stringify(createHandoffBootstrap("child-session-123", createMetadata())),
@@ -119,26 +140,40 @@ describe("session handoff spawn helpers", () => {
     });
 
     expect(result).toEqual({ success: true });
-    expect(pi.exec).toHaveBeenCalledWith(
-      "ghostty-nav",
-      [
-        "split",
-        "right",
-        "--cwd",
-        "/tmp/project",
-        "--command",
-        expect.stringContaining(HANDOFF_BOOTSTRAP_ENV),
-        "--focus",
-        "original",
-      ],
-      { cwd: "/tmp/project", timeout: 15_000 },
-    );
+    expect(pi.exec).toHaveBeenCalledWith("/usr/bin/osascript", ["-e", expect.any(String)], {
+      cwd: "/tmp/project",
+      timeout: 15_000,
+    });
 
-    const ghosttyArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
-    const command = ghosttyArgs[5] ?? "";
-    expect(command).toContain(HANDOFF_BOOTSTRAP_ENV);
-    expect(command).toContain("child-session-123");
-    expect(command).toContain("/tmp/sessions");
+    const osascriptArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+    const appleScript = osascriptArgs[1] ?? "";
+    expect(appleScript).toContain('tell application "Ghostty"');
+    expect(appleScript).toContain("set cfg to new surface configuration");
+    expect(appleScript).toContain('set initial working directory of cfg to "/tmp/project"');
+    expect(appleScript).toContain("split targetTerminal direction right with configuration cfg");
+    expect(appleScript).toContain("focus targetTerminal");
+    expect(appleScript).toContain(HANDOFF_BOOTSTRAP_ENV);
+    expect(appleScript).toContain("child-session-123");
+    expect(appleScript).toContain("/tmp/sessions");
+  });
+
+  it("reports AppleScript launch failures with a macOS Ghostty hint", async () => {
+    const pi = createPiApi({ code: 1, stderr: "execution error: Ghostty got an error" });
+
+    const result = await launchSplitHandoffSession(pi as never, {
+      cwd: "/tmp/project",
+      sessionDir: "/tmp/sessions",
+      direction: "right",
+      sessionId: "child-session-123",
+      bootstrapValue: "encoded-bootstrap",
+    });
+
+    expect(result).toEqual({
+      success: false,
+      error:
+        "Failed to launch Ghostty split: execution error: Ghostty got an error. " +
+        "Split handoff currently supports Ghostty on macOS only.",
+    });
   });
 
   it("keeps bootstrap payloads decodable after encoding", () => {

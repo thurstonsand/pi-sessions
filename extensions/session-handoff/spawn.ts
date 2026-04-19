@@ -9,6 +9,11 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import { HANDOFF_BOOTSTRAP_ENV } from "./metadata.js";
 
+const GHOSTTY_MACOS_ONLY_MESSAGE = "Split handoff currently supports Ghostty on macOS only.";
+const GHOSTTY_REQUIRED_MESSAGE = "Split handoff requires running inside Ghostty.";
+const GHOSTTY_SPLIT_TIMEOUT_MS = 15_000;
+const OSASCRIPT_PATH = "/usr/bin/osascript";
+
 export type HandoffSplitDirection = "left" | "right" | "up" | "down";
 
 export interface CreatedHandoffSession {
@@ -17,20 +22,19 @@ export interface CreatedHandoffSession {
 }
 
 export async function validateSplitHandoffPrerequisites(
-  pi: ExtensionAPI,
+  _pi: ExtensionAPI,
   ctx: ExtensionCommandContext,
 ): Promise<string | undefined> {
   if (!ctx.sessionManager.getSessionFile()) {
     return "Split handoff requires a persisted current session.";
   }
 
-  if (process.env.TERM_PROGRAM !== "ghostty") {
-    return "Split handoff requires running inside Ghostty.";
+  if (process.platform !== "darwin") {
+    return GHOSTTY_MACOS_ONLY_MESSAGE;
   }
 
-  const result = await pi.exec("which", ["ghostty-nav"], { cwd: ctx.cwd, timeout: 5_000 });
-  if (result.code !== 0) {
-    return "Split handoff requires ghostty-nav on your PATH.";
+  if (process.env.TERM_PROGRAM !== "ghostty") {
+    return GHOSTTY_REQUIRED_MESSAGE;
   }
 
   return undefined;
@@ -75,20 +79,22 @@ export async function launchSplitHandoffSession(
     options.sessionId,
     options.bootstrapValue,
   );
-  const result = await pi.exec(
-    "ghostty-nav",
-    [
-      "split",
-      options.direction,
-      "--cwd",
-      options.cwd,
-      "--command",
-      piCommand,
-      "--focus",
-      "original",
-    ],
-    { cwd: options.cwd, timeout: 15_000 },
-  );
+  const escapedCwd = escapeAppleScriptString(options.cwd);
+  const escapedCommand = escapeAppleScriptString(piCommand);
+  const appleScript = [
+    'tell application "Ghostty"',
+    "    set targetTerminal to focused terminal of selected tab of front window",
+    "    set cfg to new surface configuration",
+    `    set initial working directory of cfg to "${escapedCwd}"`,
+    `    set command of cfg to "${escapedCommand}"`,
+    `    set newTerminal to split targetTerminal direction ${options.direction} with configuration cfg`,
+    "    focus targetTerminal",
+    "end tell",
+  ].join("\n");
+  const result = await pi.exec(OSASCRIPT_PATH, ["-e", appleScript], {
+    cwd: options.cwd,
+    timeout: GHOSTTY_SPLIT_TIMEOUT_MS,
+  });
 
   if (result.code === 0) {
     return { success: true };
@@ -97,7 +103,9 @@ export async function launchSplitHandoffSession(
   const details = `${result.stderr || result.stdout}`.trim() || `exit code ${result.code}`;
   return {
     success: false,
-    error: `Failed to launch Ghostty split: ${details}`,
+    error:
+      `Failed to launch Ghostty split: ${details}. ` +
+      "Split handoff currently supports Ghostty on macOS only.",
   };
 }
 
@@ -123,6 +131,10 @@ export function buildPiLaunchCommand(
 ): string {
   const payload = `${buildPiResumeCommand(sessionDir, sessionId, bootstrapValue)}; exec /bin/zsh -il`;
   return `/bin/zsh -ilc ${shellQuote(payload)}`;
+}
+
+function escapeAppleScriptString(value: string): string {
+  return value.replaceAll("\\", "\\\\").replaceAll('"', '\\"');
 }
 
 function shellQuote(value: string): string {

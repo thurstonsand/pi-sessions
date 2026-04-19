@@ -62,20 +62,20 @@ What session did I implement the db layer?
 
 `/handoff <goal>` starts a focused new session. Give pi a goal, and it will generate a prompt for you to review before kicking it off.
 
-You can also launch the handoff into a Ghostty split pane while continuing your current session:
+You can either start a new session directly in your current one, or if you have Ghostty on macOS, you can spawn a new one in a split-pane and continue in your current:
 
 - `/handoff --left <goal>`
 - `/handoff --right <goal>`
 - `/handoff --up <goal>`
 - `/handoff --down <goal>`
 
-where the flag indicates which direction the new pane will split.
+The flag indicates the Ghostty split direction.
 
 Flow:
 
 - run `/handoff [--<direction>] <goal>`
 - review the generated prompt preview
-- optionally edit the prompt to make any adjustments
+- optionally edit the prompt
 - start the new session
 
 If you do nothing, the preview autostarts after a short countdown.

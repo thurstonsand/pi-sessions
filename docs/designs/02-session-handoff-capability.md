@@ -78,7 +78,7 @@ The handoff command should behave like this:
 9. the extension packages the approved handoff payload into `PI_SESSIONS_HANDOFF_BOOTSTRAP` as base64-encoded JSON, including the target child session id
 10. the child session is activated:
    - plain `/handoff <goal>` switches into the prepared child session in-process
-   - split-pane handoff calls `ghostty-nav split <direction> --focus original ...` to launch a fresh `pi --session <full-uuid>` in the new pane
+   - split-pane handoff invokes Ghostty's AppleScript split API via `/usr/bin/osascript` to launch a fresh `pi --session <full-uuid>` in the new pane
 11. on child-session start, the extension consumes the bootstrap env var, validates that the target session is still fresh, appends durable handoff metadata, and sends the approved handoff prompt as the first user message
 
 This keeps the current session alive when the user asks for a background handoff, while still making the new session visibly real rather than pretending the old UI simply continued.
@@ -172,7 +172,7 @@ For both in-process and split-pane handoff:
 Then activate the child session by one of two mechanisms:
 
 - in-process handoff: `ctx.switchSession(childSessionFile)`
-- split-pane handoff: launch `pi --session <full-session-uuid>` in a new Ghostty split via `ghostty-nav`
+- split-pane handoff: launch `pi --session <full-session-uuid>` in a new Ghostty split via Ghostty's AppleScript API and `/usr/bin/osascript`
 
 Use the full session UUID rather than the full file path when launching the child process. That keeps the external launch interface cleaner and doubles as a sanity check that the child was written to the expected session directory.
 
@@ -435,7 +435,7 @@ Background handoff should leave the user's current pane focused.
 Why:
 
 - the feature's purpose is to spin work up elsewhere without interrupting the current flow
-- `ghostty-nav` already exposes explicit focus control, so the behavior is easy to make deterministic
+- Ghostty's AppleScript split API exposes explicit focus control, so the behavior is easy to make deterministic
 - focus-jumping can always be added later if it proves useful
 
 ### 10. Spawned child sessions start with defaults for now
@@ -481,7 +481,8 @@ Why:
 - **User cancels in preview or editor**: stay in the current session and discard the pending handoff draft.
 - **Prepared in-process child fails to switch**: remain in the old session; do not materialize bootstrap state in the child.
 - **Split-pane handoff is requested outside Ghostty**: fail clearly and do not create or launch a child session.
-- **`ghostty-nav` is unavailable**: fail clearly and do not create or launch a child session.
+- **Split-pane handoff is requested outside macOS**: fail clearly and do not create or launch a child session.
+- **Ghostty's AppleScript split API fails**: keep the child session on disk, report the failure clearly, and include a manual recovery command.
 - **Child session file is created but Ghostty or `pi` launch fails**: keep the child session on disk, notify the user with its full UUID, and let them start it manually later.
 - **Bootstrap payload targets a different session id**: ignore it.
 - **Bootstrap reaches a child session that already has any user message**: show a UI notification that the target session is no longer fresh, and do not append handoff metadata.
@@ -613,7 +614,7 @@ Reason:
 - `extensions/session-handoff/spawn.ts`
   - header-only child-session file creation
   - bootstrap env payload assembly
-  - Ghostty / `ghostty-nav` validation and launch-command assembly
+  - Ghostty / macOS validation and AppleScript launch-command assembly
 - `extensions/session-handoff/refs.ts`
   - canonical ref formatting and resolution helpers
 - `extensions/session-handoff/lineage.ts`
@@ -633,10 +634,10 @@ Reason:
 ### New files
 
 - `extensions/session-handoff/spawn.ts`
-  - validate Ghostty / `ghostty-nav` preconditions for handoff activation
+  - validate Ghostty / macOS preconditions for handoff activation
   - create header-only child session files explicitly
   - assemble session-targeted bootstrap env payloads
-  - assemble and launch the `ghostty-nav split ... pi --session <full-uuid>` command
+  - assemble and launch the Ghostty AppleScript split command via `/usr/bin/osascript`
 - `test/session-handoff.spawn.test.ts`
   - cover child-session file creation, bootstrap-payload shaping, Ghostty validation, and launch-command shaping
 
@@ -645,7 +646,7 @@ Reason:
 - `README.md`
   - document `/handoff`
   - document optional `--left|--right|--up|--down` launch flags
-  - document Ghostty / `ghostty-nav` requirements for split-pane handoff
+  - document Ghostty / macOS requirements for split-pane handoff
 - `extensions/session-handoff.ts`
   - extend command parsing for split flags
   - prepare header-only child sessions
@@ -686,11 +687,11 @@ Deliverable: `/handoff <goal>` and `/handoff --left|--right|--up|--down <goal>` 
 - [ ] Implement explicit header-only child-session file creation
 - [ ] Implement session-targeted bootstrap env payload creation
 - [ ] Switch in-process handoff into the prepared child session
-- [ ] Launch split-pane handoff with `ghostty-nav split <direction> --focus original ...`
+- [ ] Launch split-pane handoff with Ghostty's AppleScript split API via `/usr/bin/osascript`, keeping focus on the original pane
 - [ ] Pass the full child UUID to `pi --session`
 - [ ] Materialize durable handoff metadata on child `session_start`
 - [ ] Abort startup bootstrap if the target child already has a user message, and show a UI notification that the session is no longer fresh
-- [ ] Fail clearly when not in Ghostty or when `ghostty-nav` is unavailable
+- [ ] Fail clearly when not in Ghostty or when split-pane handoff is requested outside macOS
 - [ ] Surface split-pane launch failures while preserving the created child-session UUID for manual recovery
 - [ ] Ensure handoff never copies full session history
 - [ ] Add tests for extraction success/failure, countdown behavior, cancel behavior, child-session creation, bootstrap consumption, in-process switching, Ghostty launch shaping, and recovery on launch failure
@@ -726,7 +727,7 @@ Deliverable: `@handoff/<uuid-prefix>` autocompletes in the prompt editor and sta
 Deliverable: the package exposes a coherent handoff/recall workflow and is documented well.
 
 - [ ] Document `/handoff`, the review/countdown flow, and optional split flags in `README.md`
-- [ ] Document Ghostty / `ghostty-nav` requirements and failure behavior for split-pane handoff
+- [ ] Document Ghostty / macOS requirements and failure behavior for split-pane handoff
 - [ ] Document how handoff references interact with `session_ask`
 - [ ] Document `@handoff/...` autocomplete behavior and fallback typed-reference behavior
 - [ ] Add final smoke-test instructions covering split-pane handoff → child session start → `@handoff` autocomplete → session_ask on the parent

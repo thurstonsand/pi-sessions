@@ -1,9 +1,16 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  HANDOFF_BOOTSTRAP_ENV,
+  parseHandoffBootstrap,
+} from "../extensions/session-handoff/metadata.js";
 
 const mockLoadSettings = vi.fn();
 const mockGenerateHandoffDraft = vi.fn();
 const mockReviewHandoffDraft = vi.fn();
+const mockValidateSplitHandoffPrerequisites = vi.fn();
+const mockCreateHandoffSession = vi.fn();
+const mockLaunchSplitHandoffSession = vi.fn();
 
 vi.mock("../extensions/shared/settings.js", () => ({
   loadSettings: mockLoadSettings,
@@ -21,9 +28,21 @@ vi.mock("../extensions/session-handoff/review.js", async () => {
   };
 });
 
+vi.mock("../extensions/session-handoff/spawn.js", () => ({
+  buildPiResumeCommand: vi.fn(
+    (sessionDir: string, sessionId: string, bootstrapValue: string) =>
+      `PI_SESSIONS_HANDOFF_BOOTSTRAP='${bootstrapValue}' pi --session-dir ${sessionDir} --session ${sessionId}`,
+  ),
+  validateSplitHandoffPrerequisites: mockValidateSplitHandoffPrerequisites,
+  createHandoffSession: mockCreateHandoffSession,
+  launchSplitHandoffSession: mockLaunchSplitHandoffSession,
+}));
+
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
+  delete process.env[HANDOFF_BOOTSTRAP_ENV];
+
   mockLoadSettings.mockReturnValue({
     handoff: { pickerShortcut: "alt+o" },
     index: { path: "/tmp/pi-sessions/index.sqlite" },
@@ -41,20 +60,41 @@ beforeEach(() => {
     sessionPath: "/tmp/session.jsonl",
   });
   mockReviewHandoffDraft.mockResolvedValue("Approved handoff draft");
+  mockValidateSplitHandoffPrerequisites.mockResolvedValue(undefined);
+  mockCreateHandoffSession.mockReturnValue({
+    sessionId: "child-session-123",
+    sessionFile: "/tmp/sessions/child-session-123.jsonl",
+  });
+  mockLaunchSplitHandoffSession.mockResolvedValue({ success: true });
 });
 
 describe("session handoff command", () => {
   it("requires a goal", async () => {
-    const handler = await getHandoffHandler();
+    const { handler } = await getHandoffCommand();
     const ctx = createCommandContext();
 
     await handler("   ", ctx as never);
 
-    expect(ctx.ui.notify).toHaveBeenCalledWith("Usage: /handoff <goal for new thread>", "error");
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Usage: /handoff [--left|--right|--up|--down] <goal for new thread>",
+      "error",
+    );
+  });
+
+  it("rejects multiple split flags", async () => {
+    const { handler } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--left --right Finish phase 1", ctx as never);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Use only one split flag: --left, --right, --up, or --down.",
+      "error",
+    );
   });
 
   it("requires conversation context", async () => {
-    const handler = await getHandoffHandler();
+    const { handler } = await getHandoffCommand();
     const ctx = createCommandContext({ hasMessages: false });
 
     await handler("Finish phase 1", ctx as never);
@@ -62,50 +102,115 @@ describe("session handoff command", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("No conversation to hand off", "error");
   });
 
-  it("creates a new session and queues the approved draft for delivery in the child session", async () => {
-    const handler = await getHandoffHandler();
+  it("creates a prepared child session and switches into it for plain handoff", async () => {
+    const { handler } = await getHandoffCommand();
     const ctx = createCommandContext();
 
     await handler("Finish phase 1", ctx as never);
 
-    expect(ctx.newSession).toHaveBeenCalledWith(
-      expect.objectContaining({ parentSession: "/tmp/session.jsonl", setup: expect.any(Function) }),
-    );
-    expect(ctx.appendCustomEntry).toHaveBeenCalledWith(
-      "pi-sessions.handoff",
-      expect.objectContaining({
-        origin: "handoff",
-        goal: "Finish phase 1",
-        nextTask: "Task",
-        initial_prompt: "Approved handoff draft",
-        initial_prompt_nonce: expect.any(String),
-      }),
-    );
+    expect(mockCreateHandoffSession).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+      sessionDir: "/tmp/sessions",
+      parentSessionFile: "/tmp/session.jsonl",
+    });
+    expect(ctx.switchSession).toHaveBeenCalledWith("/tmp/sessions/child-session-123.jsonl");
     expect(ctx.ui.notify).toHaveBeenCalledWith("Handoff started in a new session.", "info");
+    expect(process.env[HANDOFF_BOOTSTRAP_ENV]).toBeUndefined();
+  });
+
+  it("launches a split-pane handoff when a split flag is provided", async () => {
+    const { handler, pi } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--right Finish phase 1", ctx as never);
+
+    expect(mockValidateSplitHandoffPrerequisites).toHaveBeenCalledWith(pi, ctx);
+    expect(mockCreateHandoffSession).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+      sessionDir: "/tmp/sessions",
+      parentSessionFile: "/tmp/session.jsonl",
+    });
+    expect(mockLaunchSplitHandoffSession).toHaveBeenCalledWith(pi, {
+      cwd: "/tmp/project",
+      sessionDir: "/tmp/sessions",
+      direction: "right",
+      sessionId: "child-session-123",
+      bootstrapValue: expect.any(String),
+    });
+    expect(ctx.switchSession).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Handoff started in a new pane (right).", "info");
+
+    const launchOptions = mockLaunchSplitHandoffSession.mock.calls[0]?.[1] as {
+      bootstrapValue: string;
+    };
+    expect(parseHandoffBootstrap(launchOptions.bootstrapValue)).toEqual({
+      sessionId: "child-session-123",
+      goal: "Finish phase 1",
+      nextTask: "Task",
+      initialPrompt: "Approved handoff draft",
+    });
+  });
+
+  it("fails loudly when split-pane preflight fails", async () => {
+    mockValidateSplitHandoffPrerequisites.mockResolvedValue(
+      "Split handoff requires running inside Ghostty.",
+    );
+    const { handler } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--right Finish phase 1", ctx as never);
+
+    expect(mockGenerateHandoffDraft).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Split handoff requires running inside Ghostty.",
+      "error",
+    );
+  });
+
+  it("reports the created session id when split-pane launch fails", async () => {
+    mockLaunchSplitHandoffSession.mockResolvedValue({
+      success: false,
+      error: "Failed to launch Ghostty split: boom",
+    });
+    const { handler } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--right Finish phase 1", ctx as never);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "Failed to launch Ghostty split: boom Created handoff session child-session-123; start it manually with: PI_SESSIONS_HANDOFF_BOOTSTRAP=",
+      ),
+      "error",
+    );
   });
 
   it("stops when review is cancelled", async () => {
     mockReviewHandoffDraft.mockResolvedValue(undefined);
-    const handler = await getHandoffHandler();
+    const { handler } = await getHandoffCommand();
     const ctx = createCommandContext();
 
     await handler("Finish phase 1", ctx as never);
 
-    expect(ctx.newSession).not.toHaveBeenCalled();
+    expect(ctx.switchSession).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith("Cancelled", "info");
   });
 
-  it("stops when the new session is cancelled", async () => {
-    const handler = await getHandoffHandler();
-    const ctx = createCommandContext({ newSessionCancelled: true });
+  it("stops when the session switch is cancelled", async () => {
+    const { handler } = await getHandoffCommand();
+    const ctx = createCommandContext({ switchCancelled: true });
 
     await handler("Finish phase 1", ctx as never);
 
-    expect(ctx.ui.notify).toHaveBeenCalledWith("New session cancelled", "info");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Session switch cancelled", "info");
+    expect(process.env[HANDOFF_BOOTSTRAP_ENV]).toBeUndefined();
   });
 });
 
-async function getHandoffHandler(): Promise<(args: string, ctx: unknown) => Promise<void>> {
+async function getHandoffCommand(): Promise<{
+  pi: ExtensionAPI;
+  handler: (args: string, ctx: unknown) => Promise<void>;
+}> {
   const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
   const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
   const pi = createPiApi(commands);
@@ -114,7 +219,7 @@ async function getHandoffHandler(): Promise<(args: string, ctx: unknown) => Prom
   if (!command) {
     throw new Error("handoff command was not registered");
   }
-  return command.handler;
+  return { pi: pi as never, handler: command.handler };
 }
 
 function createPiApi(
@@ -155,12 +260,12 @@ function createPiApi(
   };
 }
 
-function createCommandContext(options?: { hasMessages?: boolean; newSessionCancelled?: boolean }) {
+function createCommandContext(options?: { hasMessages?: boolean; switchCancelled?: boolean }) {
   const hasMessages = options?.hasMessages ?? true;
-  const newSessionCancelled = options?.newSessionCancelled ?? false;
-  const appendCustomEntry = vi.fn();
+  const switchCancelled = options?.switchCancelled ?? false;
 
   return {
+    cwd: "/tmp/project",
     hasUI: true,
     model: { provider: "openai", id: "gpt-5.4" },
     ui: {
@@ -210,20 +315,13 @@ function createCommandContext(options?: { hasMessages?: boolean; newSessionCance
       getLeafId() {
         return hasMessages ? "user-1" : null;
       },
+      getSessionDir() {
+        return "/tmp/sessions";
+      },
       getSessionFile() {
         return "/tmp/session.jsonl";
       },
     },
-    appendCustomEntry,
-    newSession: vi.fn(
-      async (sessionOptions?: {
-        setup?: (sessionManager: { appendCustomEntry: typeof appendCustomEntry }) => Promise<void>;
-      }) => {
-        if (!newSessionCancelled) {
-          await sessionOptions?.setup?.({ appendCustomEntry } as never);
-        }
-        return { cancelled: newSessionCancelled };
-      },
-    ),
+    switchSession: vi.fn(async () => ({ cancelled: switchCancelled })),
   };
 }

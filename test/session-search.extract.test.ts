@@ -182,7 +182,6 @@ describe("extractSessionRecord", () => {
           goal: "Continue phase 3",
           nextTask: "Implement autocomplete",
           initial_prompt: "Continue phase 3",
-          initial_prompt_nonce: "handoff-nonce-1",
         },
       },
     ]);

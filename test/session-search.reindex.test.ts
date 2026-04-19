@@ -148,7 +148,6 @@ describe("rebuildSessionIndex", () => {
           goal: "Finish the split",
           nextTask: "Implement autocomplete",
           initial_prompt: "Finish the split",
-          initial_prompt_nonce: "handoff-nonce-3",
         },
       },
     ]);

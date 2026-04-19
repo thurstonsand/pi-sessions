@@ -1,22 +1,31 @@
-import type {
-  ExtensionAPI,
-  ExtensionCommandContext,
-  SessionManager,
-} from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@mariozechner/pi-coding-agent";
 import { buildSessionContext } from "@mariozechner/pi-coding-agent";
 import { Key, matchesKey } from "@mariozechner/pi-tui";
 import { generateHandoffDraft, type HandoffDraftResult } from "./session-handoff/extract.js";
 import {
+  createHandoffBootstrap,
   createHandoffSessionMetadata,
-  createPendingSendConsumedEntry,
-  getPendingInitialPromptFromEntries,
+  encodeHandoffBootstrap,
+  getHandoffMetadataFromEntries,
+  HANDOFF_BOOTSTRAP_ENV,
   HANDOFF_METADATA_CUSTOM_TYPE,
-  PENDING_SEND_CONSUMED_CUSTOM_TYPE,
+  HANDOFF_STALE_SESSION_MESSAGE,
+  hasUserMessages,
+  parseHandoffBootstrap,
 } from "./session-handoff/metadata.js";
 import { openSessionReferencePicker } from "./session-handoff/picker.js";
 import { SESSION_TOKEN_PREFIX } from "./session-handoff/query.js";
 import { renderStrongModal, reviewHandoffDraft } from "./session-handoff/review.js";
+import {
+  buildPiResumeCommand,
+  createHandoffSession,
+  type HandoffSplitDirection,
+  launchSplitHandoffSession,
+  validateSplitHandoffPrerequisites,
+} from "./session-handoff/spawn.js";
 import { loadSettings } from "./shared/settings.js";
+
+const HANDOFF_USAGE = "Usage: /handoff [--left|--right|--up|--down] <goal for new thread>";
 
 export default function sessionHandoffExtension(pi: ExtensionAPI): void {
   const settings = loadSettings();
@@ -34,9 +43,9 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const goal = args.trim();
-      if (!goal) {
-        ctx.ui.notify("Usage: /handoff <goal for new thread>", "error");
+      const parsedArgs = parseHandoffCommandArgs(args);
+      if (parsedArgs.kind === "error") {
+        ctx.ui.notify(parsedArgs.message, "error");
         return;
       }
 
@@ -49,12 +58,20 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         return;
       }
 
+      if (parsedArgs.splitDirection) {
+        const preflightError = await validateSplitHandoffPrerequisites(pi, ctx);
+        if (preflightError) {
+          ctx.ui.notify(preflightError, "error");
+          return;
+        }
+      }
+
       let generatedDraft: HandoffDraftResult | undefined;
       try {
         generatedDraft = await runWithLoader(
           ctx,
           "Generating handoff draft...",
-          async (signal: AbortSignal) => generateHandoffDraft(ctx, goal, signal),
+          async (signal: AbortSignal) => generateHandoffDraft(ctx, parsedArgs.goal, signal),
         );
       } catch (error) {
         ctx.ui.notify(formatHandoffError(error), "error");
@@ -72,22 +89,59 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const parentSession = ctx.sessionManager.getSessionFile();
+      const parentSessionFile = ctx.sessionManager.getSessionFile();
+      if (!parentSessionFile) {
+        ctx.ui.notify("Handoff requires a persisted current session.", "error");
+        return;
+      }
 
       const handoffMetadata = createHandoffSessionMetadata(
-        goal,
+        parsedArgs.goal,
         generatedDraft.context.nextTask,
         approvedDraft,
       );
-      const writeMetadata = async (sm: SessionManager) => {
-        sm.appendCustomEntry(HANDOFF_METADATA_CUSTOM_TYPE, handoffMetadata);
-      };
-      const newSessionResult = parentSession
-        ? await ctx.newSession({ parentSession, setup: writeMetadata })
-        : await ctx.newSession({ setup: writeMetadata });
+      const createdSession = createHandoffSession({
+        cwd: ctx.cwd,
+        sessionDir: ctx.sessionManager.getSessionDir(),
+        parentSessionFile,
+      });
+      const bootstrapValue = encodeHandoffBootstrap(
+        createHandoffBootstrap(createdSession.sessionId, handoffMetadata),
+      );
 
-      if (newSessionResult.cancelled) {
-        ctx.ui.notify("New session cancelled", "info");
+      if (parsedArgs.splitDirection) {
+        const launchResult = await launchSplitHandoffSession(pi, {
+          cwd: ctx.cwd,
+          sessionDir: ctx.sessionManager.getSessionDir(),
+          direction: parsedArgs.splitDirection,
+          sessionId: createdSession.sessionId,
+          bootstrapValue,
+        });
+
+        if (!launchResult.success) {
+          ctx.ui.notify(
+            `${launchResult.error} Created handoff session ${createdSession.sessionId}; start it manually with: ${buildPiResumeCommand(ctx.sessionManager.getSessionDir(), createdSession.sessionId, bootstrapValue)}`,
+            "error",
+          );
+          return;
+        }
+
+        ctx.ui.notify(`Handoff started in a new pane (${parsedArgs.splitDirection}).`, "info");
+        return;
+      }
+
+      const previousBootstrapValue = process.env[HANDOFF_BOOTSTRAP_ENV];
+      process.env[HANDOFF_BOOTSTRAP_ENV] = bootstrapValue;
+
+      let switchResult: { cancelled: boolean };
+      try {
+        switchResult = await ctx.switchSession(createdSession.sessionFile);
+      } finally {
+        restoreProcessEnv(HANDOFF_BOOTSTRAP_ENV, previousBootstrapValue);
+      }
+
+      if (switchResult.cancelled) {
+        ctx.ui.notify("Session switch cancelled", "info");
         return;
       }
 
@@ -116,24 +170,48 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event, ctx) => {
-    const sessionFile = ctx.sessionManager.getSessionFile();
-    const pending = getPendingInitialPromptFromEntries(ctx.sessionManager.getEntries());
-
-    if (!sessionFile || !pending) {
+    const encodedBootstrap = process.env[HANDOFF_BOOTSTRAP_ENV];
+    if (!encodedBootstrap) {
       return;
     }
 
-    pi.appendEntry(
-      PENDING_SEND_CONSUMED_CUSTOM_TYPE,
-      createPendingSendConsumedEntry(pending.initial_prompt_nonce),
-    );
-    pi.sendUserMessage(pending.initial_prompt);
+    const bootstrap = parseHandoffBootstrap(encodedBootstrap);
+    if (!bootstrap) {
+      delete process.env[HANDOFF_BOOTSTRAP_ENV];
+      return;
+    }
+
+    if (bootstrap.sessionId !== ctx.sessionManager.getSessionId()) {
+      return;
+    }
+
+    try {
+      const entries = ctx.sessionManager.getEntries();
+      if (hasUserMessages(entries)) {
+        if (ctx.hasUI) {
+          ctx.ui.notify(HANDOFF_STALE_SESSION_MESSAGE, "error");
+        }
+        return;
+      }
+
+      if (!getHandoffMetadataFromEntries(entries)) {
+        pi.appendEntry(
+          HANDOFF_METADATA_CUSTOM_TYPE,
+          createHandoffSessionMetadata(bootstrap.goal, bootstrap.nextTask, bootstrap.initialPrompt),
+        );
+      }
+
+      pi.sendUserMessage(bootstrap.initialPrompt);
+    } finally {
+      delete process.env[HANDOFF_BOOTSTRAP_ENV];
+    }
   });
 
-  pi.on("before_agent_start", async () => {
+  pi.on("before_agent_start", async (event) => {
     return {
       systemPrompt:
-        "When the user references @session:<uuid>, treat it as a session token. If you call session_ask, pass only the UUID value, not the @session: prefix.",
+        event.systemPrompt +
+        "\n\nWhen the user references @session:<uuid>, treat it as a session token. If you call session_ask, pass only the UUID value, not the @session: prefix.",
     };
   });
 }
@@ -200,4 +278,66 @@ function formatHandoffError(error: unknown): string {
   }
 
   return "Handoff generation failed.";
+}
+
+function parseHandoffCommandArgs(
+  args: string,
+):
+  | { kind: "ok"; goal: string; splitDirection?: HandoffSplitDirection | undefined }
+  | { kind: "error"; message: string } {
+  const tokens = args
+    .trim()
+    .split(/\s+/)
+    .filter((token) => token.length > 0);
+
+  if (tokens.length === 0) {
+    return { kind: "error", message: HANDOFF_USAGE };
+  }
+
+  const directionFlags = new Map<string, HandoffSplitDirection>([
+    ["--left", "left"],
+    ["--right", "right"],
+    ["--up", "up"],
+    ["--down", "down"],
+  ]);
+
+  let splitDirection: HandoffSplitDirection | undefined;
+  const goalTokens: string[] = [];
+
+  for (const token of tokens) {
+    const direction = directionFlags.get(token);
+    if (!direction) {
+      goalTokens.push(token);
+      continue;
+    }
+
+    if (splitDirection) {
+      return {
+        kind: "error",
+        message: "Use only one split flag: --left, --right, --up, or --down.",
+      };
+    }
+
+    splitDirection = direction;
+  }
+
+  const goal = goalTokens.join(" ").trim();
+  if (!goal) {
+    return { kind: "error", message: HANDOFF_USAGE };
+  }
+
+  return {
+    kind: "ok",
+    goal,
+    splitDirection,
+  };
+}
+
+function restoreProcessEnv(key: string, previousValue: string | undefined): void {
+  if (previousValue === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = previousValue;
 }

@@ -29,11 +29,19 @@ Pi's built-in session controls and existing third-party handoff implementations 
 Keep v1 narrow and clean:
 
 - provide a human-facing `/handoff <goal>` command
+- add optional split flags: `/handoff --left|--right|--up|--down <goal>`
 - keep handoff **command-only** in v1; do **not** expose an LLM-callable `handoff` tool yet
 - use structured extraction with an internal, handoff-scoped tool schema
 - show a review gate before sending
 - if the user does nothing for 8 seconds, auto-send the generated draft as-is
-- switch sessions only through `ctx.newSession(...)`
+- use the same prepared-child model for both in-process and split-pane handoff
+- create child session files explicitly with a native session header containing `parentSession`, but no pre-seeded metadata or prompt messages
+- activate in-process handoffs by switching into the prepared child session
+- activate split-pane handoffs by launching a fresh `pi` instance in Ghostty while leaving the current session active
+- pass handoff bootstrap payload via an ephemeral environment variable keyed to the target child session id
+- pass the child's full session UUID to `pi --session`, not the full path
+- default split-pane launch focus to the original pane
+- start spawned child sessions with default model / thinking / tools for now
 - preserve normal Pi compaction behavior; handoff is complementary, not a replacement
 - persist parent-session lineage in the sidecar index so recall and later ergonomics can build on it
 - ship a small, handoff-only `@handoff/...` autocomplete path in the prompt editor
@@ -42,6 +50,11 @@ V1 does **not** include:
 
 - proactive threshold-triggered handoff generation
 - `session_before_compact` cancellation or compaction replacement
+- fork-based handoff or copied conversation history in the child session
+- inherited or user-configurable launch model / thinking / tools for the spawned child session
+- pane-title customization for spawned Ghostty surfaces
+- persistent bootstrap transport files when env transport is sufficient
+- nonce / ack entries for startup handoff delivery
 - a tool-path handoff that auto-switches after an agent turn
 - a full lineage-navigation tool surface
 - a generalized mention framework for other token families
@@ -50,7 +63,7 @@ V1 does **not** include:
 
 The handoff command should behave like this:
 
-1. user runs `/handoff <goal>`
+1. user runs `/handoff <goal>` or `/handoff --left|--right|--up|--down <goal>`
 2. extension serializes the current conversation branch
 3. the current model, or an optional handoff-model override if configured, receives the conversation, the goal, and a handoff-only extraction tool
 4. the extension assembles a deterministic draft prompt from the structured result
@@ -61,10 +74,14 @@ The handoff command should behave like this:
    - `Esc` to cancel
 6. if the user does nothing, the draft is accepted automatically
 7. if the user presses `Enter`, the extension opens `ctx.ui.editor(...)` for full review/edit
-8. once accepted, the extension creates a new session with `ctx.newSession({ parentSession })`
-9. the approved handoff prompt is sent as the first message in the new session
+8. once accepted, the extension creates a prepared child session containing only a native session header with `parentSession`
+9. the extension packages the approved handoff payload into `PI_SESSIONS_HANDOFF_BOOTSTRAP` as base64-encoded JSON, including the target child session id
+10. the child session is activated:
+   - plain `/handoff <goal>` switches into the prepared child session in-process
+   - split-pane handoff calls `ghostty-nav split <direction> --focus original ...` to launch a fresh `pi --session <full-uuid>` in the new pane
+11. on child-session start, the extension consumes the bootstrap env var, validates that the target session is still fresh, appends durable handoff metadata, and sends the approved handoff prompt as the first user message
 
-This avoids the visual lie where the UI appears to continue the old session while the model is actually in a new one.
+This keeps the current session alive when the user asks for a background handoff, while still making the new session visibly real rather than pretending the old UI simply continued.
 
 ### Review model
 
@@ -143,15 +160,35 @@ Assembly rules:
 
 ### Session switching model
 
-All actual handoff completion should go through `ExtensionCommandContext`.
+All actual handoff orchestration should still go through `ExtensionCommandContext`, but both launch paths now share the same prepared-child model.
 
-Use:
+For both in-process and split-pane handoff:
 
-```ts
-await ctx.newSession({ parentSession: ctx.sessionManager.getSessionFile() })
-```
+1. write a minimal child session file explicitly into the current session directory
+2. include only a native session header with `parentSession`
+3. do **not** pre-seed durable handoff metadata or the first user prompt into the child session file
+4. package the approved handoff payload into `PI_SESSIONS_HANDOFF_BOOTSTRAP` as base64-encoded JSON with `sessionId`, `goal`, `nextTask`, and `initialPrompt`
 
-Then send the approved draft as the first user message.
+Then activate the child session by one of two mechanisms:
+
+- in-process handoff: `ctx.switchSession(childSessionFile)`
+- split-pane handoff: launch `pi --session <full-session-uuid>` in a new Ghostty split via `ghostty-nav`
+
+Use the full session UUID rather than the full file path when launching the child process. That keeps the external launch interface cleaner and doubles as a sanity check that the child was written to the expected session directory.
+
+On `session_start`, the extension should:
+
+1. read the bootstrap env payload
+2. ignore it unless the target session id matches the current session id
+3. scan current session entries
+4. if any user message already exists, abort bootstrap, show `Session handoff failed: target session already has user input.`, and do not append handoff metadata
+5. if no user message exists and no handoff metadata exists yet, append the durable `pi-sessions.handoff` metadata
+6. if metadata already exists but there is still no user message, skip the append and still send the approved prompt as the first user message
+7. clear the bootstrap env payload after the matching child consumes it
+
+Do **not** use `SessionManager.create()` or `sessionManager.newSession()` alone for the split-pane path. A blank new session is not flushed to disk until an assistant message exists, so a second `pi` process would have nothing stable to open yet.
+
+Do **not** use `pi --fork` for handoff. Fork copies prior conversation history, while handoff should always start from a fresh child session plus the approved handoff prompt.
 
 Do **not** implement the low-level `sessionManager.newSession()` + `context` filtering pattern used in the `pi-amplike` tool path. It works around API limitations, but produces confusing UX and creates two realities:
 
@@ -310,15 +347,15 @@ Reasoning:
 
 ### 1. Command-only first
 
-Start with `/handoff` only.
+Start with `/handoff` only, with optional split flags.
 
 Why:
 
-- command handlers can safely call `ctx.newSession(...)`
-- that gives correct UI reset semantics
-- the tool-path workaround is the part with the ugliest UX failure mode
+- command handlers can safely own generation and review UX
+- both in-process and split-pane handoff can share one prepared-child bootstrap model
+- activation can differ while the resulting child-session state stays largely aligned
 
-A future LLM-callable handoff tool is possible, but not in v1. Today a tool call still runs inside the old session turn, which makes it awkward to pause for review, open an editor, switch to a visibly new session, and hand control back without mixing old-session and new-session UI state. Until Pi has a cleaner tool-driven session-switch flow, the command path is the honest UX.
+A future LLM-callable handoff tool is possible, but not in v1. The split-pane launch model makes that future cleaner than before, but it is still a separate product decision and should come only after the command path is solid.
 
 ### 2. Keep compaction and handoff separate
 
@@ -351,9 +388,9 @@ Why:
 - reduces formatting drift between handoffs
 - makes later UX tweaks cheap
 
-### 5. Review gate before switch
+### 5. Review gate before launch
 
-Use a preview-and-countdown layer before session creation.
+Use a preview-and-countdown layer before any new-session launch.
 
 Why:
 
@@ -361,7 +398,57 @@ Why:
 - still keeps the no-input path fast
 - avoids forcing everyone through a full edit step
 
-### 6. Lineage belongs in the index
+### 6. Both handoff modes use a prepared child session file
+
+For both in-process and separate-instance handoff, create the child JSONL file directly instead of relying on Pi to create it implicitly.
+
+Why:
+
+- native `parentSession` lineage must exist in the child session header before activation
+- `ctx.newSession(...)` tears down the current runtime, which defeats the goal of keeping the parent session alive for split-pane handoff
+- a prepared child file lets both launch modes converge on the same session shape
+
+### 7. Bootstrap handoff state via env payload, not pre-seeded entries
+
+Use an ephemeral env payload keyed by child session id, and let the child materialize metadata and the first prompt on startup.
+
+Why:
+
+- avoids duplicating root custom entries when Pi bulk-flushes a prepared session
+- keeps the child session file minimal before activation
+- lets both in-process and forked handoff share the same startup materialization logic
+
+### 8. Launch spawned children by full session UUID
+
+Use `pi --session <full-uuid>`, not the full JSONL path.
+
+Why:
+
+- cleaner external command surface
+- validates that the child session was written into the expected session directory
+- avoids coupling the launcher to absolute session-file paths
+
+### 9. Default split focus stays on the original pane
+
+Background handoff should leave the user's current pane focused.
+
+Why:
+
+- the feature's purpose is to spin work up elsewhere without interrupting the current flow
+- `ghostty-nav` already exposes explicit focus control, so the behavior is easy to make deterministic
+- focus-jumping can always be added later if it proves useful
+
+### 10. Spawned child sessions start with defaults for now
+
+Do not inherit current model / thinking / tools in the first version of split-pane handoff.
+
+Why:
+
+- it keeps the first implementation simpler
+- default launch behavior matches normal `pi` startup
+- inheritance and per-handoff overrides can be added later once the core launch path is stable
+
+### 11. Lineage belongs in the index
 
 Persist parent metadata in the sidecar DB.
 
@@ -371,7 +458,7 @@ Why:
 - lineage-aware features become cheap once the metadata is indexed
 - siblings and ancestor chains can be derived consistently
 
-### 7. Build a narrow handoff-only autocomplete path
+### 12. Build a narrow handoff-only autocomplete path
 
 Ship `@handoff/...` autocomplete in v1, but keep it local to handoff.
 
@@ -387,12 +474,20 @@ Why:
 - **No interactive UI**: `/handoff` should fail clearly in non-interactive mode.
 - **No active model / API key**: fail before generation starts.
 - **Empty or nearly empty conversation**: refuse handoff; there is nothing meaningful to transfer.
-- **Extraction returns malformed output**: show an error and do not switch sessions.
+- **Extraction returns malformed output**: show an error and do not launch anything.
 - **Extraction returns no files**: omit the files section; do not invent paths.
 - **Preview timer expires while the user is idle**: accept the generated draft and proceed.
 - **User presses `Enter` near timer expiry**: entering the editor wins; the timer is cancelled.
 - **User cancels in preview or editor**: stay in the current session and discard the pending handoff draft.
-- **New-session creation is cancelled by another extension**: remain in the old session; do not send the draft anywhere.
+- **Prepared in-process child fails to switch**: remain in the old session; do not materialize bootstrap state in the child.
+- **Split-pane handoff is requested outside Ghostty**: fail clearly and do not create or launch a child session.
+- **`ghostty-nav` is unavailable**: fail clearly and do not create or launch a child session.
+- **Child session file is created but Ghostty or `pi` launch fails**: keep the child session on disk, notify the user with its full UUID, and let them start it manually later.
+- **Bootstrap payload targets a different session id**: ignore it.
+- **Bootstrap reaches a child session that already has any user message**: show a UI notification that the target session is no longer fresh, and do not append handoff metadata.
+- **Bootstrap reaches a child session where handoff metadata already exists but no user message exists yet**: skip metadata append and still send the initial prompt.
+- **Split-pane handoff accidentally reuses fork semantics**: reject the implementation; handoff children must never contain copied conversation history.
+- **Session-id resolution is ambiguous**: always pass the child's full UUID, not a short prefix.
 - **Multiple handoffs from the same source session**: each child stores the same parent; later sibling lookup should work by shared parent.
 - **Recursive handoffs**: each child stores only its immediate parent; ancestor traversal walks recursively.
 - **Compaction after a handoff**: normal Pi behavior applies; handoff does not alter compaction hooks.
@@ -402,15 +497,51 @@ Why:
 
 Only alternatives discussed so far are listed here.
 
+### Using `ctx.newSession(...)` for split-pane handoff
+
+Rejected.
+
+Reason:
+
+- Pi tears down the current runtime when creating the new session
+- that defeats the core goal of keeping the original session alive while the child starts elsewhere
+
+### Pre-seeding handoff metadata or the first prompt into the child session file
+
+Rejected.
+
+Reason:
+
+- Pi can bulk-flush prepared sessions on first assistant output
+- duplicated root custom entries cause the rendered session tree to replay the initial branch twice
+- header-only preparation plus startup materialization is a cleaner compromise
+
+### Using `SessionManager.create()` / `newSession()` alone for split-pane handoff
+
+Rejected.
+
+Reason:
+
+- a blank new session is not flushed to disk early enough for a second `pi` process to open it reliably
+- relying on private persistence internals would make the feature brittle
+
+### Using `pi --fork` for handoff
+
+Rejected.
+
+Reason:
+
+- fork copies prior conversation history into the child session
+- handoff should always start from a fresh child session plus the approved prompt
+
 ### Low-level tool-path handoff in v1
 
 Rejected for v1.
 
 Reason:
 
-- it cannot use `ctx.newSession(...)`
-- the common workaround visually looks like the same session continued even though the model is in a new one
-- that UX is specifically what we want to avoid
+- even with the better separate-instance launch model, the first version should keep orchestration and review policy in an explicit user command
+- command-only keeps the initial behavior easier to reason about and test
 
 ### LLM-callable `handoff` tool in v1
 
@@ -418,10 +549,9 @@ Rejected for v1.
 
 Reason:
 
-- a tool call still happens inside the old session turn
-- that makes review-gate UX awkward: the tool would need to pause, open editing UI, and then resume without confusing ownership of the draft
-- a clean visible session switch is easier from a command than from a mid-turn tool invocation
-- command-only keeps the first version honest
+- the basic command-path experience should be proven first
+- the tool version intentionally wants different UX semantics: no review gate, no countdown, automatic background launch
+- that is a follow-up feature, not part of the first split-pane command rollout
 
 ### Proactive threshold-triggered handoff
 
@@ -473,11 +603,17 @@ Reason:
 
 - `extensions/session-handoff.ts`
   - `/handoff` command entry point and orchestration
+  - split-flag parsing and launch-path selection
+  - shared startup-bootstrap consumption logic
   - registration glue for handoff-only autocomplete
 - `extensions/session-handoff/extract.ts`
   - extraction prompt, internal tool schema, and draft assembly
 - `extensions/session-handoff/review.ts`
   - preview gate with countdown and editor handoff
+- `extensions/session-handoff/spawn.ts`
+  - header-only child-session file creation
+  - bootstrap env payload assembly
+  - Ghostty / `ghostty-nav` validation and launch-command assembly
 - `extensions/session-handoff/refs.ts`
   - canonical ref formatting and resolution helpers
 - `extensions/session-handoff/lineage.ts`
@@ -490,46 +626,38 @@ Reason:
 ### Package documentation
 
 - `README.md`
-  - add handoff workflow, countdown behavior, and recall integration notes
+  - add handoff workflow, countdown behavior, split-pane launch notes, and recall integration notes
 
 ## Files to Modify
 
 ### New files
 
-- `extensions/session-handoff.ts`
-  - register `/handoff`
-  - orchestrate generate → review → new session → send
-- `extensions/session-handoff/extract.ts`
-  - define `create_handoff_context`
-  - call `complete(...)` with the handoff-only tool
-  - validate extraction output
-  - assemble the final draft
-- `extensions/session-handoff/review.ts`
-  - implement preview/countdown UI
-  - hand off to `ctx.ui.editor(...)` on explicit edit
-- `extensions/session-handoff/refs.ts`
-  - format `@handoff/<id>` refs
-  - resolve raw path / session id / handoff ref into one canonical session target
-- `extensions/session-handoff/lineage.ts`
-  - internal helpers for parent/ancestor/child/sibling queries
-- `extensions/session-handoff/autocomplete.ts`
-  - detect `@handoff/` prefixes in the prompt editor
-  - query suggestions and apply completions
-- `extensions/session-handoff/query.ts`
-  - list indexed lineage-linked sessions for autocomplete and lineage helpers
-- `test/session-handoff.extract.test.ts`
-- `test/session-handoff.review.test.ts`
-- `test/session-handoff.refs.test.ts`
-- `test/session-handoff.command.test.ts`
-- `test/session-handoff.lineage.test.ts`
-- `test/session-handoff.autocomplete.test.ts`
+- `extensions/session-handoff/spawn.ts`
+  - validate Ghostty / `ghostty-nav` preconditions for handoff activation
+  - create header-only child session files explicitly
+  - assemble session-targeted bootstrap env payloads
+  - assemble and launch the `ghostty-nav split ... pi --session <full-uuid>` command
+- `test/session-handoff.spawn.test.ts`
+  - cover child-session file creation, bootstrap-payload shaping, Ghostty validation, and launch-command shaping
 
 ### Modified files
 
-- `package.json`
-  - expose the new extension entry point
 - `README.md`
   - document `/handoff`
+  - document optional `--left|--right|--up|--down` launch flags
+  - document Ghostty / `ghostty-nav` requirements for split-pane handoff
+- `extensions/session-handoff.ts`
+  - extend command parsing for split flags
+  - prepare header-only child sessions
+  - switch in-process handoff into prepared children
+  - choose between in-process and split-pane activation paths
+  - consume startup bootstrap payloads on session start
+- `extensions/session-handoff/extract.ts`
+  - continue to define `create_handoff_context`
+  - continue to call `complete(...)` with the handoff-only tool
+  - continue to validate extraction output and assemble the final draft
+- `extensions/session-handoff/review.ts`
+  - keep preview/countdown UI shared across both launch paths
 - `extensions/session-ask.ts`
   - accept resolved handoff/session references instead of only absolute session paths
 - `extensions/session-search/db.ts`
@@ -546,18 +674,26 @@ Reason:
 
 ## Implementation Plan
 
-### Phase 1 — command-only handoff core
+### Phase 1 — unified prepared-child handoff core
 
-Deliverable: `/handoff <goal>` generates a structured draft, offers a preview/countdown, and creates a clean new session on acceptance.
+Deliverable: `/handoff <goal>` and `/handoff --left|--right|--up|--down <goal>` share the same prepared-child bootstrap model. The plain command switches into the prepared child in-process, while split-pane handoff launches that same child in Ghostty and leaves the parent session active.
 
-- [ ] Add `extensions/session-handoff.ts`
-- [ ] Add `extensions/session-handoff/extract.ts`
-- [ ] Define and validate the internal `create_handoff_context` tool schema
-- [ ] Assemble the final handoff draft in code
-- [ ] Add `extensions/session-handoff/review.ts`
-- [ ] Implement 8-second preview countdown with `Enter` → edit and `Esc` → cancel
-- [ ] Ensure actual session switching uses `ctx.newSession(...)` only
-- [ ] Add tests for extraction success/failure, countdown behavior, cancel behavior, and clean session switching
+- [ ] Extend `extensions/session-handoff.ts` to parse optional split flags
+- [ ] Keep the existing structured extraction flow and validate the internal `create_handoff_context` tool schema
+- [ ] Keep assembling the final handoff draft in code
+- [ ] Keep the 8-second preview countdown with `Enter` → edit and `Esc` → cancel
+- [ ] Add `extensions/session-handoff/spawn.ts`
+- [ ] Implement explicit header-only child-session file creation
+- [ ] Implement session-targeted bootstrap env payload creation
+- [ ] Switch in-process handoff into the prepared child session
+- [ ] Launch split-pane handoff with `ghostty-nav split <direction> --focus original ...`
+- [ ] Pass the full child UUID to `pi --session`
+- [ ] Materialize durable handoff metadata on child `session_start`
+- [ ] Abort startup bootstrap if the target child already has a user message, and show a UI notification that the session is no longer fresh
+- [ ] Fail clearly when not in Ghostty or when `ghostty-nav` is unavailable
+- [ ] Surface split-pane launch failures while preserving the created child-session UUID for manual recovery
+- [ ] Ensure handoff never copies full session history
+- [ ] Add tests for extraction success/failure, countdown behavior, cancel behavior, child-session creation, bootstrap consumption, in-process switching, Ghostty launch shaping, and recovery on launch failure
 
 ### Phase 2 — lineage persistence + recall integration
 
@@ -574,7 +710,7 @@ Deliverable: lineage-linked parent/child relationships are indexed and recall to
 
 ### Phase 3 — handoff-only autocomplete
 
-Deliverable: `@session:<uuid>` autocompletes in the prompt editor and stays visible to the model as a session token.
+Deliverable: `@handoff/<uuid-prefix>` autocompletes in the prompt editor and stays visible to the model as a session token.
 
 - [ ] Add `extensions/session-handoff/autocomplete.ts`
 - [ ] Add `extensions/session-handoff/query.ts`
@@ -589,10 +725,11 @@ Deliverable: `@session:<uuid>` autocompletes in the prompt editor and stays visi
 
 Deliverable: the package exposes a coherent handoff/recall workflow and is documented well.
 
-- [ ] Document `/handoff` and the review/countdown flow in `README.md`
+- [ ] Document `/handoff`, the review/countdown flow, and optional split flags in `README.md`
+- [ ] Document Ghostty / `ghostty-nav` requirements and failure behavior for split-pane handoff
 - [ ] Document how handoff references interact with `session_ask`
 - [ ] Document `@handoff/...` autocomplete behavior and fallback typed-reference behavior
-- [ ] Add final smoke-test instructions covering handoff → new session → `@handoff` autocomplete → session_ask on the parent
+- [ ] Add final smoke-test instructions covering split-pane handoff → child session start → `@handoff` autocomplete → session_ask on the parent
 
 ## Verification
 
@@ -611,18 +748,27 @@ Deliverable: the package exposes a coherent handoff/recall workflow and is docum
 
 ### Smoke test — handoff core
 
-- open Pi with the package loaded
+- open Pi with the package loaded in Ghostty
 - do enough work to make handoff meaningful
 - run `/handoff <goal>`
 - confirm the preview overlay appears with an 8-second countdown
-- confirm idle timeout auto-sends into a visibly new session
+- confirm idle timeout switches into a visibly new prepared child session in-process
+- inspect the child JSONL and confirm it starts header-only with native `parentSession`
+- confirm the child receives the approved handoff prompt exactly once on startup via `PI_SESSIONS_HANDOFF_BOOTSTRAP`
+- repeat with `/handoff --right <goal>`
+- confirm idle timeout launches that same prepared-child model in the right split
+- confirm the launched command uses `pi --session <full-uuid>` plus `PI_SESSIONS_HANDOFF_BOOTSTRAP`
+- confirm the original pane keeps focus
 - repeat and press `Enter` to edit instead
 - cancel once from preview and once from editor to confirm the old session remains untouched
+- simulate a stale child session with an existing user message and confirm the UI shows `Session handoff failed: target session already has user input.`
+- simulate a split-pane launch failure and confirm the parent session reports the created child UUID plus a bootstrap-aware manual resume command
 
 ### Smoke test — recall integration
 
 - complete a handoff into a new session
 - confirm the new session stores `parentSession`
+- confirm handoff metadata is appended on child startup, not pre-seeded into the child file
 - type `@handoff/` in the prompt editor and confirm handoff suggestions appear
 - select the parent-session suggestion and confirm the canonical token is inserted
 - run `session_ask` against the parent by canonical ref or session id

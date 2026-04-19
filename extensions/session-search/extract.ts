@@ -157,7 +157,7 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
       }
       case "custom": {
         const nextHandoffMetadata = extractHandoffMetadata(entry, entryTs);
-        if (nextHandoffMetadata) {
+        if (nextHandoffMetadata && !durableHandoffMetadata) {
           durableHandoffMetadata = nextHandoffMetadata;
         }
         continue;
@@ -282,7 +282,7 @@ function findDurableHandoffMetadata(
     }
 
     const parsed = extractHandoffMetadata(entry, getEntryTimestamp(entry, fallbackTs));
-    if (parsed) {
+    if (parsed && !durableHandoffMetadata) {
       durableHandoffMetadata = parsed;
     }
   }

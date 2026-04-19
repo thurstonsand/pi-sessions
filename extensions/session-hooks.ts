@@ -1,4 +1,5 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { HANDOFF_BOOTSTRAP_ENV, parseHandoffBootstrap } from "./session-handoff/metadata.js";
 import { createSessionHookController } from "./session-search/hooks.js";
 import { loadSettings } from "./shared/settings.js";
 
@@ -18,7 +19,12 @@ export default function sessionHooksExtension(pi: ExtensionAPI): void {
     switch (reason) {
       case "new":
       case "resume":
-        await controller.handleSessionSwitch(previousSessionFile, sessionFile, ctx.cwd);
+        await controller.handleSessionSwitch(
+          previousSessionFile,
+          sessionFile,
+          ctx.cwd,
+          getSessionStartOrigin(ctx),
+        );
         break;
       case "fork":
         await controller.handleSessionFork(previousSessionFile, sessionFile, ctx.cwd);
@@ -52,4 +58,18 @@ export default function sessionHooksExtension(pi: ExtensionAPI): void {
   pi.on("session_shutdown", async (_event, ctx) => {
     await controller.handleSessionShutdown(ctx.sessionManager.getSessionFile(), ctx.cwd);
   });
+}
+
+function getSessionStartOrigin(ctx: ExtensionContext): "handoff" | undefined {
+  const encodedBootstrap = process.env[HANDOFF_BOOTSTRAP_ENV];
+  if (!encodedBootstrap) {
+    return undefined;
+  }
+
+  const bootstrap = parseHandoffBootstrap(encodedBootstrap);
+  if (!bootstrap) {
+    return undefined;
+  }
+
+  return bootstrap.sessionId === ctx.sessionManager.getSessionId() ? "handoff" : undefined;
 }

@@ -1,25 +1,29 @@
-import { randomUUID } from "node:crypto";
+import { Buffer } from "node:buffer";
 import type { CustomEntry, SessionEntry } from "@mariozechner/pi-coding-agent";
 import { type Static, Type } from "@sinclair/typebox";
 import { safeParseTypeBoxValue } from "../shared/typebox.js";
 
 export const HANDOFF_METADATA_CUSTOM_TYPE = "pi-sessions.handoff";
-export const PENDING_SEND_CONSUMED_CUSTOM_TYPE = "pi-sessions.pending-send-consumed";
+export const HANDOFF_BOOTSTRAP_ENV = "PI_SESSIONS_HANDOFF_BOOTSTRAP";
+export const HANDOFF_STALE_SESSION_MESSAGE =
+  "Session handoff failed: target session already has user input.";
 
 export const HANDOFF_SESSION_METADATA_SCHEMA = Type.Object({
   origin: Type.Literal("handoff"),
   goal: Type.String(),
   nextTask: Type.String(),
   initial_prompt: Type.String(),
-  initial_prompt_nonce: Type.String(),
 });
 
-export const PENDING_SEND_CONSUMED_ENTRY_SCHEMA = Type.Object({
-  nonce: Type.String(),
+export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
+  sessionId: Type.String(),
+  goal: Type.String(),
+  nextTask: Type.String(),
+  initialPrompt: Type.String(),
 });
 
 export type HandoffSessionMetadata = Static<typeof HANDOFF_SESSION_METADATA_SCHEMA>;
-export type PendingSendConsumedEntryData = Static<typeof PENDING_SEND_CONSUMED_ENTRY_SCHEMA>;
+export type HandoffBootstrap = Static<typeof HANDOFF_BOOTSTRAP_SCHEMA>;
 
 export function createHandoffSessionMetadata(
   goal: string,
@@ -28,69 +32,69 @@ export function createHandoffSessionMetadata(
 ): HandoffSessionMetadata {
   const normalizedGoal = goal.trim();
   const normalizedNextTask = nextTask.trim() || normalizedGoal;
-  const normalizedInitialPrompt = initialPrompt.trim();
 
   return {
     origin: "handoff",
     goal: normalizedGoal,
     nextTask: normalizedNextTask,
-    initial_prompt: normalizedInitialPrompt,
-    initial_prompt_nonce: randomUUID(),
+    initial_prompt: initialPrompt.trim(),
   };
 }
 
-export function createPendingSendConsumedEntry(nonce: string): PendingSendConsumedEntryData {
-  return { nonce };
+export function createHandoffBootstrap(
+  sessionId: string,
+  metadata: HandoffSessionMetadata,
+): HandoffBootstrap {
+  return {
+    sessionId,
+    goal: metadata.goal,
+    nextTask: metadata.nextTask,
+    initialPrompt: metadata.initial_prompt,
+  };
 }
 
-export function parsePendingSendConsumedEntry(
-  value: unknown,
-): PendingSendConsumedEntryData | undefined {
-  return safeParseTypeBoxValue(PENDING_SEND_CONSUMED_ENTRY_SCHEMA, value);
+export function encodeHandoffBootstrap(bootstrap: HandoffBootstrap): string {
+  return Buffer.from(JSON.stringify(bootstrap), "utf8").toString("base64");
+}
+
+export function parseHandoffBootstrap(value: string): HandoffBootstrap | undefined {
+  try {
+    const decoded = Buffer.from(value, "base64").toString("utf8");
+    return safeParseTypeBoxValue(HANDOFF_BOOTSTRAP_SCHEMA, JSON.parse(decoded));
+  } catch {
+    return undefined;
+  }
 }
 
 export function parseHandoffSessionMetadata(value: unknown): HandoffSessionMetadata | undefined {
   return safeParseTypeBoxValue(HANDOFF_SESSION_METADATA_SCHEMA, value);
 }
 
-export function getPendingInitialPromptFromEntries(
+export function getHandoffMetadataFromEntries(
   entries: readonly SessionEntry[],
 ): HandoffSessionMetadata | undefined {
-  const consumed = new Set<string>();
-  let pending: HandoffSessionMetadata | undefined;
-
   for (const entry of entries) {
     if (entry.type !== "custom") {
       continue;
     }
 
-    const customEntry = entry as CustomEntry;
-    if (customEntry.customType === PENDING_SEND_CONSUMED_CUSTOM_TYPE) {
-      const consumedEntry = parsePendingSendConsumedEntry(customEntry.data);
-      if (consumedEntry) {
-        consumed.add(consumedEntry.nonce);
-        if (pending?.initial_prompt_nonce === consumedEntry.nonce) {
-          pending = undefined;
-        }
-      }
-      continue;
+    const metadata = parseCustomHandoffMetadata(entry);
+    if (metadata) {
+      return metadata;
     }
-
-    if (customEntry.customType !== HANDOFF_METADATA_CUSTOM_TYPE) {
-      continue;
-    }
-
-    const metadata = parseHandoffSessionMetadata(customEntry.data);
-    if (!metadata) {
-      continue;
-    }
-
-    if (consumed.has(metadata.initial_prompt_nonce)) {
-      continue;
-    }
-
-    pending = metadata;
   }
 
-  return pending;
+  return undefined;
+}
+
+export function hasUserMessages(entries: readonly SessionEntry[]): boolean {
+  return entries.some((entry) => entry.type === "message" && entry.message.role === "user");
+}
+
+function parseCustomHandoffMetadata(entry: CustomEntry): HandoffSessionMetadata | undefined {
+  if (entry.customType !== HANDOFF_METADATA_CUSTOM_TYPE) {
+    return undefined;
+  }
+
+  return parseHandoffSessionMetadata(entry.data);
 }

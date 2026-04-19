@@ -62,9 +62,18 @@ What session did I implement the db layer?
 
 `/handoff <goal>` starts a focused new session. Give pi a goal, and it will generate a prompt for you to review before kicking it off.
 
+You can also launch the handoff into a Ghostty split pane while continuing your current session:
+
+- `/handoff --left <goal>`
+- `/handoff --right <goal>`
+- `/handoff --up <goal>`
+- `/handoff --down <goal>`
+
+where the flag indicates which direction the new pane will split.
+
 Flow:
 
-- run `/handoff <goal>`
+- run `/handoff [--<direction>] <goal>`
 - review the generated prompt preview
 - optionally edit the prompt to make any adjustments
 - start the new session
@@ -138,8 +147,6 @@ To manage existing titles, run `/title`, where you can:
 
 Note that generating titles for all sessions can take some time, and will hit your configured model with the full contents of all sessions.
 
-Behavior notes:
-
 - automatic retitles run every few turns
 - if you manually rename a session with `/name`, automatic retitling pauses for that session
 - Regenerate the title for the current session to resume automatic retitling
@@ -147,7 +154,7 @@ Behavior notes:
   - `google/gemini-flash-lite-latest`
   - `anthropic/claude-haiku-4-5`
   - `openai/gpt-5.4-mini`
-- your currently configured model
+  - your currently configured model
 
 To change auto-titling settings, edit `~/.pi/agent/settings.json`:
 

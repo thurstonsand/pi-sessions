@@ -1,6 +1,6 @@
 {
   "name": "pi-sessions",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Pi session search, ask, handoff, auto-titling, and indexing tools",
   "license": "MIT",
@@ -38,27 +38,28 @@
     "prepare": "husky"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.11",
-    "@mariozechner/pi-ai": "^0.66.1",
-    "@mariozechner/pi-coding-agent": "^0.66.1",
-    "@mariozechner/pi-tui": "^0.66.1",
+    "@biomejs/biome": "^2.4.12",
+    "@mariozechner/pi-ai": "^0.67.68",
+    "@mariozechner/pi-coding-agent": "^0.67.68",
+    "@mariozechner/pi-tui": "^0.67.68",
+    "@sinclair/typebox": "^0.34.49",
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.6.0",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
-    "typescript": "^6.0.2",
+    "typescript": "^6.0.3",
     "vitest": "^4.1.4"
   },
-  "dependencies": {
-    "better-sqlite3": "^12.8.0"
-  },
   "peerDependencies": {
-    "@mariozechner/pi-ai": ">=0.66.1",
-    "@mariozechner/pi-coding-agent": ">=0.66.1",
-    "@mariozechner/pi-tui": ">=0.66.1",
-    "@sinclair/typebox": ">=0.34.49"
+    "@mariozechner/pi-ai": ">=0.67.68",
+    "@mariozechner/pi-coding-agent": ">=0.67.68",
+    "@mariozechner/pi-tui": ">=0.67.68",
+    "@sinclair/typebox": ">=0.34.41"
   },
   "lint-staged": {
     "*.{js,cjs,mjs,jsx,ts,tsx,json,jsonc}": "biome check --write --no-errors-on-unmatched"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.9.0"
   }
 }

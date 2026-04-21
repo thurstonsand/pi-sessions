@@ -5,7 +5,6 @@ import { loadSettings } from "./shared/settings.js";
 
 interface SessionStartLifecycleEvent {
   reason?: "startup" | "reload" | "new" | "resume" | "fork";
-  previousSessionFile?: string;
 }
 
 export default function sessionHooksExtension(pi: ExtensionAPI): void {
@@ -13,21 +12,16 @@ export default function sessionHooksExtension(pi: ExtensionAPI): void {
   const controller = createSessionHookController({ indexPath: settings.index.path });
 
   pi.on("session_start", async (event, ctx) => {
-    const { reason, previousSessionFile } = event as SessionStartLifecycleEvent;
+    const { reason } = event as SessionStartLifecycleEvent;
     const sessionFile = ctx.sessionManager.getSessionFile();
 
     switch (reason) {
       case "new":
       case "resume":
-        await controller.handleSessionSwitch(
-          previousSessionFile,
-          sessionFile,
-          ctx.cwd,
-          getSessionStartOrigin(ctx),
-        );
+        await controller.handleSessionSwitch(sessionFile, ctx.cwd, getSessionStartOrigin(ctx));
         break;
       case "fork":
-        await controller.handleSessionFork(previousSessionFile, sessionFile, ctx.cwd);
+        await controller.handleSessionFork(sessionFile, ctx.cwd);
         break;
       default:
         await controller.handleSessionStart(sessionFile, ctx.cwd);

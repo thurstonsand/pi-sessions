@@ -48,16 +48,11 @@ export interface SessionHookController {
   getState(): SessionHookStateSnapshot;
   handleSessionStart(sessionFile: string | undefined, cwd: string): Promise<boolean>;
   handleSessionSwitch(
-    previousSessionFile: string | undefined,
     sessionFile: string | undefined,
     cwd: string,
     sessionOrigin?: SessionOrigin,
   ): Promise<boolean>;
-  handleSessionFork(
-    previousSessionFile: string | undefined,
-    sessionFile: string | undefined,
-    cwd: string,
-  ): Promise<boolean>;
+  handleSessionFork(sessionFile: string | undefined, cwd: string): Promise<boolean>;
   handleToolCall(event: ToolCallEvent, sessionFile: string | undefined, cwd: string): void;
   handleToolResult(event: ToolResultEvent): void;
   handleTurnEnd(sessionFile: string | undefined, cwd: string): Promise<boolean>;
@@ -95,17 +90,13 @@ export function createSessionHookController(options: { indexPath: string }): Ses
       attachSession(state, sessionFile, cwd);
       return syncAttachedSession(indexPath, state, "session_start");
     },
-    async handleSessionSwitch(previousSessionFile, sessionFile, cwd, sessionOrigin) {
-      const previousSynced = syncSessionFile(indexPath, previousSessionFile, "session_switch");
+    async handleSessionSwitch(sessionFile, cwd, sessionOrigin) {
       attachSession(state, sessionFile, cwd);
-      const currentSynced = syncAttachedSession(indexPath, state, "session_switch", sessionOrigin);
-      return previousSynced || currentSynced;
+      return syncAttachedSession(indexPath, state, "session_switch", sessionOrigin);
     },
-    async handleSessionFork(previousSessionFile, sessionFile, cwd) {
-      const previousSynced = syncSessionFile(indexPath, previousSessionFile, "session_fork");
+    async handleSessionFork(sessionFile, cwd) {
       attachSession(state, sessionFile, cwd);
-      const currentSynced = syncAttachedSession(indexPath, state, "session_fork", "fork");
-      return previousSynced || currentSynced;
+      return syncAttachedSession(indexPath, state, "session_fork", "fork");
     },
     handleToolCall(event, sessionFile, cwd) {
       attachSession(state, sessionFile, cwd);
@@ -172,16 +163,7 @@ function syncAttachedSession(
   eventType: string,
   sessionOrigin?: SessionOrigin,
 ): boolean {
-  return syncSessionFile(indexPath, state.currentSessionFile, eventType, state, sessionOrigin);
-}
-
-function syncSessionFile(
-  indexPath: string,
-  sessionFile: string | undefined,
-  eventType: string,
-  state?: SessionHookState,
-  sessionOrigin?: SessionOrigin,
-): boolean {
+  const sessionFile = state.currentSessionFile;
   if (!sessionFile || !existsSync(sessionFile)) {
     return false;
   }
@@ -222,10 +204,7 @@ function syncSessionFile(
     db.close();
   }
 
-  if (state) {
-    state.lastFlushedSessionFile = sessionFile;
-  }
-
+  state.lastFlushedSessionFile = sessionFile;
   return true;
 }
 

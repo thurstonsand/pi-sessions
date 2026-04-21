@@ -259,7 +259,7 @@ describe("session-search hooks", () => {
       isError: false,
     });
     expect(await controller.handleTurnEnd(sessionOnePath, cwd)).toBe(true);
-    expect(await controller.handleSessionSwitch(sessionOnePath, sessionTwoPath, cwd)).toBe(true);
+    expect(await controller.handleSessionSwitch(sessionTwoPath, cwd)).toBe(true);
     expect(await controller.handleSessionShutdown(sessionTwoPath, cwd)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
@@ -321,7 +321,7 @@ describe("session-search hooks", () => {
     const controller = createSessionHookController({ indexPath });
 
     expect(await controller.handleSessionStart(parentPath, cwd)).toBe(true);
-    expect(await controller.handleSessionFork(parentPath, childPath, cwd)).toBe(true);
+    expect(await controller.handleSessionFork(childPath, cwd)).toBe(true);
     expect(await controller.handleTurnEnd(childPath, cwd)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
@@ -386,7 +386,8 @@ describe("session-search hooks", () => {
 
     const controller = createSessionHookController({ indexPath });
 
-    expect(await controller.handleSessionSwitch(parentPath, childPath, cwd, "handoff")).toBe(true);
+    expect(await controller.handleSessionStart(parentPath, cwd)).toBe(true);
+    expect(await controller.handleSessionSwitch(childPath, cwd, "handoff")).toBe(true);
     expect(await controller.handleTurnEnd(childPath, cwd)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });

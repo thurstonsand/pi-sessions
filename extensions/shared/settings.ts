@@ -114,7 +114,7 @@ function parseModelReference(value: string | undefined): ModelReference | undefi
 }
 
 function loadSessionFileSettings(): SessionFileSettings {
-  const globalSettings = SettingsManager.create(undefined, getAgentDir()).getGlobalSettings();
+  const globalSettings = SettingsManager.create(process.cwd(), getAgentDir()).getGlobalSettings();
   const parsed = parseTypeBoxValue(ROOT_SETTINGS_SCHEMA, globalSettings, "Invalid settings");
   return parsed.sessions ?? {};
 }

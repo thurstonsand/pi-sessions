@@ -259,7 +259,7 @@ describe("session-search hooks", () => {
       isError: false,
     });
     expect(await controller.handleTurnEnd(sessionOnePath, cwd)).toBe(true);
-    expect(await controller.handleSessionSwitch(sessionOnePath, sessionTwoPath, cwd)).toBe(true);
+    expect(await controller.handleSessionSwitch(sessionTwoPath, cwd)).toBe(true);
     expect(await controller.handleSessionShutdown(sessionTwoPath, cwd)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
@@ -278,6 +278,50 @@ describe("session-search hooks", () => {
     );
     expect(lastHookEvent).toBe("session_shutdown");
     expect(controller.getState().lastFlushedSessionFile).toBe(sessionTwoPath);
+  });
+
+  it("flushes the outgoing session on shutdown when turn_end has not fired", async () => {
+    const root = testFs.createTempDir();
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const db = openIndexDatabase(indexPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    db.close();
+
+    const sessionPath = testFs.writeJsonlFile(root, "session.jsonl", [
+      {
+        type: "session",
+        id: "session-mid-turn",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+      {
+        type: "message",
+        id: "user-1",
+        parentId: null,
+        timestamp: "2026-03-22T00:00:01.000Z",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "mid-turn shutdown" }],
+        },
+      },
+    ]);
+
+    const controller = createSessionHookController({ indexPath });
+
+    expect(await controller.handleSessionStart(sessionPath, cwd)).toBe(true);
+    expect(await controller.handleSessionShutdown(sessionPath, cwd)).toBe(true);
+
+    const indexedDb = openIndexDatabase(indexPath, { create: false });
+    const recentSessions = searchSessions(indexedDb, { limit: 10 });
+    const lastHookEvent = getMetadata(indexedDb, "hook_last_event");
+    indexedDb.close();
+
+    expect(recentSessions.map((result) => result.sessionId)).toContain("session-mid-turn");
+    expect(lastHookEvent).toBe("session_shutdown");
+    expect(controller.getState().lastFlushedSessionFile).toBe(sessionPath);
   });
 
   it("records fork lineage and preserves it across later hook syncs", async () => {
@@ -321,7 +365,7 @@ describe("session-search hooks", () => {
     const controller = createSessionHookController({ indexPath });
 
     expect(await controller.handleSessionStart(parentPath, cwd)).toBe(true);
-    expect(await controller.handleSessionFork(parentPath, childPath, cwd)).toBe(true);
+    expect(await controller.handleSessionFork(childPath, cwd)).toBe(true);
     expect(await controller.handleTurnEnd(childPath, cwd)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
@@ -386,7 +430,8 @@ describe("session-search hooks", () => {
 
     const controller = createSessionHookController({ indexPath });
 
-    expect(await controller.handleSessionSwitch(parentPath, childPath, cwd, "handoff")).toBe(true);
+    expect(await controller.handleSessionStart(parentPath, cwd)).toBe(true);
+    expect(await controller.handleSessionSwitch(childPath, cwd, "handoff")).toBe(true);
     expect(await controller.handleTurnEnd(childPath, cwd)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });

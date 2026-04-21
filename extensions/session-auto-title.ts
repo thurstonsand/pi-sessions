@@ -80,7 +80,6 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
-    sessionEpoch += 1;
     resolvedModel = resolveAutoTitleModel(ctx, settings.autoTitle.model)?.model;
     persistAutoTitleState(pi, controller.handleSessionStart(ctx));
   });

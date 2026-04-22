@@ -144,8 +144,6 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         ctx.ui.notify("Session switch cancelled", "info");
         return;
       }
-
-      ctx.ui.notify("Handoff started in a new session.", "info");
     },
   });
 

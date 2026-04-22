@@ -114,7 +114,7 @@ describe("session handoff command", () => {
       parentSessionFile: "/tmp/session.jsonl",
     });
     expect(ctx.switchSession).toHaveBeenCalledWith("/tmp/sessions/child-session-123.jsonl");
-    expect(ctx.ui.notify).toHaveBeenCalledWith("Handoff started in a new session.", "info");
+    expect(ctx.ui.notify).not.toHaveBeenCalledWith("Handoff started in a new session.", "info");
     expect(process.env[HANDOFF_BOOTSTRAP_ENV]).toBeUndefined();
   });
 

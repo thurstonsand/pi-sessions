@@ -478,4 +478,78 @@ describe("session-search hooks", () => {
     expect(fileHits.map((result) => result.sessionId)).toContain("session-tree");
     expect(lastHookEvent).toBe("session_compact");
   });
+
+  it("retries locked hook writes", async () => {
+    const root = testFs.createTempDir();
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const db = openIndexDatabase(indexPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    db.close();
+
+    const sessionPath = testFs.writeJsonlFile(root, "locked-retry.jsonl", [
+      {
+        type: "session",
+        id: "locked-retry",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+    ]);
+
+    const controller = createSessionHookController({ indexPath });
+    const lockDb = openIndexDatabase(indexPath, { create: false });
+    lockDb.exec("BEGIN IMMEDIATE");
+    const releaseLock = setTimeout(() => {
+      if (lockDb.inTransaction) {
+        lockDb.exec("COMMIT");
+      }
+    }, 550);
+
+    try {
+      expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+    } finally {
+      clearTimeout(releaseLock);
+      if (lockDb.inTransaction) {
+        lockDb.exec("ROLLBACK");
+      }
+      lockDb.close();
+    }
+  });
+
+  it("throws locked hook write failures after retries are exhausted", async () => {
+    const root = testFs.createTempDir();
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const db = openIndexDatabase(indexPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    db.close();
+
+    const sessionPath = testFs.writeJsonlFile(root, "locked-failure.jsonl", [
+      {
+        type: "session",
+        id: "locked-failure",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+    ]);
+
+    const controller = createSessionHookController({ indexPath });
+    const lockDb = openIndexDatabase(indexPath, { create: false });
+    lockDb.exec("BEGIN IMMEDIATE");
+
+    try {
+      await expect(controller.handleTurnEnd(sessionPath, cwd)).rejects.toThrow(
+        "database is locked",
+      );
+    } finally {
+      if (lockDb.inTransaction) {
+        lockDb.exec("ROLLBACK");
+      }
+      lockDb.close();
+    }
+  });
 });

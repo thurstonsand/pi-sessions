@@ -26,10 +26,15 @@ export function createTempIndexPath(finalPath: string): string {
 
 export function openIndexDatabase(
   dbPath: string,
-  options?: { create?: boolean },
+  options?: { create?: boolean; timeoutMs?: number },
 ): SessionIndexDatabase {
   const create = options?.create ?? true;
-  const db = new Database(dbPath, { fileMustExist: !create });
+  const db = new Database(
+    dbPath,
+    options?.timeoutMs === undefined
+      ? { fileMustExist: !create }
+      : { fileMustExist: !create, timeout: options.timeoutMs },
+  );
   db.pragma("journal_mode = WAL");
   db.pragma("synchronous = NORMAL");
   db.pragma("foreign_keys = ON");

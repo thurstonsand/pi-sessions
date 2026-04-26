@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { getAgentDir, SettingsManager } from "@mariozechner/pi-coding-agent";
+import { SettingsManager } from "@mariozechner/pi-coding-agent";
 import type { KeyId } from "@mariozechner/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 import { parseTypeBoxValue } from "./typebox.js";
@@ -114,7 +114,7 @@ function parseModelReference(value: string | undefined): ModelReference | undefi
 }
 
 function loadSessionFileSettings(): SessionFileSettings {
-  const globalSettings = SettingsManager.create(undefined, getAgentDir()).getGlobalSettings();
+  const globalSettings = SettingsManager.create(process.cwd()).getGlobalSettings();
   const parsed = parseTypeBoxValue(ROOT_SETTINGS_SCHEMA, globalSettings, "Invalid settings");
   return parsed.sessions ?? {};
 }

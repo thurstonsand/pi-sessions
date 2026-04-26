@@ -130,22 +130,16 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const previousBootstrapValue = process.env[HANDOFF_BOOTSTRAP_ENV];
-      process.env[HANDOFF_BOOTSTRAP_ENV] = bootstrapValue;
-
-      let switchResult: { cancelled: boolean };
-      try {
-        switchResult = await ctx.switchSession(createdSession.sessionFile);
-      } finally {
-        restoreProcessEnv(HANDOFF_BOOTSTRAP_ENV, previousBootstrapValue);
-      }
+      const switchResult = await ctx.switchSession(createdSession.sessionFile, {
+        withSession: async (nextCtx) => {
+          await nextCtx.sendUserMessage(approvedDraft);
+          nextCtx.ui.notify("Handoff started in a new session.", "info");
+        },
+      });
 
       if (switchResult.cancelled) {
         ctx.ui.notify("Session switch cancelled", "info");
-        return;
       }
-
-      ctx.ui.notify("Handoff started in a new session.", "info");
     },
   });
 
@@ -331,13 +325,4 @@ function parseHandoffCommandArgs(
     goal,
     splitDirection,
   };
-}
-
-function restoreProcessEnv(key: string, previousValue: string | undefined): void {
-  if (previousValue === undefined) {
-    delete process.env[key];
-    return;
-  }
-
-  process.env[key] = previousValue;
 }

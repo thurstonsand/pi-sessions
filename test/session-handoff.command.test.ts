@@ -113,8 +113,15 @@ describe("session handoff command", () => {
       sessionDir: "/tmp/sessions",
       parentSessionFile: "/tmp/session.jsonl",
     });
-    expect(ctx.switchSession).toHaveBeenCalledWith("/tmp/sessions/child-session-123.jsonl");
-    expect(ctx.ui.notify).toHaveBeenCalledWith("Handoff started in a new session.", "info");
+    expect(ctx.switchSession).toHaveBeenCalledWith("/tmp/sessions/child-session-123.jsonl", {
+      withSession: expect.any(Function),
+    });
+    expect(ctx.ui.notify).not.toHaveBeenCalledWith("Handoff started in a new session.", "info");
+    expect(ctx.replacementContext.sendUserMessage).toHaveBeenCalledWith("Approved handoff draft");
+    expect(ctx.replacementContext.ui.notify).toHaveBeenCalledWith(
+      "Handoff started in a new session.",
+      "info",
+    );
     expect(process.env[HANDOFF_BOOTSTRAP_ENV]).toBeUndefined();
   });
 
@@ -265,6 +272,14 @@ function createCommandContext(options?: { hasMessages?: boolean; switchCancelled
   const hasMessages = options?.hasMessages ?? true;
   const switchCancelled = options?.switchCancelled ?? false;
 
+  const replacementContext = {
+    hasUI: true,
+    sendUserMessage: vi.fn(async () => {}),
+    ui: {
+      notify: vi.fn(),
+    },
+  };
+
   return {
     cwd: "/tmp/project",
     hasUI: true,
@@ -323,6 +338,18 @@ function createCommandContext(options?: { hasMessages?: boolean; switchCancelled
         return "/tmp/session.jsonl";
       },
     },
-    switchSession: vi.fn(async () => ({ cancelled: switchCancelled })),
+    replacementContext,
+    switchSession: vi.fn(
+      async (
+        _sessionPath: string,
+        options?: { withSession?: (ctx: typeof replacementContext) => Promise<void> },
+      ) => {
+        if (!switchCancelled) {
+          await options?.withSession?.(replacementContext);
+        }
+
+        return { cancelled: switchCancelled };
+      },
+    ),
   };
 }

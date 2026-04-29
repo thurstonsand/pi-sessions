@@ -28,6 +28,8 @@ npm test -- --watch
 
 No build/compile step — `noEmit: true` in tsconfig. The Pi framework loads extensions directly from TypeScript source.
 
+For npm releases, follow [RELEASE.md](./RELEASE.md).
+
 ## Project Structure
 
 ```

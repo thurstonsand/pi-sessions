@@ -4,7 +4,7 @@ import { join } from "node:path";
 import {
   CURRENT_SESSION_VERSION,
   type ExtensionAPI,
-  type ExtensionCommandContext,
+  type ExtensionContext,
   type SessionHeader,
   type SessionInfoEntry,
 } from "@earendil-works/pi-coding-agent";
@@ -22,9 +22,13 @@ export interface CreatedHandoffSession {
   sessionFile: string;
 }
 
+export function isGhosttyHandoffAvailable(): boolean {
+  return process.platform === "darwin" && process.env.TERM_PROGRAM === "ghostty";
+}
+
 export async function validateSplitHandoffPrerequisites(
   _pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
+  ctx: ExtensionContext,
 ): Promise<string | undefined> {
   if (!ctx.sessionManager.getSessionFile()) {
     return "Split handoff requires a persisted current session.";
@@ -77,6 +81,27 @@ export function createHandoffSession(options: {
   return { sessionId, sessionFile };
 }
 
+export async function getFocusedGhosttyTerminalId(
+  pi: ExtensionAPI,
+  cwd: string,
+): Promise<string | undefined> {
+  const appleScript = [
+    'tell application "Ghostty"',
+    "    get id of focused terminal of selected tab of front window",
+    "end tell",
+  ].join("\n");
+  const result = await pi.exec(OSASCRIPT_PATH, ["-e", appleScript], {
+    cwd,
+    timeout: GHOSTTY_SPLIT_TIMEOUT_MS,
+  });
+
+  if (result.code !== 0) {
+    return undefined;
+  }
+
+  return result.stdout.trim() || undefined;
+}
+
 export async function launchSplitHandoffSession(
   pi: ExtensionAPI,
   options: {
@@ -86,24 +111,32 @@ export async function launchSplitHandoffSession(
     sessionId: string;
     bootstrapValue: string;
     title: string;
+    terminalId?: string | undefined;
+    restoreFocus?: boolean | undefined;
+    model?: string | undefined;
   },
 ): Promise<{ success: true } | { success: false; error: string }> {
-  const piCommand = buildPiLaunchCommand(
-    options.sessionDir,
-    options.sessionId,
-    options.bootstrapValue,
-    options.title,
-  );
+  const piCommand = buildPiLaunchCommand({
+    sessionDir: options.sessionDir,
+    sessionId: options.sessionId,
+    bootstrapValue: options.bootstrapValue,
+    title: options.title,
+    model: options.model,
+  });
   const escapedCwd = escapeAppleScriptString(options.cwd);
   const escapedCommand = escapeAppleScriptString(piCommand);
+  const targetTerminalLine = options.terminalId
+    ? `    set targetTerminal to item 1 of (every terminal whose id is "${escapeAppleScriptString(options.terminalId)}")`
+    : "    set targetTerminal to focused terminal of selected tab of front window";
+  const focusLine = options.restoreFocus === false ? [] : ["    focus targetTerminal"];
   const appleScript = [
     'tell application "Ghostty"',
-    "    set targetTerminal to focused terminal of selected tab of front window",
+    targetTerminalLine,
     "    set cfg to new surface configuration",
     `    set initial working directory of cfg to "${escapedCwd}"`,
     `    set command of cfg to "${escapedCommand}"`,
     `    set newTerminal to split targetTerminal direction ${options.direction} with configuration cfg`,
-    "    focus targetTerminal",
+    ...focusLine,
     "end tell",
   ].join("\n");
   const result = await pi.exec(OSASCRIPT_PATH, ["-e", appleScript], {
@@ -129,6 +162,7 @@ export function buildPiResumeCommand(
   sessionId: string,
   bootstrapValue: string,
   title: string,
+  model?: string | undefined,
 ): string {
   const args = [
     `${HANDOFF_BOOTSTRAP_ENV}=${shellQuote(bootstrapValue)}`,
@@ -141,16 +175,27 @@ export function buildPiResumeCommand(
     shellQuote(title),
   ];
 
+  if (model) {
+    args.push("--model", shellQuote(model));
+  }
+
   return args.join(" ");
 }
 
-export function buildPiLaunchCommand(
-  sessionDir: string,
-  sessionId: string,
-  bootstrapValue: string,
-  title: string,
-): string {
-  const payload = `${buildPiResumeCommand(sessionDir, sessionId, bootstrapValue, title)}; exec /bin/zsh -il`;
+export function buildPiLaunchCommand(options: {
+  sessionDir: string;
+  sessionId: string;
+  bootstrapValue: string;
+  title: string;
+  model?: string | undefined;
+}): string {
+  const payload = `${buildPiResumeCommand(
+    options.sessionDir,
+    options.sessionId,
+    options.bootstrapValue,
+    options.title,
+    options.model,
+  )}; exec /bin/zsh -il`;
   return `/bin/zsh -ilc ${shellQuote(payload)}`;
 }
 

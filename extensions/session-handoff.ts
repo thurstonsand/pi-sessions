@@ -1,8 +1,24 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { buildSessionContext } from "@earendil-works/pi-coding-agent";
+import { existsSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { isAbsolute, resolve } from "node:path";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type {
+  ExtensionAPI,
+  ExtensionCommandContext,
+  ExtensionContext,
+  ExtensionUIContext,
+} from "@earendil-works/pi-coding-agent";
+import { buildSessionContext, SessionManager } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey } from "@earendil-works/pi-tui";
-import { generateHandoffDraft, type HandoffDraftResult } from "./session-handoff/extract.js";
+import { Type } from "typebox";
 import {
+  generateHandoffDraft,
+  generateHandoffDraftFromSessionManager,
+  type HandoffDraftResult,
+} from "./session-handoff/extract.js";
+import {
+  type ChildGeneratedHandoffBootstrap,
+  createChildGeneratedHandoffBootstrap,
   createHandoffBootstrap,
   createHandoffSessionMetadata,
   encodeHandoffBootstrap,
@@ -11,15 +27,22 @@ import {
   HANDOFF_METADATA_CUSTOM_TYPE,
   HANDOFF_STALE_SESSION_MESSAGE,
   hasUserMessages,
+  isChildGeneratedHandoffBootstrap,
   parseHandoffBootstrap,
 } from "./session-handoff/metadata.js";
 import { openSessionReferencePicker } from "./session-handoff/picker.js";
 import { SESSION_TOKEN_PREFIX } from "./session-handoff/query.js";
-import { renderStrongModal, reviewHandoffDraft } from "./session-handoff/review.js";
+import {
+  renderStrongModal,
+  reviewHandoffDraft,
+  reviewHandoffDraftForSend,
+} from "./session-handoff/review.js";
 import {
   buildPiResumeCommand,
   createHandoffSession,
+  getFocusedGhosttyTerminalId,
   type HandoffSplitDirection,
+  isGhosttyHandoffAvailable,
   launchSplitHandoffSession,
   validateSplitHandoffPrerequisites,
 } from "./session-handoff/spawn.js";
@@ -27,14 +50,72 @@ import { isTuiMode } from "./shared/pi-mode.js";
 import { loadSettings } from "./shared/settings.js";
 
 const HANDOFF_USAGE = "Usage: /handoff [--left|--right|--up|--down] <goal for new thread>";
+const TOOL_HANDOFF_PROVISIONAL_TITLE = "Session handoff";
+const NO_IDENTIFIED_TERMINAL_MESSAGE =
+  "No Ghostty source terminal identified. Run /handoff --identify from the intended source pane.";
+
+interface HandoffToolParams {
+  goal: string;
+  splitDirection: HandoffSplitDirection;
+  cwd?: string | undefined;
+}
+
+interface HandoffToolDetails {
+  error: boolean;
+  sessionId?: string | undefined;
+  title?: string | undefined;
+  splitDirection?: HandoffSplitDirection | undefined;
+  cwd?: string | undefined;
+}
 
 interface HandoffPromptContext {
-  ui: ExtensionCommandContext["ui"];
+  ui: ExtensionUIContext;
   sendUserMessage(content: string): Promise<void>;
 }
 
 export default function sessionHandoffExtension(pi: ExtensionAPI): void {
   const settings = loadSettings();
+  let identifiedGhosttyTerminalId: string | undefined;
+
+  if (isGhosttyHandoffAvailable()) {
+    pi.registerTool({
+      name: "session_handoff",
+      label: "Session Handoff",
+      description:
+        "Start a new background Pi session with directed instructions based on current work. The current session continues after launch.",
+      promptSnippet:
+        "Start a background pi session in a terminal split based on the current session",
+      promptGuidelines: [
+        "Use session_handoff only when it is clear the work should be forked to a new context.",
+        "Prefer using session_handoff by direction of the user, not as an unsolicited default.",
+        "The goal should capture enough detail to encompass the ask and include any directions the next sessions should consider.",
+        "Only capable of a background handoff; to replace the current session, tell the user to run /handoff instead.",
+      ],
+      executionMode: "sequential",
+      parameters: Type.Object({
+        goal: Type.String({
+          description:
+            "Goal for the new session, including enough detail to capture the user's ask and any directions the next prompt should consider.",
+        }),
+        splitDirection: Type.Union(
+          [Type.Literal("left"), Type.Literal("right"), Type.Literal("up"), Type.Literal("down")],
+          {
+            description:
+              "Direction to split the Ghostty terminal. Must be explicitly provided by the user.",
+          },
+        ),
+        cwd: Type.Optional(
+          Type.String({
+            description:
+              "Optional target working directory. Relative paths resolve from the current session cwd.",
+          }),
+        ),
+      }),
+      async execute(_toolCallId, params: HandoffToolParams, _signal, _onUpdate, ctx) {
+        return executeSessionHandoffTool(pi, params, ctx, identifiedGhosttyTerminalId);
+      },
+    });
+  }
 
   pi.registerCommand("handoff", {
     description: "Transfer context to a new focused session",
@@ -44,14 +125,26 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      if (!ctx.model) {
-        ctx.ui.notify("No model selected", "error");
-        return;
-      }
-
       const parsedArgs = parseHandoffCommandArgs(args);
       if (parsedArgs.kind === "error") {
         ctx.ui.notify(parsedArgs.message, "error");
+        return;
+      }
+
+      if (parsedArgs.kind === "identify") {
+        const terminalId = await getFocusedGhosttyTerminalId(pi, ctx.cwd);
+        if (!terminalId) {
+          ctx.ui.notify("Unable to identify the focused Ghostty terminal.", "error");
+          return;
+        }
+
+        identifiedGhosttyTerminalId = terminalId;
+        ctx.ui.notify(`Identified Ghostty terminal ${terminalId}.`, "info");
+        return;
+      }
+
+      if (!ctx.model) {
+        ctx.ui.notify("No model selected", "error");
         return;
       }
 
@@ -118,14 +211,25 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         const bootstrapValue = encodeHandoffBootstrap(
           createHandoffBootstrap(createdSession.sessionId, handoffMetadata),
         );
-        const launchResult = await launchSplitHandoffSession(pi, {
+        let launchResult = await launchSplitHandoffSession(pi, {
           cwd: ctx.cwd,
           sessionDir: ctx.sessionManager.getSessionDir(),
           direction: parsedArgs.splitDirection,
           sessionId: createdSession.sessionId,
           bootstrapValue,
           title: handoffMetadata.title,
+          terminalId: identifiedGhosttyTerminalId,
         });
+        if (!launchResult.success && identifiedGhosttyTerminalId) {
+          launchResult = await launchSplitHandoffSession(pi, {
+            cwd: ctx.cwd,
+            sessionDir: ctx.sessionManager.getSessionDir(),
+            direction: parsedArgs.splitDirection,
+            sessionId: createdSession.sessionId,
+            bootstrapValue,
+            title: handoffMetadata.title,
+          });
+        }
 
         if (!launchResult.success) {
           ctx.ui.notify(
@@ -193,6 +297,11 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
     }
 
     try {
+      if (isChildGeneratedHandoffBootstrap(bootstrap)) {
+        await startChildGeneratedHandoff(pi, ctx, bootstrap, pi.getThinkingLevel());
+        return;
+      }
+
       const entries = ctx.sessionManager.getEntries();
       if (hasUserMessages(entries)) {
         if (ctx.hasUI) {
@@ -223,7 +332,12 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
     }
   });
 
-  pi.on("before_agent_start", async (event) => {
+  pi.on("before_agent_start", async (event, ctx) => {
+    if (isGhosttyHandoffAvailable() && ctx) {
+      identifiedGhosttyTerminalId =
+        (await getFocusedGhosttyTerminalId(pi, ctx.cwd)) ?? identifiedGhosttyTerminalId;
+    }
+
     return {
       systemPrompt:
         event.systemPrompt +
@@ -232,8 +346,243 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
   });
 }
 
+async function executeSessionHandoffTool(
+  pi: ExtensionAPI,
+  params: HandoffToolParams,
+  ctx: ExtensionContext,
+  terminalId: string | undefined,
+) {
+  const goal = params.goal.trim();
+  if (!goal) {
+    return createHandoffToolError("session_handoff requires a goal.");
+  }
+
+  if (!ctx.model) {
+    return createHandoffToolError("No model selected.");
+  }
+
+  const preflightError = await validateSplitHandoffPrerequisites(pi, ctx);
+  if (preflightError) {
+    return createHandoffToolError(preflightError);
+  }
+
+  if (!terminalId) {
+    return createHandoffToolError(NO_IDENTIFIED_TERMINAL_MESSAGE);
+  }
+
+  const targetCwd = resolveHandoffCwd(ctx.cwd, params.cwd);
+  if (targetCwd.error) {
+    return createHandoffToolError(targetCwd.message);
+  }
+
+  const parentSessionFile = ctx.sessionManager.getSessionFile();
+  if (!parentSessionFile) {
+    return createHandoffToolError("Handoff requires a persisted current session.");
+  }
+
+  const sessionContext = buildSessionContext(
+    ctx.sessionManager.getEntries(),
+    ctx.sessionManager.getLeafId(),
+  );
+  if (sessionContext.messages.length === 0) {
+    return createHandoffToolError("No conversation to hand off.");
+  }
+
+  const createdSession = createHandoffSession({
+    cwd: targetCwd.path,
+    sessionDir: ctx.sessionManager.getSessionDir(),
+    parentSessionFile,
+    title: TOOL_HANDOFF_PROVISIONAL_TITLE,
+  });
+  const bootstrapValue = encodeHandoffBootstrap(
+    createChildGeneratedHandoffBootstrap({
+      sessionId: createdSession.sessionId,
+      goal,
+      title: TOOL_HANDOFF_PROVISIONAL_TITLE,
+      parentSessionFile,
+    }),
+  );
+  const model = formatModelArgument(ctx.model, pi.getThinkingLevel());
+  const launchResult = await launchSplitHandoffSession(pi, {
+    cwd: targetCwd.path,
+    sessionDir: ctx.sessionManager.getSessionDir(),
+    direction: params.splitDirection,
+    sessionId: createdSession.sessionId,
+    bootstrapValue,
+    title: TOOL_HANDOFF_PROVISIONAL_TITLE,
+    terminalId,
+    restoreFocus: true,
+    model,
+  });
+
+  if (!launchResult.success) {
+    return createHandoffToolError(
+      `${launchResult.error} Created handoff session ${createdSession.sessionId}; start it manually with: ${buildPiResumeCommand(
+        ctx.sessionManager.getSessionDir(),
+        createdSession.sessionId,
+        bootstrapValue,
+        TOOL_HANDOFF_PROVISIONAL_TITLE,
+        model,
+      )}`,
+      {
+        sessionId: createdSession.sessionId,
+        title: TOOL_HANDOFF_PROVISIONAL_TITLE,
+        splitDirection: params.splitDirection,
+        cwd: targetCwd.path,
+      },
+    );
+  }
+
+  const details: HandoffToolDetails = {
+    error: false,
+    sessionId: createdSession.sessionId,
+    title: TOOL_HANDOFF_PROVISIONAL_TITLE,
+    splitDirection: params.splitDirection,
+    cwd: targetCwd.path,
+  };
+
+  return {
+    content: [
+      {
+        type: "text" as const,
+        text: `Started handoff session ${createdSession.sessionId} (${params.splitDirection}) in ${targetCwd.path}.`,
+      },
+    ],
+    details,
+  };
+}
+
+async function startChildGeneratedHandoff(
+  pi: ExtensionAPI,
+  ctx: ExtensionContext,
+  bootstrap: ChildGeneratedHandoffBootstrap,
+  thinkingLevel: ThinkingLevel | undefined,
+): Promise<void> {
+  const entries = ctx.sessionManager.getEntries();
+  if (hasUserMessages(entries)) {
+    if (ctx.hasUI) {
+      ctx.ui.notify(HANDOFF_STALE_SESSION_MESSAGE, "error");
+    }
+    return;
+  }
+
+  if (!ctx.hasUI) {
+    return;
+  }
+
+  try {
+    const sourceSessionManager = SessionManager.open(bootstrap.parentSessionFile);
+    const generatedDraft = await runWithLoader(
+      ctx,
+      "Generating handoff draft...",
+      async (signal: AbortSignal) =>
+        generateHandoffDraftFromSessionManager(
+          ctx,
+          sourceSessionManager,
+          bootstrap.goal,
+          thinkingLevel,
+          signal,
+        ),
+    );
+    if (!generatedDraft) {
+      ctx.ui.notify("Cancelled", "info");
+      return;
+    }
+
+    const review = await reviewHandoffDraftForSend(ctx.ui, generatedDraft.draft);
+    if (review.action === "prefill") {
+      ctx.ui.setEditorText(review.prompt);
+      ctx.ui.notify("Handoff prompt ready in editor.", "info");
+      return;
+    }
+
+    if (review.action === "cancel") {
+      ctx.ui.notify("Cancelled", "info");
+      return;
+    }
+
+    const metadata = createHandoffSessionMetadata(
+      bootstrap.goal,
+      generatedDraft.context.nextTask,
+      review.prompt,
+      generatedDraft.context.title,
+    );
+    if (!getHandoffMetadataFromEntries(ctx.sessionManager.getEntries())) {
+      pi.appendEntry(HANDOFF_METADATA_CUSTOM_TYPE, metadata);
+    }
+    pi.setSessionName(metadata.title);
+    pi.sendUserMessage(review.prompt);
+  } catch (error) {
+    ctx.ui.notify(formatHandoffError(error), "error");
+  }
+}
+
+function createHandoffToolError(message: string, details: Partial<HandoffToolDetails> = {}) {
+  const resultDetails: HandoffToolDetails = {
+    error: true,
+    ...details,
+  };
+
+  return {
+    content: [{ type: "text" as const, text: message }],
+    details: resultDetails,
+  };
+}
+
+function resolveHandoffCwd(
+  currentCwd: string,
+  requestedCwd: string | undefined,
+): { path: string; error?: undefined } | { error: true; message: string } {
+  const rawPath = requestedCwd?.trim();
+  const resolvedPath = rawPath ? resolveRequestedPath(currentCwd, rawPath) : currentCwd;
+
+  if (!existsSync(resolvedPath)) {
+    return {
+      error: true,
+      message: `Handoff cwd does not exist: ${resolvedPath}`,
+    };
+  }
+
+  if (!statSync(resolvedPath).isDirectory()) {
+    return {
+      error: true,
+      message: `Handoff cwd is not a directory: ${resolvedPath}`,
+    };
+  }
+
+  return { path: resolvedPath };
+}
+
+function resolveRequestedPath(currentCwd: string, requestedPath: string): string {
+  if (requestedPath === "~") {
+    return homedir();
+  }
+
+  if (requestedPath.startsWith("~/")) {
+    return resolve(homedir(), requestedPath.slice(2));
+  }
+
+  if (isAbsolute(requestedPath)) {
+    return requestedPath;
+  }
+
+  return resolve(currentCwd, requestedPath);
+}
+
+function formatModelArgument(
+  model: ExtensionContext["model"],
+  thinkingLevel: ThinkingLevel | undefined,
+): string | undefined {
+  if (!model) {
+    return undefined;
+  }
+
+  const base = `${model.provider}/${model.id}`;
+  return thinkingLevel ? `${base}:${thinkingLevel}` : base;
+}
+
 async function runWithLoader<T>(
-  ctx: ExtensionCommandContext,
+  ctx: { ui: ExtensionUIContext },
   label: string,
   task: (signal: AbortSignal) => Promise<T>,
 ): Promise<T | undefined> {
@@ -313,15 +662,22 @@ function formatHandoffError(error: unknown): string {
   return "Handoff generation failed.";
 }
 
-function parseHandoffCommandArgs(
-  args: string,
-):
-  | { kind: "ok"; goal: string; splitDirection?: HandoffSplitDirection | undefined }
+function parseHandoffCommandArgs(args: string):
+  | { kind: "identify" }
+  | {
+      kind: "ok";
+      goal: string;
+      splitDirection?: HandoffSplitDirection | undefined;
+    }
   | { kind: "error"; message: string } {
   const tokens = args
     .trim()
     .split(/\s+/)
     .filter((token) => token.length > 0);
+
+  if (tokens.includes("--identify")) {
+    return { kind: "identify" };
+  }
 
   if (tokens.length === 0) {
     return { kind: "error", message: HANDOFF_USAGE };

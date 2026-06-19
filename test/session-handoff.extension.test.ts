@@ -256,6 +256,7 @@ function createPiApi(
     sendUserMessage: vi.fn(),
     setSessionName: vi.fn(),
     registerCommand,
+    registerTool: vi.fn(),
     registerShortcut: vi.fn(
       (shortcut: string, definition: { handler: (ctx: unknown) => Promise<void> }) => {
         shortcuts.set(shortcut, definition);

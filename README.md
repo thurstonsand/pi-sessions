@@ -55,7 +55,7 @@ What session did I implement the db layer?
 | ------------------ | ------------------------------------- | ------------------------------------------------------- |
 | Session Search     | `session_search` pi tool              | Search through old sessions                             |
 | Session Ask        | `session_ask` pi tool                 | Ask questions about old sessions                        |
-| Session Handoff    | `/handoff`, session picker shortcut   | Start a focused new session; alternative to compaction  |
+| Session Handoff    | `/handoff`, `session_handoff` pi tool | Start a focused new session; alternative to compaction  |
 | Session Picker     | `Alt+O`                               | Reference old sessions in your prompt                   |
 | Session Index      | `/session-index` slash command        | Shows index status and rebuilds the local session index |
 | Session Auto Title | in background, `/title` slash command | Give sessions titles                                    |
@@ -81,6 +81,10 @@ Flow:
 - start the new session
 
 If you do nothing, the preview autostarts after a short countdown.
+
+When running in Ghostty on macOS, pi-sessions also exposes a `session_handoff` tool. This lets the agent start a background handoff after you choose a split direction. The current session keeps running, while the child session opens in the requested split, gathers context, and shows the same review countdown before starting.
+
+If background handoffs ever target the wrong pane, run `/handoff --identify` from the intended source pane to refresh the in-memory Ghostty terminal binding.
 
 ## Session picker
 

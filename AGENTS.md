@@ -59,7 +59,7 @@ extensions/                  # All source code
     metadata.ts              # Session metadata resolution
     picker.ts                # Session reference picker overlay
     query.ts                 # Session picker query helpers
-    refs.ts                  # @session ref resolution
+    refs.ts                  # `@session` ref resolution
     review.ts                # Preview overlay and review flow
   session-auto-title/        # Auto-titling implementation
     command.ts               # /title command parsing, completions, handler wrapper

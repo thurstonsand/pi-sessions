@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  createChildGeneratedHandoffBootstrap,
   createHandoffBootstrap,
   createHandoffSessionMetadata,
   HANDOFF_BOOTSTRAP_ENV,
@@ -13,6 +14,7 @@ import {
   buildPiLaunchCommand,
   buildPiResumeCommand,
   createHandoffSession,
+  getFocusedGhosttyTerminalId,
   launchSplitHandoffSession,
   validateSplitHandoffPrerequisites,
 } from "../extensions/session-handoff/spawn.js";
@@ -69,13 +71,27 @@ describe("session handoff spawn helpers", () => {
     expect(resumeCommand).toContain("Implement autocomplete");
   });
 
-  it("builds a zsh launch command around the bootstrap-aware resume command", () => {
-    const launchCommand = buildPiLaunchCommand(
+  it("adds an inherited model to resume commands", () => {
+    const bootstrap = createHandoffBootstrap("child-session-123", createMetadata());
+    const resumeCommand = buildPiResumeCommand(
       "/tmp/sessions",
       "child-session-123",
-      "encoded-bootstrap",
+      Buffer.from(JSON.stringify(bootstrap), "utf8").toString("base64"),
       "Implement autocomplete",
+      "openai/gpt-5.4:medium",
     );
+
+    expect(resumeCommand).toContain("--model");
+    expect(resumeCommand).toContain("openai/gpt-5.4:medium");
+  });
+
+  it("builds a zsh launch command around the bootstrap-aware resume command", () => {
+    const launchCommand = buildPiLaunchCommand({
+      sessionDir: "/tmp/sessions",
+      sessionId: "child-session-123",
+      bootstrapValue: "encoded-bootstrap",
+      title: "Implement autocomplete",
+    });
 
     expect(launchCommand).toContain(HANDOFF_BOOTSTRAP_ENV);
     expect(launchCommand).toContain("encoded-bootstrap");
@@ -135,6 +151,17 @@ describe("session handoff spawn helpers", () => {
     );
   });
 
+  it("reads the focused Ghostty terminal id", async () => {
+    const pi = createPiApi({ stdout: "terminal-123\n" });
+
+    await expect(getFocusedGhosttyTerminalId(pi as never, "/tmp/project")).resolves.toBe(
+      "terminal-123",
+    );
+
+    const osascriptArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+    expect(osascriptArgs[1]).toContain("get id of focused terminal");
+  });
+
   it("launches Ghostty via osascript with focus pinned to the original pane", async () => {
     const pi = createPiApi({ code: 0 });
     const bootstrapValue = Buffer.from(
@@ -170,6 +197,29 @@ describe("session handoff spawn helpers", () => {
     expect(appleScript).toContain("Implement autocomplete");
   });
 
+  it("can launch from a stored Ghostty terminal id with an inherited model", async () => {
+    const pi = createPiApi({ code: 0 });
+
+    await launchSplitHandoffSession(pi as never, {
+      cwd: "/tmp/project",
+      sessionDir: "/tmp/sessions",
+      direction: "down",
+      sessionId: "child-session-123",
+      bootstrapValue: "encoded-bootstrap",
+      title: "Implement autocomplete",
+      terminalId: "terminal-123",
+      model: "openai/gpt-5.4:medium",
+    });
+
+    const osascriptArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
+    const appleScript = osascriptArgs[1] ?? "";
+    expect(appleScript).toContain('every terminal whose id is "terminal-123"');
+    expect(appleScript).toContain("split targetTerminal direction down with configuration cfg");
+    expect(appleScript).toContain("--model");
+    expect(appleScript).toContain("openai/gpt-5.4:medium");
+    expect(appleScript).toContain("focus targetTerminal");
+  });
+
   it("reports AppleScript launch failures with a macOS Ghostty hint", async () => {
     const pi = createPiApi({ code: 1, stderr: "execution error: Ghostty got an error" });
 
@@ -187,6 +237,28 @@ describe("session handoff spawn helpers", () => {
       error:
         "Failed to launch Ghostty split: execution error: Ghostty got an error. " +
         "Split handoff currently supports Ghostty on macOS only.",
+    });
+  });
+
+  it("keeps child-generated bootstrap payloads decodable", () => {
+    const bootstrapValue = Buffer.from(
+      JSON.stringify(
+        createChildGeneratedHandoffBootstrap({
+          sessionId: "child-session-123",
+          goal: "Finish phase 1",
+          title: "Session handoff",
+          parentSessionFile: "/tmp/parent.jsonl",
+        }),
+      ),
+      "utf8",
+    ).toString("base64");
+
+    expect(parseHandoffBootstrap(bootstrapValue)).toEqual({
+      mode: "generate",
+      sessionId: "child-session-123",
+      goal: "Finish phase 1",
+      title: "Session handoff",
+      parentSessionFile: "/tmp/parent.jsonl",
     });
   });
 

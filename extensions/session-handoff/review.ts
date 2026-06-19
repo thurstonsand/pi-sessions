@@ -17,6 +17,11 @@ const PREVIEW_BODY_LINE_LIMIT = 16;
 
 type ReviewAction = "accept" | "edit" | "cancel";
 
+export type HandoffReviewResult =
+  | { action: "send"; prompt: string }
+  | { action: "prefill"; prompt: string }
+  | { action: "cancel" };
+
 interface TimerHandle {
   stop(): void;
 }
@@ -234,21 +239,33 @@ export async function reviewHandoffDraft(
   ctx: ExtensionCommandContext,
   draft: string,
 ): Promise<string | undefined> {
-  const action = await runPreviewGate(ctx.ui, draft);
-  if (action === "cancel") {
+  const result = await reviewHandoffDraftForSend(ctx.ui, draft);
+  if (result.action !== "send") {
     return undefined;
+  }
+
+  return result.prompt;
+}
+
+export async function reviewHandoffDraftForSend(
+  ui: ExtensionUIContext,
+  draft: string,
+): Promise<HandoffReviewResult> {
+  const action = await runPreviewGate(ui, draft);
+  if (action === "cancel") {
+    return { action: "prefill", prompt: draft };
   }
 
   if (action === "accept") {
-    return draft;
+    return { action: "send", prompt: draft };
   }
 
-  const editedDraft = await ctx.ui.editor("Edit handoff prompt", draft);
+  const editedDraft = await ui.editor("Edit handoff prompt", draft);
   if (!editedDraft?.trim()) {
-    return undefined;
+    return { action: "prefill", prompt: draft };
   }
 
-  return editedDraft;
+  return { action: "send", prompt: editedDraft };
 }
 
 async function runPreviewGate(ui: ExtensionUIContext, draft: string): Promise<ReviewAction> {

@@ -93,10 +93,30 @@ export async function generateHandoffDraft(
     throw new Error("No model is available for handoff.");
   }
 
+  return generateHandoffDraftFromSessionManager(
+    ctx,
+    ctx.sessionManager,
+    goal,
+    thinkingLevel,
+    signal,
+  );
+}
+
+export async function generateHandoffDraftFromSessionManager(
+  ctx: ExtensionContext,
+  sourceSessionManager: ExtensionContext["sessionManager"],
+  goal: string,
+  thinkingLevel: ThinkingLevel | undefined,
+  signal?: AbortSignal,
+): Promise<HandoffDraftResult | undefined> {
+  if (!ctx.model) {
+    throw new Error("No model is available for handoff.");
+  }
+
   const model = ctx.model;
   const sessionContext = buildSessionContext(
-    ctx.sessionManager.getEntries(),
-    ctx.sessionManager.getLeafId(),
+    sourceSessionManager.getEntries(),
+    sourceSessionManager.getLeafId(),
   );
   if (sessionContext.messages.length === 0) {
     throw new Error("No conversation is available to hand off.");
@@ -115,8 +135,8 @@ export async function generateHandoffDraft(
     return undefined;
   }
 
-  const sessionId = ctx.sessionManager.getSessionId();
-  const sessionPath = ctx.sessionManager.getSessionFile();
+  const sessionId = sourceSessionManager.getSessionId();
+  const sessionPath = sourceSessionManager.getSessionFile();
 
   return {
     draft: assembleHandoffDraft(sessionId, sessionPath, handoffContext, goal),

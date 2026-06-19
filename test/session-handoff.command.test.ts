@@ -11,6 +11,7 @@ const mockReviewHandoffDraft = vi.fn();
 const mockValidateSplitHandoffPrerequisites = vi.fn();
 const mockCreateHandoffSession = vi.fn();
 const mockLaunchSplitHandoffSession = vi.fn();
+const mockGetFocusedGhosttyTerminalId = vi.fn();
 
 vi.mock("../extensions/shared/settings.js", () => ({
   loadSettings: mockLoadSettings,
@@ -34,6 +35,8 @@ vi.mock("../extensions/session-handoff/spawn.js", () => ({
       `PI_SESSIONS_HANDOFF_BOOTSTRAP='${bootstrapValue}' pi --session-dir ${sessionDir} --session-id ${sessionId} --name '${title}'`,
   ),
   validateSplitHandoffPrerequisites: mockValidateSplitHandoffPrerequisites,
+  isGhosttyHandoffAvailable: vi.fn(() => false),
+  getFocusedGhosttyTerminalId: mockGetFocusedGhosttyTerminalId,
   createHandoffSession: mockCreateHandoffSession,
   launchSplitHandoffSession: mockLaunchSplitHandoffSession,
 }));
@@ -67,6 +70,7 @@ beforeEach(() => {
     sessionFile: "/tmp/sessions/child-session-123.jsonl",
   });
   mockLaunchSplitHandoffSession.mockResolvedValue({ success: true });
+  mockGetFocusedGhosttyTerminalId.mockResolvedValue("terminal-123");
 });
 
 describe("session handoff command", () => {
@@ -92,6 +96,17 @@ describe("session handoff command", () => {
       "Use only one split flag: --left, --right, --up, or --down.",
       "error",
     );
+  });
+
+  it("identifies the focused Ghostty terminal and ignores other arguments", async () => {
+    const { handler } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--identify --right Finish phase 1", ctx as never);
+
+    expect(mockGetFocusedGhosttyTerminalId).toHaveBeenCalledWith(expect.anything(), "/tmp/project");
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Identified Ghostty terminal terminal-123.", "info");
+    expect(mockGenerateHandoffDraft).not.toHaveBeenCalled();
   });
 
   it("requires conversation context", async () => {

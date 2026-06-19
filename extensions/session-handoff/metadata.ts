@@ -16,7 +16,7 @@ export const HANDOFF_SESSION_METADATA_SCHEMA = Type.Object({
   initial_prompt: Type.String(),
 });
 
-export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
+export const IMMEDIATE_HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
   sessionId: Type.String(),
   goal: Type.String(),
   nextTask: Type.String(),
@@ -24,7 +24,24 @@ export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
   initialPrompt: Type.String(),
 });
 
+export const CHILD_GENERATED_HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
+  mode: Type.Literal("generate"),
+  sessionId: Type.String(),
+  goal: Type.String(),
+  title: Type.String(),
+  parentSessionFile: Type.String(),
+});
+
+export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Union([
+  IMMEDIATE_HANDOFF_BOOTSTRAP_SCHEMA,
+  CHILD_GENERATED_HANDOFF_BOOTSTRAP_SCHEMA,
+]);
+
 export type HandoffSessionMetadata = Static<typeof HANDOFF_SESSION_METADATA_SCHEMA>;
+export type ImmediateHandoffBootstrap = Static<typeof IMMEDIATE_HANDOFF_BOOTSTRAP_SCHEMA>;
+export type ChildGeneratedHandoffBootstrap = Static<
+  typeof CHILD_GENERATED_HANDOFF_BOOTSTRAP_SCHEMA
+>;
 export type HandoffBootstrap = Static<typeof HANDOFF_BOOTSTRAP_SCHEMA>;
 
 export function createHandoffSessionMetadata(
@@ -48,7 +65,7 @@ export function createHandoffSessionMetadata(
 export function createHandoffBootstrap(
   sessionId: string,
   metadata: HandoffSessionMetadata,
-): HandoffBootstrap {
+): ImmediateHandoffBootstrap {
   return {
     sessionId,
     goal: metadata.goal,
@@ -56,6 +73,27 @@ export function createHandoffBootstrap(
     title: metadata.title,
     initialPrompt: metadata.initial_prompt,
   };
+}
+
+export function createChildGeneratedHandoffBootstrap(options: {
+  sessionId: string;
+  goal: string;
+  title: string;
+  parentSessionFile: string;
+}): ChildGeneratedHandoffBootstrap {
+  return {
+    mode: "generate",
+    sessionId: options.sessionId,
+    goal: options.goal.trim(),
+    title: options.title.trim(),
+    parentSessionFile: options.parentSessionFile,
+  };
+}
+
+export function isChildGeneratedHandoffBootstrap(
+  bootstrap: HandoffBootstrap,
+): bootstrap is ChildGeneratedHandoffBootstrap {
+  return "mode" in bootstrap && bootstrap.mode === "generate";
 }
 
 export function encodeHandoffBootstrap(bootstrap: HandoffBootstrap): string {

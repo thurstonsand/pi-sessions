@@ -1,5 +1,14 @@
 # Release Notes
 
+## v0.5.0
+
+Background session handoffs from agents.
+
+- Added the `session_handoff` tool for Ghostty/macOS background handoffs.
+- Tool-launched child sessions now collect context and show the handoff review countdown in the new split while the current session continues.
+- Added `/handoff --identify` to refresh the Ghostty source pane used for background handoffs.
+- Added optional target working directories for handoffs into related repos.
+
 ## v0.4.1
 
 Richer handoff draft extraction.

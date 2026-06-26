@@ -1,5 +1,11 @@
 # Release Notes
 
+## v0.5.1
+
+Pi dependency compatibility update.
+
+- Bumped Pi dependencies to `0.80.2`.
+
 ## v0.5.0
 
 Background session handoffs from agents.

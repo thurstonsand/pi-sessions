@@ -1,4 +1,5 @@
-import { complete, type Message } from "@earendil-works/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
+import { complete } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";

@@ -15,13 +15,9 @@ const { completeMock } = vi.hoisted(() => ({
   completeMock: vi.fn(),
 }));
 
-vi.mock("@earendil-works/pi-ai", async () => {
-  const actual = await vi.importActual<object>("@earendil-works/pi-ai");
-  return {
-    ...actual,
-    complete: completeMock,
-  };
-});
+vi.mock("@earendil-works/pi-ai/compat", () => ({
+  complete: completeMock,
+}));
 
 const testFs = createTestFilesystem("pi-sessions-ask-");
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;

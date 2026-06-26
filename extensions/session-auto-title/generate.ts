@@ -1,13 +1,8 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import {
-  type Api,
-  completeSimple,
-  type Model,
-  type TextContent,
-  type UserMessage,
-} from "@earendil-works/pi-ai";
+import type { Api, Model, TextContent, UserMessage } from "@earendil-works/pi-ai";
+import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutoTitleContext } from "./context.js";
 import type { AutoTitleTrigger } from "./state.js";

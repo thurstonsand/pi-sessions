@@ -20,7 +20,7 @@
 
 ## Install
 
-Requires Pi `0.78.1` or newer.
+Requires Pi `0.80.2` or newer.
 
 **From npm** (recommended):
 

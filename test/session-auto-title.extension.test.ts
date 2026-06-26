@@ -5,13 +5,9 @@ const { completeSimpleMock, loadSettingsMock } = vi.hoisted(() => ({
   loadSettingsMock: vi.fn(),
 }));
 
-vi.mock("@earendil-works/pi-ai", async () => {
-  const actual = await vi.importActual<object>("@earendil-works/pi-ai");
-  return {
-    ...actual,
-    completeSimple: completeSimpleMock,
-  };
-});
+vi.mock("@earendil-works/pi-ai/compat", () => ({
+  completeSimple: completeSimpleMock,
+}));
 
 vi.mock("../extensions/shared/settings.js", () => ({
   loadSettings: loadSettingsMock,

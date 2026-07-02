@@ -1,5 +1,15 @@
 # Release Notes
 
+## v0.6.0
+
+Live session messaging between running Pi sessions.
+
+- Added `session_list_live` and `session_send_message` pi tools for agent-to-agent coordination.
+- Incoming messages start idle sessions or steer active sessions.
+- Added `session_handoff.requestResponse` so child sessions can be asked to report back when complete.
+- Added a local broker to handle the communication between pi instances.
+- Raised the Node requirement to `>=24 <26`.
+
 ## v0.5.1
 
 Pi dependency compatibility update.

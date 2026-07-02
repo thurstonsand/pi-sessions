@@ -4,13 +4,13 @@ import {
   type FileTouchOp,
   matchesRepoRoot,
   normalizeSearchPath,
-} from "../../session-search/normalize.js";
+} from "../../session-search/normalize.ts";
 import {
   SEARCH_SNIPPET_ELLIPSIS,
   SEARCH_SNIPPET_MATCH_END,
   SEARCH_SNIPPET_MATCH_START,
-} from "../search-snippet.js";
-import { parseTypeBoxRows } from "../typebox.js";
+} from "../search-snippet.ts";
+import { parseTypeBoxRows } from "../typebox.ts";
 import {
   boostIndependentHits,
   buildFtsQuery,
@@ -26,7 +26,7 @@ import {
   type SessionIndexDatabase,
   sanitizeFilterValues,
   tokenizeSearchTerms,
-} from "./common.js";
+} from "./common.ts";
 
 const SESSION_LIST_ROW_SCHEMA = Type.Object({
   sessionId: Type.String(),

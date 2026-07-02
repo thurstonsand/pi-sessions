@@ -23,16 +23,16 @@ import {
   HANDOFF_METADATA_CUSTOM_TYPE,
   type HandoffSessionMetadata,
   parseHandoffSessionMetadata,
-} from "../session-handoff/metadata.js";
-import type { SessionOrigin } from "../shared/session-index/index.js";
-import { safeParseTypeBoxValue } from "../shared/typebox.js";
+} from "../session-handoff/metadata.ts";
+import type { SessionOrigin } from "../shared/session-index/index.ts";
+import { safeParseTypeBoxValue } from "../shared/typebox.ts";
 import {
   deriveSessionRepoRoots,
   type FileTouchOp,
   type FileTouchSource,
   normalizePathRecord,
   type PathScope,
-} from "./normalize.js";
+} from "./normalize.ts";
 
 export interface SearchTextChunk {
   entryId?: string | undefined;

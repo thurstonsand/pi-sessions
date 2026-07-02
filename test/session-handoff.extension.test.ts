@@ -5,16 +5,16 @@ import {
   encodeHandoffBootstrap,
   HANDOFF_BOOTSTRAP_ENV,
   HANDOFF_STALE_SESSION_MESSAGE,
-} from "../extensions/session-handoff/metadata.js";
+} from "../extensions/session-handoff/metadata.ts";
 
 const mockLoadSettings = vi.fn();
 const mockOpenSessionReferencePicker = vi.fn();
 
-vi.mock("../extensions/shared/settings.js", () => ({
+vi.mock("../extensions/shared/settings.ts", () => ({
   loadSettings: mockLoadSettings,
 }));
 
-vi.mock("../extensions/session-handoff/picker.js", () => ({
+vi.mock("../extensions/session-handoff/picker.ts", () => ({
   openSessionReferencePicker: mockOpenSessionReferencePicker,
 }));
 
@@ -33,7 +33,7 @@ beforeEach(() => {
 
 describe("session handoff extension", () => {
   it("registers the picker shortcut and keeps the session token system prompt note", async () => {
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
     const registerCommand = vi.fn();
@@ -60,7 +60,7 @@ describe("session handoff extension", () => {
       sessionId: "88171ce4-9021-4464-8cab-f49d04a82815",
     });
 
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
     const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
     const pi = createPiApi(new Map(), shortcuts, vi.fn());
 
@@ -90,7 +90,7 @@ describe("session handoff extension", () => {
       autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
     });
 
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
     const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
     const pi = createPiApi(new Map(), shortcuts, vi.fn());
 
@@ -103,7 +103,7 @@ describe("session handoff extension", () => {
   it("does nothing when the picker is cancelled", async () => {
     mockOpenSessionReferencePicker.mockResolvedValue({ kind: "cancel" });
 
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
     const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
     const pi = createPiApi(new Map(), shortcuts, vi.fn());
 
@@ -122,7 +122,7 @@ describe("session handoff extension", () => {
   });
 
   it("materializes handoff metadata and sends the initial prompt on matching child session start", async () => {
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
 
@@ -159,7 +159,7 @@ describe("session handoff extension", () => {
   });
 
   it("refuses bootstrap when the target session already has user input", async () => {
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
 
@@ -202,7 +202,7 @@ describe("session handoff extension", () => {
   });
 
   it("still sends the prompt when metadata already exists but there is no user input", async () => {
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
 

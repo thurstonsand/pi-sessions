@@ -15,7 +15,7 @@ import {
   generateHandoffDraft,
   generateHandoffDraftFromSessionManager,
   type HandoffDraftResult,
-} from "./session-handoff/extract.js";
+} from "./session-handoff/extract.ts";
 import {
   type ChildGeneratedHandoffBootstrap,
   createChildGeneratedHandoffBootstrap,
@@ -29,14 +29,14 @@ import {
   hasUserMessages,
   isChildGeneratedHandoffBootstrap,
   parseHandoffBootstrap,
-} from "./session-handoff/metadata.js";
-import { openSessionReferencePicker } from "./session-handoff/picker.js";
-import { SESSION_TOKEN_PREFIX } from "./session-handoff/query.js";
+} from "./session-handoff/metadata.ts";
+import { openSessionReferencePicker } from "./session-handoff/picker.ts";
+import { SESSION_TOKEN_PREFIX } from "./session-handoff/query.ts";
 import {
   renderStrongModal,
   reviewHandoffDraft,
   reviewHandoffDraftForSend,
-} from "./session-handoff/review.js";
+} from "./session-handoff/review.ts";
 import {
   buildPiResumeCommand,
   createHandoffSession,
@@ -45,9 +45,9 @@ import {
   isGhosttyHandoffAvailable,
   launchSplitHandoffSession,
   validateSplitHandoffPrerequisites,
-} from "./session-handoff/spawn.js";
-import { isTuiMode } from "./shared/pi-mode.js";
-import { loadSettings } from "./shared/settings.js";
+} from "./session-handoff/spawn.ts";
+import { isTuiMode } from "./shared/pi-mode.ts";
+import { loadSettings } from "./shared/settings.ts";
 
 const HANDOFF_USAGE = "Usage: /handoff [--left|--right|--up|--down] <goal for new thread>";
 const TOOL_HANDOFF_PROVISIONAL_TITLE = "Session handoff";
@@ -58,6 +58,7 @@ interface HandoffToolParams {
   goal: string;
   splitDirection: HandoffSplitDirection;
   cwd?: string | undefined;
+  requestResponse?: boolean | undefined;
 }
 
 interface HandoffToolDetails {
@@ -108,6 +109,12 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
           Type.String({
             description:
               "Optional target working directory. Relative paths resolve from the current session cwd.",
+          }),
+        ),
+        requestResponse: Type.Optional(
+          Type.Boolean({
+            description:
+              "Whether the child session should report completion/results of its task back to this session.",
           }),
         ),
       }),
@@ -388,6 +395,7 @@ async function executeSessionHandoffTool(
     return createHandoffToolError("No conversation to hand off.");
   }
 
+  const requestResponse = params.requestResponse ?? false;
   const createdSession = createHandoffSession({
     cwd: targetCwd.path,
     sessionDir: ctx.sessionManager.getSessionDir(),
@@ -400,6 +408,7 @@ async function executeSessionHandoffTool(
       goal,
       title: TOOL_HANDOFF_PROVISIONAL_TITLE,
       parentSessionFile,
+      requestResponse,
     }),
   );
   const model = formatModelArgument(ctx.model, pi.getThinkingLevel());
@@ -482,6 +491,7 @@ async function startChildGeneratedHandoff(
           bootstrap.goal,
           thinkingLevel,
           signal,
+          bootstrap.requestResponse ?? false,
         ),
     );
     if (!generatedDraft) {

@@ -6,8 +6,8 @@ import {
   DEFAULT_AUTO_TITLE_REFRESH_TURNS,
   loadSettings,
   ModelReference,
-} from "../extensions/shared/settings.js";
-import { createTestFilesystem } from "./test-helpers.js";
+} from "../extensions/shared/settings.ts";
+import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-auto-title-settings-");
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;

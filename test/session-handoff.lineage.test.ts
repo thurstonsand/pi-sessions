@@ -10,8 +10,8 @@ import {
   insertSession,
   openIndexDatabase,
   rebuildSessionLineageRelations,
-} from "../extensions/shared/session-index/index.js";
-import { createTestFilesystem } from "./test-helpers.js";
+} from "../extensions/shared/session-index/index.ts";
+import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-handoff-lineage-");
 

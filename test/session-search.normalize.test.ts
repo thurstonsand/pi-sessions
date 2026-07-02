@@ -4,8 +4,8 @@ import {
   deriveSessionRepoRoots,
   matchesRepoRoot,
   normalizePathRecord,
-} from "../extensions/session-search/normalize.js";
-import { createTestFilesystem } from "./test-helpers.js";
+} from "../extensions/session-search/normalize.ts";
+import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-normalize-");
 

@@ -1,7 +1,7 @@
 import { Buffer } from "node:buffer";
 import type { CustomEntry, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
-import { safeParseTypeBoxValue } from "../shared/typebox.js";
+import { safeParseTypeBoxValue } from "../shared/typebox.ts";
 
 export const HANDOFF_METADATA_CUSTOM_TYPE = "pi-sessions.handoff";
 export const HANDOFF_BOOTSTRAP_ENV = "PI_SESSIONS_HANDOFF_BOOTSTRAP";
@@ -30,6 +30,7 @@ export const CHILD_GENERATED_HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
   goal: Type.String(),
   title: Type.String(),
   parentSessionFile: Type.String(),
+  requestResponse: Type.Optional(Type.Boolean()),
 });
 
 export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Union([
@@ -80,6 +81,7 @@ export function createChildGeneratedHandoffBootstrap(options: {
   goal: string;
   title: string;
   parentSessionFile: string;
+  requestResponse?: boolean | undefined;
 }): ChildGeneratedHandoffBootstrap {
   return {
     mode: "generate",
@@ -87,6 +89,7 @@ export function createChildGeneratedHandoffBootstrap(options: {
     goal: options.goal.trim(),
     title: options.title.trim(),
     parentSessionFile: options.parentSessionFile,
+    ...(options.requestResponse === undefined ? {} : { requestResponse: options.requestResponse }),
   };
 }
 

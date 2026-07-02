@@ -2,14 +2,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { type SessionInfo, SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { rebuildSessionIndex } from "../extensions/session-search/reindex.js";
+import { rebuildSessionIndex } from "../extensions/session-search/reindex.ts";
 import {
   initializeSchema,
   openIndexDatabase,
   searchSessions,
   upsertSession,
-} from "../extensions/shared/session-index/index.js";
-import { createTestFilesystem } from "./test-helpers.js";
+} from "../extensions/shared/session-index/index.ts";
+import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-reindex-");
 

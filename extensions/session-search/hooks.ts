@@ -22,7 +22,7 @@ import {
   type SessionRow,
   setMetadata,
   upsertSession,
-} from "../shared/session-index/index.js";
+} from "../shared/session-index/index.ts";
 import {
   createSessionNameChunk,
   type ExtractedSessionRecord,
@@ -30,8 +30,8 @@ import {
   extractSessionRecord,
   extractSessionTail,
   type SessionFileTouch,
-} from "./extract.js";
-import { deriveSessionRepoRoots } from "./normalize.js";
+} from "./extract.ts";
+import { deriveSessionRepoRoots } from "./normalize.ts";
 
 const TOOL_RESULT_TEXT_LIMIT = 500;
 

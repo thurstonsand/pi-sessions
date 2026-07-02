@@ -9,7 +9,7 @@ import {
   createHandoffSessionMetadata,
   HANDOFF_BOOTSTRAP_ENV,
   parseHandoffBootstrap,
-} from "../extensions/session-handoff/metadata.js";
+} from "../extensions/session-handoff/metadata.ts";
 import {
   buildPiLaunchCommand,
   buildPiResumeCommand,
@@ -17,7 +17,7 @@ import {
   getFocusedGhosttyTerminalId,
   launchSplitHandoffSession,
   validateSplitHandoffPrerequisites,
-} from "../extensions/session-handoff/spawn.js";
+} from "../extensions/session-handoff/spawn.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();

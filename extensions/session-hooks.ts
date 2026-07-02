@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { HANDOFF_BOOTSTRAP_ENV, parseHandoffBootstrap } from "./session-handoff/metadata.js";
-import { createSessionHookController } from "./session-search/hooks.js";
-import { loadSettings } from "./shared/settings.js";
+import { HANDOFF_BOOTSTRAP_ENV, parseHandoffBootstrap } from "./session-handoff/metadata.ts";
+import { createSessionHookController } from "./session-search/hooks.ts";
+import { loadSettings } from "./shared/settings.ts";
 
 interface SessionStartLifecycleEvent {
   reason?: "startup" | "reload" | "new" | "resume" | "fork";

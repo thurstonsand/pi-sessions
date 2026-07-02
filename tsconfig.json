@@ -8,6 +8,7 @@
     "skipLibCheck": true,
     "exactOptionalPropertyTypes": true,
     "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true,
     "types": ["node", "vitest/globals"]
   },
   "include": ["extensions/**/*.ts", "test/**/*.ts", "vitest.config.ts"]

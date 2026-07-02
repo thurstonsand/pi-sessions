@@ -19,7 +19,7 @@ import {
   serializeConversation,
 } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
-import { parseTypeBoxValue } from "../shared/typebox.js";
+import { parseTypeBoxValue } from "../shared/typebox.ts";
 
 const MAX_RELEVANT_FILES = 12;
 const MAX_OPEN_QUESTIONS = 8;
@@ -88,6 +88,7 @@ export async function generateHandoffDraft(
   goal: string,
   thinkingLevel: ThinkingLevel | undefined,
   signal?: AbortSignal,
+  requestResponse = false,
 ): Promise<HandoffDraftResult | undefined> {
   if (!ctx.model) {
     throw new Error("No model is available for handoff.");
@@ -99,6 +100,7 @@ export async function generateHandoffDraft(
     goal,
     thinkingLevel,
     signal,
+    requestResponse,
   );
 }
 
@@ -108,6 +110,7 @@ export async function generateHandoffDraftFromSessionManager(
   goal: string,
   thinkingLevel: ThinkingLevel | undefined,
   signal?: AbortSignal,
+  requestResponse = false,
 ): Promise<HandoffDraftResult | undefined> {
   if (!ctx.model) {
     throw new Error("No model is available for handoff.");
@@ -139,7 +142,7 @@ export async function generateHandoffDraftFromSessionManager(
   const sessionPath = sourceSessionManager.getSessionFile();
 
   return {
-    draft: assembleHandoffDraft(sessionId, sessionPath, handoffContext, goal),
+    draft: assembleHandoffDraft(sessionId, sessionPath, handoffContext, goal, requestResponse),
     context: handoffContext,
     sessionId,
     sessionPath,
@@ -241,8 +244,9 @@ export function assembleHandoffDraft(
   sessionPath: string | undefined,
   handoffContext: HandoffContext,
   goal: string,
+  requestResponse = false,
 ): string {
-  const sections = [buildContinuityLine(sessionId, sessionPath)];
+  const sections = [buildContinuityLine(sessionId, sessionPath, requestResponse)];
   const nextTask = handoffContext.nextTask.trim() || goal.trim();
 
   if (nextTask) {
@@ -326,8 +330,17 @@ function extractHandoffContextFromArguments(
   };
 }
 
-function buildContinuityLine(sessionId: string, _sessionPath: string | undefined): string {
-  return `Continuing work from session ${sessionId}. When you lack specific information you can use session_ask.`;
+function buildContinuityLine(
+  sessionId: string,
+  _sessionPath: string | undefined,
+  requestResponse: boolean,
+): string {
+  const base = `Continuing work from session ${sessionId}. When you lack specific information you can use session_ask.`;
+  if (!requestResponse) {
+    return base;
+  }
+
+  return `${base} When this work is complete, send that session a completion report with session_send_message.`;
 }
 
 function normalizeStringArray(value: unknown, limit: number): string[] {

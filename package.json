@@ -2,7 +2,7 @@
   "name": "pi-sessions",
   "version": "0.5.1",
   "type": "module",
-  "description": "Pi session search, ask, handoff, auto-titling, and indexing tools",
+  "description": "Pi session search, ask, handoff, messaging, auto-titling, and indexing tools",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -16,7 +16,7 @@
     "pi-package"
   ],
   "engines": {
-    "node": ">=20 <26"
+    "node": ">=24 <26"
   },
   "files": [
     "extensions",
@@ -29,6 +29,7 @@
       "./extensions/session-handoff.ts",
       "./extensions/session-hooks.ts",
       "./extensions/session-index.ts",
+      "./extensions/session-messaging.ts",
       "./extensions/session-search.ts"
     ]
   },

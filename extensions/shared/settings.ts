@@ -3,7 +3,7 @@ import path from "node:path";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
-import { parseTypeBoxValue } from "./typebox.js";
+import { parseTypeBoxValue } from "./typebox.ts";
 
 export const DEFAULT_AUTO_TITLE_REFRESH_TURNS = 4;
 export const DEFAULT_AUTO_TITLE_PROMPT = `Name this coding session (under 80 chars). Be specific to what is being discussed. Your exact output will be displayed to the user, so make sure that it contains ONLY the title itself and nothing else.`;

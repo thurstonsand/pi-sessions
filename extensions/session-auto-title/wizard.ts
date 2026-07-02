@@ -7,9 +7,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { Focusable, TUI } from "@earendil-works/pi-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { RetitleCommandOutcome, RetitleMode, RetitleScope } from "./command.js";
-import type { AutoRetitleStatus, SessionAutoTitleController } from "./controller.js";
-import type { AutoTitleFailure } from "./generate.js";
+import type { RetitleCommandOutcome, RetitleMode, RetitleScope } from "./command.ts";
+import type { AutoRetitleStatus, SessionAutoTitleController } from "./controller.ts";
+import type { AutoTitleFailure } from "./generate.ts";
 import {
   buildBulkRetitleMessage,
   buildRetitleScopeScan,
@@ -20,7 +20,7 @@ import {
   type RetitleScopeScan,
   runBulkRetitle,
   runRetitlePlan,
-} from "./retitle.js";
+} from "./retitle.ts";
 
 interface RetitleWizardOptions {
   initialInvocation?: {

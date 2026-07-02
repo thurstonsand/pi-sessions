@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   HANDOFF_BOOTSTRAP_ENV,
   parseHandoffBootstrap,
-} from "../extensions/session-handoff/metadata.js";
+} from "../extensions/session-handoff/metadata.ts";
 
 const mockLoadSettings = vi.fn();
 const mockGenerateHandoffDraft = vi.fn();
@@ -13,23 +13,23 @@ const mockCreateHandoffSession = vi.fn();
 const mockLaunchSplitHandoffSession = vi.fn();
 const mockGetFocusedGhosttyTerminalId = vi.fn();
 
-vi.mock("../extensions/shared/settings.js", () => ({
+vi.mock("../extensions/shared/settings.ts", () => ({
   loadSettings: mockLoadSettings,
 }));
 
-vi.mock("../extensions/session-handoff/extract.js", () => ({
+vi.mock("../extensions/session-handoff/extract.ts", () => ({
   generateHandoffDraft: mockGenerateHandoffDraft,
 }));
 
-vi.mock("../extensions/session-handoff/review.js", async () => {
-  const actual = await vi.importActual<object>("../extensions/session-handoff/review.js");
+vi.mock("../extensions/session-handoff/review.ts", async () => {
+  const actual = await vi.importActual<object>("../extensions/session-handoff/review.ts");
   return {
     ...actual,
     reviewHandoffDraft: mockReviewHandoffDraft,
   };
 });
 
-vi.mock("../extensions/session-handoff/spawn.js", () => ({
+vi.mock("../extensions/session-handoff/spawn.ts", () => ({
   buildPiResumeCommand: vi.fn(
     (sessionDir: string, sessionId: string, bootstrapValue: string, title: string) =>
       `PI_SESSIONS_HANDOFF_BOOTSTRAP='${bootstrapValue}' pi --session-dir ${sessionDir} --session-id ${sessionId} --name '${title}'`,
@@ -251,7 +251,7 @@ async function getHandoffCommand(): Promise<{
   pi: ExtensionAPI;
   handler: (args: string, ctx: unknown) => Promise<void>;
 }> {
-  const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.js");
+  const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
   const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
   const pi = createPiApi(commands);
   sessionHandoffExtension(pi as never);

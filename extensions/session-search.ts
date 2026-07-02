@@ -5,7 +5,7 @@ import { Type } from "typebox";
 import {
   stripSearchSnippetMarkers,
   transformSearchSnippetMatches,
-} from "./shared/search-snippet.js";
+} from "./shared/search-snippet.ts";
 import {
   getIndexStatus,
   INDEX_SCHEMA_VERSION,
@@ -14,9 +14,9 @@ import {
   type SearchSessionsParams,
   type SessionIndexStatus,
   searchSessions,
-} from "./shared/session-index/index.js";
-import { formatSessionTitleOrShortId } from "./shared/session-ui.js";
-import { loadSettings } from "./shared/settings.js";
+} from "./shared/session-index/index.ts";
+import { formatSessionTitleOrShortId } from "./shared/session-ui.ts";
+import { loadSettings } from "./shared/settings.ts";
 
 interface SessionSearchToolParams {
   query?: string;

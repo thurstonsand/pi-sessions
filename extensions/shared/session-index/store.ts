@@ -1,5 +1,5 @@
 import { type Static, Type } from "typebox";
-import { parseTypeBoxValue } from "../typebox.js";
+import { parseTypeBoxValue } from "../typebox.ts";
 import {
   compactSessionId,
   INDEX_SCHEMA_VERSION,
@@ -10,7 +10,7 @@ import {
   type SessionIndexDatabase,
   type SessionRow,
   type SessionTextChunkRow,
-} from "./common.js";
+} from "./common.ts";
 
 const SESSION_ROW_QUERY_SCHEMA = Type.Object({
   sessionId: Type.String(),

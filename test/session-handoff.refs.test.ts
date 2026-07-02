@@ -1,13 +1,13 @@
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { formatHandoffRef, resolveSessionReference } from "../extensions/session-handoff/refs.js";
+import { formatHandoffRef, resolveSessionReference } from "../extensions/session-handoff/refs.ts";
 import {
   initializeSchema,
   insertSession,
   openIndexDatabase,
   setMetadata,
-} from "../extensions/shared/session-index/index.js";
-import { createTestFilesystem } from "./test-helpers.js";
+} from "../extensions/shared/session-index/index.ts";
+import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-handoff-refs-");
 

@@ -6,19 +6,19 @@ import type {
   SessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import type { RetitleMode, RetitleScope } from "./command.js";
-import { buildAutoTitleContext } from "./context.js";
-import type { AutoTitleTriggerPlan, SessionAutoTitleController } from "./controller.js";
+import type { RetitleMode, RetitleScope } from "./command.ts";
+import { buildAutoTitleContext } from "./context.ts";
+import type { AutoTitleTriggerPlan, SessionAutoTitleController } from "./controller.ts";
 import {
   type AutoTitleGenerationResult,
   createAutoTitleFailure,
   generateAutoTitle,
-} from "./generate.js";
+} from "./generate.ts";
 import {
   AUTO_TITLE_STATE_CUSTOM_TYPE,
   type AutoTitlePersistedState,
   createAutoTitleState,
-} from "./state.js";
+} from "./state.ts";
 
 export interface RetitleScopeScan {
   scope: Exclude<RetitleScope, "this">;

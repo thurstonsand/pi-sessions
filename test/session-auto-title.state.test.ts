@@ -4,7 +4,7 @@ import {
   createAutoTitleState,
   getLatestAutoTitleState,
   parseAutoTitleState,
-} from "../extensions/session-auto-title/state.js";
+} from "../extensions/session-auto-title/state.ts";
 
 describe("session auto-title state", () => {
   it("creates persisted state payloads without re-normalizing stored titles", () => {

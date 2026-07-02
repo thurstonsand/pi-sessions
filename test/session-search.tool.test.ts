@@ -9,20 +9,20 @@ import {
 import type { TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { listSessionPickerItems } from "../extensions/session-handoff/query.js";
-import sessionSearchExtension from "../extensions/session-search.js";
+import { listSessionPickerItems } from "../extensions/session-handoff/query.ts";
+import sessionSearchExtension from "../extensions/session-search.ts";
 import {
   SEARCH_SNIPPET_MATCH_END,
   SEARCH_SNIPPET_MATCH_START,
-} from "../extensions/shared/search-snippet.js";
+} from "../extensions/shared/search-snippet.ts";
 import {
   initializeSchema,
   insertSession,
   insertTextChunk,
   openIndexDatabase,
   setMetadata,
-} from "../extensions/shared/session-index/index.js";
-import { createTestFilesystem } from "./test-helpers.js";
+} from "../extensions/shared/session-index/index.ts";
+import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-search-tool-");
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;

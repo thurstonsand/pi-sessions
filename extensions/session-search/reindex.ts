@@ -11,8 +11,8 @@ import {
   type SessionIndexDatabase,
   setMetadata,
   upsertSession,
-} from "../shared/session-index/index.js";
-import { type ExtractedSessionRecord, extractSessionRecord } from "./extract.js";
+} from "../shared/session-index/index.ts";
+import { type ExtractedSessionRecord, extractSessionRecord } from "./extract.ts";
 
 export interface ReindexOptions {
   indexPath: string;

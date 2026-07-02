@@ -3,16 +3,16 @@ import { complete } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { type RenderedSessionTree, renderSessionTreeMarkdown } from "./session-search/extract.js";
+import { type RenderedSessionTree, renderSessionTreeMarkdown } from "./session-search/extract.ts";
 import {
   getIndexStatus,
   getSessionById,
   INDEX_SCHEMA_VERSION,
   openIndexDatabase,
   type SessionLineageRow,
-} from "./shared/session-index/index.js";
-import { formatSessionTitleOrShortId, isExactSessionId } from "./shared/session-ui.js";
-import { loadSettings } from "./shared/settings.js";
+} from "./shared/session-index/index.ts";
+import { formatSessionTitleOrShortId, isExactSessionId } from "./shared/session-ui.ts";
+import { loadSettings } from "./shared/settings.ts";
 
 const SESSION_ASK_SYSTEM_PROMPT = `You are analyzing a Pi coding session transcript. The transcript includes the entire session tree, including abandoned branches and summaries.
 

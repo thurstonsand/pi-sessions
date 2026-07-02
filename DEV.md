@@ -33,6 +33,7 @@ No build/compile step — The pi framework loads extensions directly from TypeSc
 
 - Wrap multi-step writes in transactions and run them with `db.transaction(fn).immediate()` — a deferred read-then-write transaction fails with `SQLITE_BUSY` on the snapshot upgrade
 - SQLite is accessed via `bun:sqlite` when using bun as the runtime, `better-sqlite3` otherwise
+- use `.ts` extensions for repo-local imports
 
 ## Project structure
 
@@ -41,6 +42,7 @@ No build/compile step — The pi framework loads extensions directly from TypeSc
 - **Session index**: entrypoint at `extensions/session-index.ts`; core logic at `extensions/session-search/reindex.ts` and `extensions/shared/session-index/`.
 - **Session hooks**: entrypoint at `extensions/session-hooks.ts`; core logic at `extensions/session-search/hooks.ts`.
 - **Session handoff**: entrypoint at `extensions/session-handoff.ts`; core logic at `extensions/session-handoff/`.
+- **Session messaging**: entrypoint at `extensions/session-messaging.ts`; broker/client/runtime logic at `extensions/session-messaging/`.
 - **Session reference picker**: entrypoint at `extensions/session-handoff.ts`; core logic at `extensions/session-handoff/picker.ts` and `extensions/session-handoff/query.ts`.
 - **Session auto-title**: entrypoint at `extensions/session-auto-title.ts`; core logic at `extensions/session-auto-title/`.
 - **Shared utilities**: no primary entrypoint; core logic at `extensions/shared/`.

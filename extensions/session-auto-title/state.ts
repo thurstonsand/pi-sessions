@@ -1,6 +1,6 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
-import { safeParseTypeBoxValue } from "../shared/typebox.js";
+import { safeParseTypeBoxValue } from "../shared/typebox.ts";
 
 export const AUTO_TITLE_STATE_CUSTOM_TYPE = "pi-sessions.auto-title";
 export const AUTO_TITLE_STATE_VERSION = 1;

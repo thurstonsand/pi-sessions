@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { resolveAutoTitleModel } from "../extensions/session-auto-title/model.js";
-import { ModelReference } from "../extensions/shared/settings.js";
+import { resolveAutoTitleModel } from "../extensions/session-auto-title/model.ts";
+import { ModelReference } from "../extensions/shared/settings.ts";
 
 interface TestModel {
   provider: string;

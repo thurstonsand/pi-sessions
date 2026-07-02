@@ -1,6 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { ModelReference } from "../shared/settings.js";
+import { ModelReference } from "../shared/settings.ts";
 
 const DEFAULT_AUTO_TITLE_FALLBACK_MODELS: readonly ModelReference[] = [
   new ModelReference("google", "gemini-flash-lite-latest"),

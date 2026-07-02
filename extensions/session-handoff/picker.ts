@@ -11,8 +11,8 @@ import {
 import {
   stripSearchSnippetMarkers,
   transformSearchSnippetMatches,
-} from "../shared/search-snippet.js";
-import { listSessionPickerItems, normalizeDisplayText, type SessionPickerItem } from "./query.js";
+} from "../shared/search-snippet.ts";
+import { listSessionPickerItems, normalizeDisplayText, type SessionPickerItem } from "./query.ts";
 
 const MAX_VISIBLE_BROWSE_ROWS = 10;
 const MAX_VISIBLE_SEARCH_ROWS = 4;

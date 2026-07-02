@@ -3,15 +3,15 @@ import { createRequire } from "node:module";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { afterEach, describe, expect, it } from "vitest";
-import { createSessionHookController } from "../extensions/session-search/hooks.js";
+import { createSessionHookController } from "../extensions/session-search/hooks.ts";
 import {
   getMetadata,
   initializeSchema,
   openIndexDatabase,
   searchSessions,
   setMetadata,
-} from "../extensions/shared/session-index/index.js";
-import { createTestFilesystem } from "./test-helpers.js";
+} from "../extensions/shared/session-index/index.ts";
+import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-hooks-");
 

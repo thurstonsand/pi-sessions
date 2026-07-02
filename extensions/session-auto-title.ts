@@ -11,29 +11,29 @@ import {
   getRetitleArgumentCompletions,
   type RetitleCommandInvocation,
   type RetitleCommandOutcome,
-} from "./session-auto-title/command.js";
+} from "./session-auto-title/command.ts";
 import {
   createSessionAutoTitleController,
   type SessionAutoTitleController,
-} from "./session-auto-title/controller.js";
-import { resolveAutoTitleModel } from "./session-auto-title/model.js";
+} from "./session-auto-title/controller.ts";
+import { resolveAutoTitleModel } from "./session-auto-title/model.ts";
 import {
   buildRetitleScopeScan,
   notifyBulkRetitleResult,
   persistAutoTitleState,
   runBulkRetitle,
   runRetitlePlan,
-} from "./session-auto-title/retitle.js";
-import { showRetitleWizard } from "./session-auto-title/wizard.js";
-import { isTuiMode } from "./shared/pi-mode.js";
-import { loadSettings } from "./shared/settings.js";
+} from "./session-auto-title/retitle.ts";
+import { showRetitleWizard } from "./session-auto-title/wizard.ts";
+import { isTuiMode } from "./shared/pi-mode.ts";
+import { loadSettings } from "./shared/settings.ts";
 
 export {
   createSessionAutoTitleCommandHandler,
   getRetitleArgumentCompletions,
   parseRetitleCommand,
   TITLE_USAGE,
-} from "./session-auto-title/command.js";
+} from "./session-auto-title/command.ts";
 
 interface TitleRunState {
   controller: SessionAutoTitleController;

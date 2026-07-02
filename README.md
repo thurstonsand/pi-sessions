@@ -20,7 +20,7 @@
 
 ## Install
 
-Requires Pi `0.80.2` or newer.
+Requires Pi `0.80.2` or newer and Node `>=24 <26`.
 
 **From npm** (recommended):
 
@@ -51,14 +51,15 @@ What session did I implement the db layer?
 
 ## Features
 
-| Extension          | Surface                               | What it does                                            |
-| ------------------ | ------------------------------------- | ------------------------------------------------------- |
-| Session Search     | `session_search` pi tool              | Search through old sessions                             |
-| Session Ask        | `session_ask` pi tool                 | Ask questions about old sessions                        |
-| Session Handoff    | `/handoff`, `session_handoff` pi tool | Start a focused new session; alternative to compaction  |
-| Session Picker     | `Alt+O`                               | Reference old sessions in your prompt                   |
-| Session Index      | `/session-index` slash command        | Shows index status and rebuilds the local session index |
-| Session Auto Title | in background, `/title` slash command | Give sessions titles                                    |
+| Extension          | Surface                                              | What it does                                            |
+| ------------------ | ---------------------------------------------------- | ------------------------------------------------------- |
+| Session Search     | `session_search` pi tool                             | Search through old sessions                             |
+| Session Ask        | `session_ask` pi tool                                | Ask questions about old sessions                        |
+| Session Handoff    | `/handoff`, `session_handoff` pi tool                | Start a focused new session; alternative to compaction  |
+| Session Messaging  | `session_list_live`, `session_send_message` pi tools | Send messages between running Pi sessions               |
+| Session Picker     | `Alt+O`                                              | Reference old sessions in your prompt                   |
+| Session Index      | `/session-index` slash command                       | Shows index status and rebuilds the local session index |
+| Session Auto Title | in background, `/title` slash command                | Give sessions titles                                    |
 
 ## Session Handoff
 
@@ -85,6 +86,15 @@ If you do nothing, the preview autostarts after a short countdown.
 When running in Ghostty on macOS, pi-sessions also exposes a `session_handoff` tool. This lets the agent start a background handoff after you choose a split direction. The current session keeps running, while the child session opens in the requested split, gathers context, and shows the same review countdown before starting.
 
 If background handoffs ever target the wrong pane, run `/handoff --identify` from the intended source pane to refresh the in-memory Ghostty terminal binding.
+
+## Session Messaging
+
+Agents can coordinate with other currently running Pi sessions:
+
+- `session_list_live` lists other live sessions
+- `session_send_message` sends a message to a live session
+
+Incoming messages start the recipient agent when idle and steer it when already running. Inactive sessions cannot receive messages, but you can still use `session_search` and `session_ask` with them.
 
 ## Session picker
 

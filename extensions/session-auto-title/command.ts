@@ -1,6 +1,6 @@
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { AutocompleteItem } from "@earendil-works/pi-tui";
-import { isTuiMode } from "../shared/pi-mode.js";
+import { isTuiMode } from "../shared/pi-mode.ts";
 
 export const TITLE_USAGE = "Usage: /title [this|folder|pi] [-f]";
 

@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDefaultIndexPath, loadSettings } from "../extensions/shared/settings.js";
-import { createTestFilesystem } from "./test-helpers.js";
+import { getDefaultIndexPath, loadSettings } from "../extensions/shared/settings.ts";
+import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-settings-");
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;

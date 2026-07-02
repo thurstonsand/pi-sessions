@@ -8,7 +8,7 @@ import {
   type SessionHeader,
   type SessionInfoEntry,
 } from "@earendil-works/pi-coding-agent";
-import { HANDOFF_BOOTSTRAP_ENV } from "./metadata.js";
+import { HANDOFF_BOOTSTRAP_ENV } from "./metadata.ts";
 
 const GHOSTTY_MACOS_ONLY_MESSAGE = "Split handoff currently supports Ghostty on macOS only.";
 const GHOSTTY_REQUIRED_MESSAGE = "Split handoff requires running inside Ghostty.";

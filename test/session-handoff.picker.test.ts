@@ -2,20 +2,20 @@ import path from "node:path";
 import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SessionReferencePickerComponent } from "../extensions/session-handoff/picker.js";
-import { listSessionPickerItems } from "../extensions/session-handoff/query.js";
+import { SessionReferencePickerComponent } from "../extensions/session-handoff/picker.ts";
+import { listSessionPickerItems } from "../extensions/session-handoff/query.ts";
 import {
   SEARCH_SNIPPET_MATCH_END,
   SEARCH_SNIPPET_MATCH_START,
-} from "../extensions/shared/search-snippet.js";
+} from "../extensions/shared/search-snippet.ts";
 import {
   initializeSchema,
   insertSession,
   insertTextChunk,
   openIndexDatabase,
   rebuildSessionLineageRelations,
-} from "../extensions/shared/session-index/index.js";
-import { createTestFilesystem } from "./test-helpers.js";
+} from "../extensions/shared/session-index/index.ts";
+import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-handoff-picker-");
 

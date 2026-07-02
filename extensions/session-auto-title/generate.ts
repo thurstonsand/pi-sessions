@@ -4,8 +4,8 @@ import { join } from "node:path";
 import type { Api, Model, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AutoTitleContext } from "./context.js";
-import type { AutoTitleTrigger } from "./state.js";
+import type { AutoTitleContext } from "./context.ts";
+import type { AutoTitleTrigger } from "./state.ts";
 
 const AUTO_TITLE_REQUEST_TIMEOUT_MS = 15_000;
 const AUTO_TITLE_MAX_TOKENS = 64;

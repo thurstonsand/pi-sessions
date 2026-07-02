@@ -1,7 +1,7 @@
-import { stripSearchSnippetMarkers } from "../shared/search-snippet.js";
+import { stripSearchSnippetMarkers } from "../shared/search-snippet.ts";
 import {
   getIndexStatus,
-  getLineageSessions,
+  getLineageRelationMap,
   getSessionByPath,
   INDEX_SCHEMA_VERSION,
   openIndexDatabase,
@@ -9,9 +9,9 @@ import {
   type SessionIndexDatabase,
   type SessionLineageRelation,
   searchSessions,
-} from "../shared/session-index/index.js";
-import { shortenSessionId } from "../shared/session-ui.js";
-import { formatCompactRelativeTime } from "../shared/time.js";
+} from "../shared/session-index/index.ts";
+import { shortenSessionId } from "../shared/session-ui.ts";
+import { formatCompactRelativeTime } from "../shared/time.ts";
 
 export const SESSION_TOKEN_PREFIX = "@session:";
 
@@ -127,9 +127,7 @@ function buildPresentationContext(
   return {
     currentSessionId,
     relationBySessionId: currentSessionId
-      ? new Map(
-          getLineageSessions(db, currentSessionId).map((row) => [row.sessionId, row.relation]),
-        )
+      ? getLineageRelationMap(db, currentSessionId)
       : new Map<string, SessionLineageRelation>(),
   };
 }

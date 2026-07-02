@@ -1,13 +1,13 @@
 import { buildSessionContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { AutoTitleSettings } from "../shared/settings.js";
-import type { AutoTitleFailure } from "./generate.js";
+import type { AutoTitleSettings } from "../shared/settings.ts";
+import type { AutoTitleFailure } from "./generate.ts";
 import {
   type AutoTitleMode,
   type AutoTitlePersistedState,
   type AutoTitleTrigger,
   createAutoTitleState,
   getLatestAutoTitleState,
-} from "./state.js";
+} from "./state.ts";
 
 export interface SessionAutoTitleStateSnapshot {
   currentSessionFile: string | undefined;

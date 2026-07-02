@@ -3,8 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   extractSessionRecord,
   renderSessionTreeMarkdown,
-} from "../extensions/session-search/extract.js";
-import { createTestFilesystem } from "./test-helpers.js";
+} from "../extensions/session-search/extract.ts";
+import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-extract-");
 

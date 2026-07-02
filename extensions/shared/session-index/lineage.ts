@@ -1,5 +1,5 @@
 import { type Static, Type } from "typebox";
-import { parseTypeBoxRows, parseTypeBoxValue } from "../typebox.js";
+import { parseTypeBoxRows, parseTypeBoxValue } from "../typebox.ts";
 import {
   NULLABLE_STRING_SCHEMA,
   parseRepoRoots,
@@ -9,7 +9,7 @@ import {
   type SessionLineageRelation,
   type SessionLineageRow,
   type SessionRelatedSessionRow,
-} from "./common.js";
+} from "./common.ts";
 
 const SESSION_GRAPH_ROW_SCHEMA = Type.Object({
   sessionId: Type.String(),
@@ -158,6 +158,13 @@ export function getLineageSessions(
   sessionId: string,
 ): SessionRelatedSessionRow[] {
   return queryRelatedSessions(db, sessionId);
+}
+
+export function getLineageRelationMap(
+  db: SessionIndexDatabase,
+  sessionId: string,
+): Map<string, SessionLineageRelation> {
+  return new Map(getLineageSessions(db, sessionId).map((row) => [row.sessionId, row.relation]));
 }
 
 export function getParentSession(

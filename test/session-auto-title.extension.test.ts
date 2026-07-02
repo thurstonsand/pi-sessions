@@ -9,7 +9,7 @@ vi.mock("@earendil-works/pi-ai/compat", () => ({
   completeSimple: completeSimpleMock,
 }));
 
-vi.mock("../extensions/shared/settings.js", () => ({
+vi.mock("../extensions/shared/settings.ts", () => ({
   loadSettings: loadSettingsMock,
   ModelReference: class ModelReference {
     constructor(
@@ -41,7 +41,7 @@ beforeEach(() => {
 describe("session auto-title extension", () => {
   it("resolves the current session model at session start when cheap models are unavailable", async () => {
     const { default: sessionAutoTitleExtension } = await import(
-      "../extensions/session-auto-title.js"
+      "../extensions/session-auto-title.ts"
     );
     const { commands, handlers, pi } = createExtensionApi();
 
@@ -82,7 +82,7 @@ describe("session auto-title extension", () => {
       },
     });
     const { default: sessionAutoTitleExtension } = await import(
-      "../extensions/session-auto-title.js"
+      "../extensions/session-auto-title.ts"
     );
     const { commands, handlers, pi } = createExtensionApi();
 
@@ -116,7 +116,7 @@ describe("session auto-title extension", () => {
   });
 
   it("adds current-title preservation instructions only for periodic retitles", async () => {
-    const { generateAutoTitle } = await import("../extensions/session-auto-title/generate.js");
+    const { generateAutoTitle } = await import("../extensions/session-auto-title/generate.ts");
     const ctx = createRetitleContext({
       availableModels: [],
       currentModel: { provider: "openai", id: "gpt-5.4-mini" },
@@ -173,7 +173,7 @@ describe("session auto-title extension", () => {
 
   it("does not retry a second model after startup picks one resolved model", async () => {
     const { default: sessionAutoTitleExtension } = await import(
-      "../extensions/session-auto-title.js"
+      "../extensions/session-auto-title.ts"
     );
     const { commands, handlers, pi } = createExtensionApi();
 
@@ -206,7 +206,7 @@ describe("session auto-title extension", () => {
 
   it("surfaces background auto-title failures as a warning notification", async () => {
     const { default: sessionAutoTitleExtension } = await import(
-      "../extensions/session-auto-title.js"
+      "../extensions/session-auto-title.ts"
     );
     const { handlers, pi } = createExtensionApi();
 

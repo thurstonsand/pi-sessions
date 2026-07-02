@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   HandoffPreviewComponent,
   reviewHandoffDraft,
-} from "../extensions/session-handoff/review.js";
+} from "../extensions/session-handoff/review.ts";
 
 describe("session handoff review", () => {
   it("accepts the draft automatically when the timer expires", () => {

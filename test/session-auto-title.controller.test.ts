@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { createSessionAutoTitleController } from "../extensions/session-auto-title/controller.js";
+import { createSessionAutoTitleController } from "../extensions/session-auto-title/controller.ts";
 import {
   AUTO_TITLE_STATE_CUSTOM_TYPE,
   type AutoTitlePersistedState,
   createAutoTitleState,
-} from "../extensions/session-auto-title/state.js";
+} from "../extensions/session-auto-title/state.ts";
 
 function createMessageEntry(
   id: string,

@@ -2,14 +2,14 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import sessionAskExtension from "../extensions/session-ask.js";
+import sessionAskExtension from "../extensions/session-ask.ts";
 import {
   initializeSchema,
   insertSession,
   openIndexDatabase,
   setMetadata,
-} from "../extensions/shared/session-index/index.js";
-import { createTestFilesystem } from "./test-helpers.js";
+} from "../extensions/shared/session-index/index.ts";
+import { createTestFilesystem } from "./test-helpers.ts";
 
 const { completeMock } = vi.hoisted(() => ({
   completeMock: vi.fn(),

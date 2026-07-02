@@ -1,13 +1,13 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { parseTypeBoxValue } from "../typebox.js";
+import { parseTypeBoxValue } from "../typebox.ts";
 import {
   INDEX_SCHEMA_VERSION,
   METADATA_ROW_SCHEMA,
   ROW_COUNT_SCHEMA,
   type SessionIndexDatabase,
   type SessionIndexStatus,
-} from "./common.js";
-import { openSqlite } from "./sqlite.js";
+} from "./common.ts";
+import { openSqlite } from "./sqlite.ts";
 
 export function ensureIndexDir(dir: string): string {
   if (!existsSync(dir)) {

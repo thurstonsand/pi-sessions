@@ -5,10 +5,10 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { type Focusable, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
-import { type ReindexResult, rebuildSessionIndex } from "./session-search/reindex.js";
-import { isTuiMode } from "./shared/pi-mode.js";
-import { getIndexStatus, type SessionIndexStatus } from "./shared/session-index/index.js";
-import { loadSettings } from "./shared/settings.js";
+import { type ReindexResult, rebuildSessionIndex } from "./session-search/reindex.ts";
+import { isTuiMode } from "./shared/pi-mode.ts";
+import { getIndexStatus, type SessionIndexStatus } from "./shared/session-index/index.ts";
+import { loadSettings } from "./shared/settings.ts";
 
 type SessionIndexAction = "reindex" | undefined;
 

@@ -4,7 +4,7 @@ import {
   buildExtractionPrompt,
   extractHandoffContext,
   generateHandoffDraft,
-} from "../extensions/session-handoff/extract.js";
+} from "../extensions/session-handoff/extract.ts";
 
 const { createAgentSessionMock } = vi.hoisted(() => ({
   createAgentSessionMock: vi.fn(),

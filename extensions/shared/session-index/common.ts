@@ -1,7 +1,7 @@
 import { Type } from "typebox";
-import type { FileTouchOp, FileTouchSource, PathScope } from "../../session-search/normalize.js";
-import { safeParseTypeBoxJson } from "../typebox.js";
-import type { SqliteDatabase } from "./sqlite.js";
+import type { FileTouchOp, FileTouchSource, PathScope } from "../../session-search/normalize.ts";
+import { safeParseTypeBoxJson } from "../typebox.ts";
+import type { SqliteDatabase } from "./sqlite.ts";
 
 export const INDEX_SCHEMA_VERSION = 8;
 

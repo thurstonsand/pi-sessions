@@ -14,6 +14,7 @@ interface MessageViewOptions {
   status: "sending" | "received";
   targetSessionId?: string | undefined;
   sourceSessionId?: string | undefined;
+  sourceSessionName?: string | undefined;
   message: string;
   requestResponse?: boolean | undefined;
   relation?: string | undefined;
@@ -41,6 +42,7 @@ export function createReceivedSessionMessageComponent(
           expanded,
           status: "received",
           sourceSessionId: received.source.sessionId,
+          sourceSessionName: received.source.sessionName,
           message: received.body,
           requestResponse: received.requestResponse,
           relation: received.relation,
@@ -84,10 +86,19 @@ function formatHeader(options: MessageViewOptions, theme: MessageViewTheme): str
   const metadataHint = metadata.length > 0 ? theme.fg("muted", ` (${metadata.join(", ")})`) : "";
   switch (options.status) {
     case "received":
-      return `${name} ${theme.fg("muted", `from ${options.sourceSessionId ?? "[source unknown]"}`)}${metadataHint}`;
+      return `${name} ${theme.fg("muted", `from ${formatSourceLabel(options)}`)}${metadataHint}`;
     case "sending":
       return `${name} ${theme.fg("muted", `to ${options.targetSessionId ?? "[target pending]"}`)}${metadataHint}`;
   }
+}
+
+function formatSourceLabel(options: MessageViewOptions): string {
+  if (!options.sourceSessionId) {
+    return "[source unknown]";
+  }
+
+  const title = options.sourceSessionName?.trim();
+  return title ? `${title} (${options.sourceSessionId})` : options.sourceSessionId;
 }
 
 function formatKeyHint(

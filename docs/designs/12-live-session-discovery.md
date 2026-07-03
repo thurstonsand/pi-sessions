@@ -40,7 +40,7 @@ Concrete scenario: session A is auto-titled from "[untitled]" to "Fix search ran
 ```ts
 {
   // ...existing params from doc 11...
-  live?: boolean;   // true = only sessions currently registered with the broker; false ≡ absent
+  live?: boolean;   // true = only sessions currently registered with the broker; false ≡ treat filter as absent, show all sessions, live or not
 }
 ```
 
@@ -125,46 +125,46 @@ The one ordering consequence: the broker shrink lands *after* `session_list_live
 ### Observer (unregistered) `list` connections
 
 - **Status:** Rejected
-- **Decision or open issue:** The live filter uses the messaging extension's existing registered connection via a shared accessor. An observer mode would add a protocol concept with exactly one consumer that already has a better path.
+- **Decision:** The live filter uses the messaging extension's existing registered connection via a shared accessor. An observer mode would add a protocol concept with exactly one consumer that already has a better path.
 - **Retained discussion:** If a future consumer needs liveness without a registered session (an external CLI, say), an unauthenticated read-only `list` is the natural extension point.
 
 ### Sender-supplied metadata in the send frame
 
 - **Status:** Rejected
-- **Decision or open issue:** The sender could attach its own current name/cwd to each send, keeping receipts self-contained without an index lookup. Receiver-side index annotation won because it uses infrastructure the receiver already exercises per message, keeps frames minimal, and behaves identically for every future frame type without each one growing metadata fields.
+- **Decision:** The sender could attach its own current name/cwd to each send, keeping receipts self-contained without an index lookup. Receiver-side index annotation won because it uses infrastructure the receiver already exercises per message, keeps frames minimal, and behaves identically for every future frame type without each one growing metadata fields.
 - **Retained discussion:** Sender-supplied names are also fresh; this was a close call decided by "rely on the broker strictly for communication, and on the index for metadata."
 
 ### Keep `session_list_live` as a thin alias over the search path
 
 - **Status:** Rejected
-- **Decision or open issue:** Two tools answering one question costs model prompt budget and invites drift. The send-message guideline redirect covers discoverability.
+- **Decision:** Two tools answering one question costs model prompt budget and invites drift. The send-message guideline redirect covers discoverability.
 
 ### Liveness as a result annotation on every search
 
 - **Status:** Rejected
-- **Decision or open issue:** Annotating all results would put a broker socket roundtrip on the hot path of every search for information rarely wanted. Filter semantics keep the cost opt-in.
+- **Decision:** Annotating all results would put a broker socket roundtrip on the hot path of every search for information rarely wanted. Filter semantics keep the cost opt-in.
 
 ## Implementation Plan
 
-- [ ] Phase 1: Broker client prefactor into shared
+- [x] Phase 1: Broker client prefactor into shared
   - Goal: The broker connection, protocol schemas, framing, and socket path live under `extensions/shared/`, with a process-wide accessor for the active connection. Zero behavior change.
   - Files: `extensions/session-messaging/shared/*` → `extensions/shared/session-broker/`; `extensions/session-messaging/pi/client.ts` → shared; new accessor module (`setActiveBrokerConnection`/`getActiveBrokerConnection`); import updates in `extensions/session-messaging/pi/service.ts` and broker process; `test/session-messaging.broker.test.ts` import paths
   - Work: Move the modules verbatim, register the active connection in `SessionMessagingService.start`/`stop`, keep all frame shapes untouched.
   - Validation: `npm run check`; broker tests pass unmodified apart from imports.
 
-- [ ] Phase 2: Lineage relation on search results
+- [x] Phase 2: Lineage relation on search results
   - Goal: Every `session_search` result carries `relation` relative to the current session; the picker consumes it instead of computing its own map.
   - Files: `extensions/shared/session-index/common.ts` (result type), `search.ts` (accept a `relativeToSessionId`, annotate from `getLineageRelationMap`), `extensions/session-search.ts` (pass current session id), `extensions/session-handoff/query.ts` (consume `result.relation`, drop duplicate map building); `test/session-search.tool.test.ts`, `test/session-handoff.picker.test.ts`
   - Work: One lineage-map lookup per search, annotation in result shaping, picker markers/priorities read the annotation.
   - Validation: `npm run check`; picker tests confirm identical markers/ordering; tool output shows `relation` for a handoff child in a real search.
 
-- [ ] Phase 3: `live` filter and `session_list_live` removal
+- [x] Phase 3: `live` filter and `session_list_live` removal
   - Goal: `session_search` accepts `live: true`; `session_list_live` is gone; the send-message guideline points at the search tool.
   - Files: `extensions/session-search.ts` (param, broker id fetch via shared accessor), `extensions/shared/session-index/search.ts` (live id set constrains candidates via the existing allowed-ids clause), `extensions/session-messaging/pi/tools.ts` (delete list tool, update guideline), `extensions/session-messaging/pi/service.ts` (drop `listLiveSessions`); tool tests
   - Work: Fetch live ids over the registered connection when `live: true`; throw a clear error when messaging is inactive; intersect ids with candidates; exclude current session (already handled); delete the tool and its formatters.
   - Validation: `npm run check`; live smoke with two real Pi sessions — `live: true` returns the other session with index metadata and relation; messaging-inactive case throws the expected error.
 
-- [ ] Phase 4: Broker and protocol shrink
+- [x] Phase 4: Broker and protocol shrink
   - Goal: Broker stores `Map<sessionId, socket>`; all frames carry bare ids; receipts are annotated by the receiver from the index.
   - Files: `extensions/shared/session-broker/protocol.ts` (id-only frames), broker `process.ts` (registry, `handleSend` stops attaching source info), `client.ts`, `extensions/session-messaging/pi/service.ts` (identity = id), `incoming-runtime.ts` + `message-contracts.ts` (receipt enrichment from index before `appendEntry`, optional `sessionName`/`cwd`), `message-view.ts`; broker tests
   - Work: Shrink schemas, delete `buildSessionInfo` metadata, add the index lookup (name, cwd) alongside the existing relation lookup at delivery, keep receipt fields optional for unknown sources.

@@ -1,34 +1,45 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { SessionLineageRelation } from "../../shared/session-index/index.ts";
 import {
-  getIndexStatus,
-  getLineageRelationMap,
-  INDEX_SCHEMA_VERSION,
-  openIndexDatabase,
-} from "../../shared/session-index/index.ts";
-import { spawnSessionMessagingBrokerIfNeeded } from "../broker/spawn.ts";
-import type { SessionMessagePayload, SessionMessagingSessionInfo } from "../shared/protocol.ts";
+  type ActiveSessionBrokerConnection,
+  setActiveSessionBrokerConnection,
+} from "../../shared/session-broker/active.ts";
 import {
   INCOMING_SESSION_MESSAGE_EVENT,
   type SessionMessageSendResult,
   SessionMessagingClient,
-} from "./client.ts";
+} from "../../shared/session-broker/client.ts";
+import type { SessionMessagePayload } from "../../shared/session-broker/protocol.ts";
+import type {
+  SessionLineageRelation,
+  SessionLineageRow,
+} from "../../shared/session-index/index.ts";
+import {
+  getIndexStatus,
+  getLineageRelationMap,
+  getSessionById,
+  INDEX_SCHEMA_VERSION,
+  openIndexDatabase,
+} from "../../shared/session-index/index.ts";
+import { spawnSessionMessagingBrokerIfNeeded } from "../broker/spawn.ts";
 import type { IncomingSessionMessageRuntime } from "./incoming-runtime.ts";
+import type { ReceivedMessageEndpoint, ReceivedMessageEntry } from "./message-contracts.ts";
 
 export const MESSAGE_SENT_CUSTOM_TYPE = "pi-sessions.message_sent";
 
 const RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 5_000, 10_000, 30_000] as const;
-
-export interface LiveSessionRow extends SessionMessagingSessionInfo {
-  relation?: SessionLineageRelation | undefined;
-}
 
 export interface SendMessageRequest {
   target: string;
   body: string;
   requestResponse?: boolean | undefined;
   sourceToolCallId?: string | undefined;
+}
+
+interface IncomingMessageIndexContext {
+  source: ReceivedMessageEndpoint;
+  target: ReceivedMessageEndpoint;
+  relation?: SessionLineageRelation | undefined;
 }
 
 export class SessionMessagingService {
@@ -51,27 +62,16 @@ export class SessionMessagingService {
   }
 
   async start(ctx: ExtensionContext): Promise<void> {
-    this.refreshCachedRelations(ctx.sessionManager.getSessionId());
-    await this.connection.start(buildSessionInfo(ctx));
+    const sessionId = ctx.sessionManager.getSessionId();
+    this.refreshCachedRelations(sessionId);
+    await this.connection.start(sessionId);
+    setActiveSessionBrokerConnection(this.connection);
   }
 
   stop(): void {
+    setActiveSessionBrokerConnection(undefined);
     this.relationBySessionId.clear();
     this.connection.stop();
-  }
-
-  async listLiveSessions(ctx: ExtensionContext): Promise<LiveSessionRow[]> {
-    const sessions = await this.connection.listSessions();
-    this.refreshCachedRelations(ctx.sessionManager.getSessionId());
-    const currentSessionId = ctx.sessionManager.getSessionId();
-    return sessions
-      .filter((session) => session.sessionId !== currentSessionId)
-      .map(
-        (session): LiveSessionRow => ({
-          ...session,
-          relation: this.getCachedRelationTo(session.sessionId),
-        }),
-      );
   }
 
   async sendMessage(request: SendMessageRequest): Promise<SessionMessageSendResult> {
@@ -103,8 +103,8 @@ export class SessionMessagingService {
   }
 
   private handleIncoming(requestId: string, message: SessionMessagePayload): void {
-    const relation = this.getCachedRelationTo(message.source.sessionId, true);
-    const result = this.incomingRuntime.deliver(message, relation);
+    const received = this.buildReceivedMessageEntry(message);
+    const result = this.incomingRuntime.deliver(received);
     this.connection.acknowledgeIncoming(requestId, message.messageId, result);
   }
 
@@ -124,12 +124,12 @@ export class SessionMessagingService {
       return undefined;
     }
 
-    const identity = this.connection.currentIdentity;
+    const identity = this.connection.currentSessionId;
     if (!identity) {
       throw new Error("Session messaging is not active.");
     }
 
-    this.refreshCachedRelations(identity.sessionId);
+    this.refreshCachedRelations(identity);
     if (!this.relationBySessionId.has(sessionId)) {
       this.relationBySessionId.set(sessionId, undefined);
     }
@@ -137,9 +137,73 @@ export class SessionMessagingService {
     return this.relationBySessionId.get(sessionId);
   }
 
+  private buildReceivedMessageEntry(message: SessionMessagePayload): ReceivedMessageEntry {
+    const context = this.getIncomingMessageIndexContext(message.source, message.target);
+    return {
+      messageId: message.messageId,
+      source: context.source,
+      target: context.target,
+      body: message.body,
+      sentAt: message.sentAt,
+      receivedAt: new Date().toISOString(),
+      ...(message.requestResponse === undefined
+        ? {}
+        : { requestResponse: message.requestResponse }),
+      ...(message.sourceToolCallId === undefined
+        ? {}
+        : { sourceToolCallId: message.sourceToolCallId }),
+      ...(context.relation === undefined ? {} : { relation: context.relation }),
+    };
+  }
+
+  private getIncomingMessageIndexContext(
+    sourceSessionId: string,
+    targetSessionId: string,
+  ): IncomingMessageIndexContext {
+    const fallback = {
+      source: buildReceivedMessageEndpoint(sourceSessionId),
+      target: buildReceivedMessageEndpoint(targetSessionId),
+    };
+    const status = getIndexStatus(this.indexPath);
+    if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
+      return fallback;
+    }
+
+    const db = openIndexDatabase(status.dbPath, { create: false });
+    try {
+      const source = getSessionById(db, sourceSessionId);
+      const target = getSessionById(db, targetSessionId);
+      const currentSessionId = this.connection.currentSessionId;
+      const relationBySessionId = currentSessionId
+        ? new Map(getLineageRelationMap(db, currentSessionId))
+        : new Map<string, SessionLineageRelation>();
+      const relation = relationBySessionId.get(sourceSessionId);
+
+      if (currentSessionId) {
+        this.replaceCachedRelations(relationBySessionId);
+        if (!this.relationBySessionId.has(sourceSessionId)) {
+          this.relationBySessionId.set(sourceSessionId, undefined);
+        }
+      }
+
+      return {
+        source: buildReceivedMessageEndpoint(sourceSessionId, source),
+        target: buildReceivedMessageEndpoint(targetSessionId, target),
+        ...(relation === undefined ? {} : { relation }),
+      };
+    } finally {
+      db.close();
+    }
+  }
+
   private refreshCachedRelations(currentSessionId: string): void {
+    this.replaceCachedRelations(getRelationMapForSession(this.indexPath, currentSessionId));
+  }
+
+  private replaceCachedRelations(
+    nextRelations: Map<string, SessionLineageRelation | undefined>,
+  ): void {
     const previousRelations = this.relationBySessionId;
-    const nextRelations = getRelationMapForSession(this.indexPath, currentSessionId);
 
     for (const [sessionId, relation] of previousRelations) {
       if (relation === undefined && !nextRelations.has(sessionId)) {
@@ -151,9 +215,9 @@ export class SessionMessagingService {
   }
 }
 
-class BrokerConnection {
+class BrokerConnection implements ActiveSessionBrokerConnection {
   private client: SessionMessagingClient | undefined;
-  private identity: SessionMessagingSessionInfo | undefined;
+  private sessionId: string | undefined;
   private active = false;
   private reconnectTimer: NodeJS.Timeout | undefined;
   private reconnectDelayIndex = 0;
@@ -163,28 +227,28 @@ class BrokerConnection {
     private readonly onIncoming: (requestId: string, message: SessionMessagePayload) => void,
   ) {}
 
-  get currentIdentity(): SessionMessagingSessionInfo | undefined {
-    return this.identity;
+  get currentSessionId(): string | undefined {
+    return this.sessionId;
   }
 
-  async start(identity: SessionMessagingSessionInfo): Promise<void> {
+  async start(sessionId: string): Promise<void> {
     this.active = true;
-    this.identity = identity;
+    this.sessionId = sessionId;
     await this.ensureConnectedNow();
   }
 
   stop(): void {
     this.active = false;
-    this.identity = undefined;
+    this.sessionId = undefined;
     this.clearReconnectTimer();
     this.client?.disconnect();
     this.client = undefined;
     this.connectPromise = undefined;
   }
 
-  async listSessions(): Promise<SessionMessagingSessionInfo[]> {
+  async listSessionIds(): Promise<string[]> {
     await this.ensureConnectedNow();
-    return this.requireClient().listSessions();
+    return this.requireClient().listSessionIds();
   }
 
   async sendMessage(options: {
@@ -213,7 +277,7 @@ class BrokerConnection {
     if (this.client?.isConnected) {
       return;
     }
-    if (!this.active || !this.identity) {
+    if (!this.active || !this.sessionId) {
       throw new Error("Session messaging is not active.");
     }
     this.clearReconnectTimer();
@@ -233,8 +297,8 @@ class BrokerConnection {
   }
 
   private async connect(): Promise<void> {
-    const identity = this.identity;
-    if (!identity) {
+    const sessionId = this.sessionId;
+    if (!sessionId) {
       throw new Error("Session messaging is not active.");
     }
 
@@ -251,7 +315,7 @@ class BrokerConnection {
       }
     });
 
-    await client.connect(identity);
+    await client.connect(sessionId);
     this.client = client;
     this.reconnectDelayIndex = 0;
   }
@@ -288,12 +352,15 @@ class BrokerConnection {
   }
 }
 
-function buildSessionInfo(ctx: ExtensionContext): SessionMessagingSessionInfo {
-  const sessionName = ctx.sessionManager.getSessionName()?.trim();
+function buildReceivedMessageEndpoint(
+  sessionId: string,
+  session?: SessionLineageRow | undefined,
+): ReceivedMessageEndpoint {
+  const sessionName = session?.sessionName.trim();
   return {
-    sessionId: ctx.sessionManager.getSessionId(),
+    sessionId,
     ...(sessionName ? { sessionName } : {}),
-    cwd: ctx.cwd,
+    ...(session?.cwd ? { cwd: session.cwd } : {}),
   };
 }
 

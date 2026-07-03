@@ -3,7 +3,10 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import net from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { getSessionMessagingDir, getSessionMessagingSocketPath } from "../shared/socket-path.ts";
+import {
+  getSessionMessagingDir,
+  getSessionMessagingSocketPath,
+} from "../../shared/session-broker/socket-path.ts";
 
 const BROKER_START_TIMEOUT_MS = 5_000;
 const BROKER_CONNECT_TIMEOUT_MS = 1_000;
@@ -107,7 +110,9 @@ async function waitForBroker(): Promise<void> {
 function acquireSpawnLock(): boolean {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      writeFileSync(brokerSpawnLockPath, `${process.pid}\n${Date.now()}\n`, { flag: "wx" });
+      writeFileSync(brokerSpawnLockPath, `${process.pid}\n${Date.now()}\n`, {
+        flag: "wx",
+      });
       return true;
     } catch (error) {
       if (!(error instanceof Error) || (error as NodeJS.ErrnoException).code !== "EEXIST") {

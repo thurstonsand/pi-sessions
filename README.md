@@ -56,16 +56,16 @@ What session did I implement the db layer?
 | Session Search     | `session_search` pi tool                             | Search through old sessions                             |
 | Session Ask        | `session_ask` pi tool                                | Ask questions about old sessions                        |
 | Session Handoff    | `/handoff`, `session_handoff` pi tool                | Start a focused new session; alternative to compaction  |
-| Session Messaging  | `session_list_live`, `session_send_message` pi tools | Send messages between running Pi sessions               |
+| Session Messaging  | `session_send_message` pi tool                       | Send messages between running Pi sessions               |
 | Session Picker     | `Alt+O`                                              | Reference old sessions in your prompt                   |
 | Session Index      | `/session-index` slash command                       | Shows index status and rebuilds the local session index |
 | Session Auto Title | in background, `/title` slash command                | Give sessions titles                                    |
 
 ## Session Search
 
-`session_search` searches the local session index by text, repo, cwd, time range, and file evidence.
+`session_search` searches the local session index by text, repo, cwd, time range, file evidence, and whether a session is currently running.
 
-Queries support quoted phrases, `AND` / `OR` / `NOT`, parentheses, and `-term` negation. Unquoted terms use prefix matching, quoted terms are exact. A search with no query returns matching sessions chronologically, newest first.
+Queries support quoted phrases, `AND` / `OR` / `NOT`, parentheses, and `-term` negation. Unquoted terms use prefix matching, quoted terms are exact. A search with no query returns matching sessions chronologically, newest first. Use `live: true` to restrict results to currently running sessions.
 
 File filters distinguish read-or-write evidence from write-only evidence:
 
@@ -102,7 +102,7 @@ If background handoffs ever target the wrong pane, run `/handoff --identify` fro
 
 Agents can coordinate with other currently running Pi sessions:
 
-- `session_list_live` lists other live sessions
+- `session_search` with `live: true` lists other live sessions
 - `session_send_message` sends a message to a live session
 
 Incoming messages start the recipient agent when idle and steer it when already running. Inactive sessions cannot receive messages, but you can still use `session_search` and `session_ask` with them.

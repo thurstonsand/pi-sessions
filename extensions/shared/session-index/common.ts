@@ -95,6 +95,8 @@ export interface SearchSessionsParams {
   sort?: SearchSort | undefined;
   limit?: number | undefined;
   excludeSessionIds?: string[] | undefined;
+  includeSessionIds?: string[] | undefined;
+  relativeToSessionId?: string | undefined;
 }
 
 export type SessionSearchEvidence =
@@ -133,6 +135,7 @@ export interface SearchSessionResult {
   sessionOrigin?: SessionOrigin | undefined;
   handoffGoal?: string | undefined;
   handoffNextTask?: string | undefined;
+  relation?: SessionLineageRelation | undefined;
   snippet: string;
   evidence: SessionSearchEvidence[];
   score: number;

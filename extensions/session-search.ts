@@ -7,6 +7,10 @@ import {
   transformSearchSnippetMatches,
 } from "./shared/search-snippet.ts";
 import {
+  type ActiveSessionBrokerConnection,
+  getActiveSessionBrokerConnection,
+} from "./shared/session-broker/active.ts";
+import {
   getIndexStatus,
   INDEX_SCHEMA_VERSION,
   openIndexDatabase,
@@ -34,6 +38,7 @@ interface SessionSearchToolParams {
   };
   sort?: SearchSort;
   limit?: number;
+  live?: boolean;
 }
 
 interface SessionSearchToolDetails {
@@ -45,7 +50,14 @@ interface SessionSearchToolDetails {
 const DEFAULT_SESSION_SEARCH_LIMIT = 6;
 const COLLAPSED_RESULT_PREVIEW_ROWS = 6;
 
-export default function sessionSearchExtension(pi: ExtensionAPI): void {
+export interface SessionSearchDeps {
+  getBrokerConnection: () => ActiveSessionBrokerConnection | undefined;
+}
+
+export default function sessionSearchExtension(
+  pi: ExtensionAPI,
+  deps: SessionSearchDeps = { getBrokerConnection: getActiveSessionBrokerConnection },
+): void {
   const settings = loadSettings();
 
   pi.registerTool({
@@ -114,6 +126,11 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
           },
         ),
       ),
+      live: Type.Optional(
+        Type.Boolean({
+          description: "When true, only return currently active sessions",
+        }),
+      ),
       limit: Type.Optional(
         Type.Number({
           description: "Number of matches to return",
@@ -143,9 +160,12 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
         );
       }
 
+      const liveSessionIds = params.live
+        ? await getLiveSessionIds(deps.getBrokerConnection)
+        : undefined;
       const db = openIndexDatabase(status.dbPath, { create: false });
       try {
-        const results = searchSessions(db, buildSearchParams(params, ctx));
+        const results = searchSessions(db, buildSearchParams(params, ctx, liveSessionIds));
 
         if (results.length === 0) {
           const details: SessionSearchToolDetails = {
@@ -211,6 +231,7 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
 function buildSearchParams(
   params: SessionSearchToolParams,
   ctx: ExtensionContext,
+  liveSessionIds?: string[] | undefined,
 ): SearchSessionsParams {
   const currentSessionId = ctx.sessionManager.getSessionId();
 
@@ -225,7 +246,26 @@ function buildSearchParams(
     sort: params.sort,
     limit: params.limit ?? DEFAULT_SESSION_SEARCH_LIMIT,
     excludeSessionIds: currentSessionId ? [currentSessionId] : undefined,
+    includeSessionIds: liveSessionIds,
+    relativeToSessionId: currentSessionId,
   };
+}
+
+async function getLiveSessionIds(
+  getBrokerConnection: SessionSearchDeps["getBrokerConnection"],
+): Promise<string[]> {
+  const connection = getBrokerConnection();
+  if (!connection) {
+    throw new Error(
+      "Session messaging is not active; live session search requires session messaging.",
+    );
+  }
+
+  try {
+    return await connection.listSessionIds();
+  } catch (error) {
+    throw new Error(`Session messaging is unavailable: ${formatError(error)}`);
+  }
 }
 
 function formatSessionSearchContextLines(
@@ -246,6 +286,7 @@ function formatSessionSearchContextLines(
     filters.push(`files.touched: ${params.files.touched.join(", ")}`);
   if (params.files?.changed?.length)
     filters.push(`files.changed: ${params.files.changed.join(", ")}`);
+  if (params.live) filters.push("live: true");
   if (params.sort) filters.push(`sort: ${params.sort}`);
   if (params.time?.after?.trim()) filters.push(`after: ${params.time.after.trim()}`);
   if (params.time?.before?.trim()) filters.push(`before: ${params.time.before.trim()}`);
@@ -271,7 +312,8 @@ function formatSessionSearchPanelResults(
   const visibleResults = expanded ? results : results.slice(0, COLLAPSED_RESULT_PREVIEW_ROWS);
   const lines = visibleResults.flatMap((result, index) => {
     const location = formatSearchResultLocation(result.cwd);
-    const heading = `${index + 1}. ${theme.bold(formatSearchResultLabel(result))}${location ? ` ${theme.fg("dim", `(${location})`)}` : ""}`;
+    const relation = result.relation ? ` ${theme.fg("dim", `[${result.relation}]`)}` : "";
+    const heading = `${index + 1}. ${theme.bold(formatSearchResultLabel(result))}${relation}${location ? ` ${theme.fg("dim", `(${location})`)}` : ""}`;
     const snippets = params?.query ? formatSearchSnippets(result).slice(0, 3) : [];
     return snippets.length > 0
       ? [heading, ...snippets.map((snippet) => theme.fg("dim", `  - ${snippet}`))]
@@ -387,4 +429,8 @@ function validateSearchParams(params: SessionSearchToolParams): string | undefin
 function isValidIsoDateLike(value: string): boolean {
   const date = new Date(value);
   return !Number.isNaN(date.getTime());
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error && error.message.trim() ? error.message : String(error);
 }

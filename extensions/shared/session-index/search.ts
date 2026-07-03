@@ -19,9 +19,11 @@ import {
   type SearchSessionsParams,
   type SearchSort,
   type SessionIndexDatabase,
+  type SessionLineageRelation,
   sanitizeFilterValues,
   tokenizeSearchText,
 } from "./common.ts";
+import { getLineageRelationMap } from "./lineage.ts";
 import { type CompiledSearchQuery, compileSearchQuery } from "./query/compiler.ts";
 import {
   buildTextOverfetchLimit,
@@ -89,6 +91,7 @@ interface SearchFilters {
   sort: SearchSort | undefined;
   query: string | undefined;
   excludeSessionIds: string[];
+  includeSessionIds: string[] | undefined;
 }
 
 interface FileFilterQuery {
@@ -137,6 +140,7 @@ export function searchSessions(
   params: SearchSessionsParams,
 ): SearchSessionResult[] {
   const filters = buildSearchFilters(params);
+  const relationBySessionId = buildRelationMap(db, params.relativeToSessionId);
   const compiledQuery = filters.query ? compileSearchQuery(filters.query) : undefined;
   const hasPositiveQuery = compiledQuery !== undefined;
   const fileQueries = buildFileFilterQueries(filters);
@@ -161,12 +165,19 @@ export function searchSessions(
 
   if (!compiledQuery) {
     return limitBrowseResults(
-      candidates.map((row) => buildSearchResult(row, 0, fileMatches)),
+      candidates.map((row) => buildSearchResult(row, 0, fileMatches, relationBySessionId)),
       filters,
     );
   }
 
-  const ranked = searchFilteredSessions(db, candidates, fileMatches, filters, compiledQuery);
+  const ranked = searchFilteredSessions(
+    db,
+    candidates,
+    fileMatches,
+    filters,
+    compiledQuery,
+    relationBySessionId,
+  );
   const selected = ranked.slice(0, filters.limit);
   return applyDisplaySort(selected, filters, true);
 }
@@ -191,7 +202,19 @@ function buildSearchFilters(params: SearchSessionsParams): SearchFilters {
     sort: normalizeSort(params.sort),
     query: params.query?.trim() || undefined,
     excludeSessionIds: sanitizeFilterValues(params.excludeSessionIds),
+    includeSessionIds:
+      params.includeSessionIds === undefined
+        ? undefined
+        : sanitizeFilterValues(params.includeSessionIds),
   };
+}
+
+function buildRelationMap(
+  db: SessionIndexDatabase,
+  sessionId: string | undefined,
+): Map<string, SessionLineageRelation> {
+  const normalizedSessionId = sessionId?.trim();
+  return normalizedSessionId ? getLineageRelationMap(db, normalizedSessionId) : new Map();
 }
 
 function normalizeSort(value: SearchSort | undefined): SearchSort | undefined {
@@ -250,6 +273,7 @@ function searchFilteredSessions(
   fileMatches: Map<string, FileMatchSummary>,
   filters: SearchFilters,
   compiledQuery: CompiledSearchQuery,
+  relationBySessionId: Map<string, SessionLineageRelation>,
 ): SearchSessionResult[] {
   const nowMs = Date.now();
   const candidateById = new Map(candidates.map((candidate) => [candidate.sessionId, candidate]));
@@ -262,7 +286,13 @@ function searchFilteredSessions(
       continue;
     }
 
-    const accumulator = ensureSearchAccumulator(accumulators, candidate, fileMatches, nowMs);
+    const accumulator = ensureSearchAccumulator(
+      accumulators,
+      candidate,
+      fileMatches,
+      nowMs,
+      relationBySessionId,
+    );
     addSessionIdEvidence(accumulator, sessionIdEvidence.kind, sessionIdEvidence.score);
   }
 
@@ -281,7 +311,13 @@ function searchFilteredSessions(
     }
 
     const score = scoreTextHit(row.sourceKind, rankIndex);
-    const accumulator = ensureSearchAccumulator(accumulators, candidate, fileMatches, nowMs);
+    const accumulator = ensureSearchAccumulator(
+      accumulators,
+      candidate,
+      fileMatches,
+      nowMs,
+      relationBySessionId,
+    );
     addTextEvidence(accumulator, row, score);
   });
 
@@ -450,6 +486,7 @@ function ensureSearchAccumulator(
   row: SessionListRow,
   fileMatches: Map<string, FileMatchSummary>,
   nowMs: number,
+  relationBySessionId: Map<string, SessionLineageRelation>,
 ): SearchResultAccumulator {
   const existing = accumulators.get(row.sessionId);
   if (existing) {
@@ -457,7 +494,12 @@ function ensureSearchAccumulator(
   }
 
   const nextAccumulator: SearchResultAccumulator = {
-    result: buildSearchResult(row, scoreRecency(row.modifiedAt, nowMs), fileMatches),
+    result: buildSearchResult(
+      row,
+      scoreRecency(row.modifiedAt, nowMs),
+      fileMatches,
+      relationBySessionId,
+    ),
     evidenceKeys: new Set<string>(),
     textEvidenceCount: 0,
     textScoreContributionCount: 0,
@@ -524,6 +566,7 @@ function buildSearchResult(
   row: SessionListRow,
   score: number,
   fileMatches: Map<string, FileMatchSummary>,
+  relationBySessionId: Map<string, SessionLineageRelation>,
 ): SearchSessionResult {
   const fileEvidence = fileMatches.get(row.sessionId)?.evidence ?? [];
   return {
@@ -541,6 +584,7 @@ function buildSearchResult(
     sessionOrigin: row.sessionOrigin ?? undefined,
     handoffGoal: row.handoffGoal ?? undefined,
     handoffNextTask: row.handoffNextTask ?? undefined,
+    relation: relationBySessionId.get(row.sessionId),
     snippet: "",
     evidence: [...fileEvidence],
     score,
@@ -646,6 +690,17 @@ function buildSessionWhereClause(alias: string, filters: SearchFilters): SqlClau
       `${alias}.session_id NOT IN (${filters.excludeSessionIds.map(() => "?").join(", ")})`,
     );
     args.push(...filters.excludeSessionIds);
+  }
+
+  if (filters.includeSessionIds) {
+    if (filters.includeSessionIds.length === 0) {
+      conditions.push("0 = 1");
+    } else {
+      conditions.push(
+        `${alias}.session_id IN (${filters.includeSessionIds.map(() => "?").join(", ")})`,
+      );
+      args.push(...filters.includeSessionIds);
+    }
   }
 
   const repoClause = buildRepoFilterClause(alias, filters.repo);

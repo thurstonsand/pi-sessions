@@ -1,8 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { SessionLineageRelation } from "../../shared/session-index/index.ts";
 import { safeParseTypeBoxValue } from "../../shared/typebox.ts";
-import type { SessionMessagePayload } from "../shared/protocol.ts";
 import { RECEIVED_MESSAGE_ENTRY_SCHEMA, type ReceivedMessageEntry } from "./message-contracts.ts";
+
 export const MESSAGE_RECEIVED_CUSTOM_TYPE = "pi-sessions.message_received";
 export const SESSION_MESSAGE_CUSTOM_TYPE = "pi-sessions.session_message";
 
@@ -39,17 +38,13 @@ export class IncomingSessionMessageRuntime {
     });
   }
 
-  deliver(
-    message: SessionMessagePayload,
-    relation: SessionLineageRelation | undefined,
-  ): DeliveryResult {
+  deliver(received: ReceivedMessageEntry): DeliveryResult {
     const ctx = this.context;
     if (!ctx) {
       return { delivered: false, error: "Target session is not ready." };
     }
 
     try {
-      const received = buildReceivedMessageEntry(message, relation);
       this.actions.appendEntry(MESSAGE_RECEIVED_CUSTOM_TYPE, received);
       this.inject(ctx, received);
       return { delivered: true };
@@ -104,17 +99,6 @@ export class IncomingSessionMessageRuntime {
       deliveryOptions,
     );
   }
-}
-
-function buildReceivedMessageEntry(
-  message: SessionMessagePayload,
-  relation: SessionLineageRelation | undefined,
-): ReceivedMessageEntry {
-  return {
-    ...message,
-    receivedAt: new Date().toISOString(),
-    ...(relation === undefined ? {} : { relation }),
-  };
 }
 
 function formatIncomingMessageForModel(received: ReceivedMessageEntry): string {

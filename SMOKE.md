@@ -1,6 +1,6 @@
 # pi-sessions smoke test
 
-This is the end-to-end manual recipe for verifying reindex, search, ask, and hook-maintained freshness.
+This is the end-to-end manual recipe for verifying reindex, search, live discovery, ask, and hook-maintained freshness.
 
 ## 1. Load the package
 
@@ -41,7 +41,21 @@ Expected:
 - evidence includes snippets from indexed session text
 - snippet markers are rendered for matched terms
 
-## 4. Verify follow-up analysis
+## 4. Verify live session discovery
+
+Open two Pi sessions with `pi-sessions` loaded. In one session, prompt Pi to call:
+
+```text
+Use session_search with live true and limit 5. Return session ids, titles, cwd, and relation only.
+```
+
+Expected:
+
+- the other live session is returned if it is present in the session index
+- the current session is not returned
+- results use index metadata, not broker registration metadata
+
+## 5. Verify follow-up analysis
 
 Take one returned session id and ask:
 
@@ -54,7 +68,7 @@ Expected:
 - answer is grounded in the chosen session
 - answer comes from the full rendered session tree, not a guessed summary
 
-## 5. Verify hook-maintained freshness
+## 6. Verify hook-maintained freshness
 
 Use a fresh disposable working directory.
 
@@ -102,7 +116,7 @@ Expected:
 - the just-created session is returned
 - file-touch evidence includes `smoke/generated.txt` with `op: changed`
 
-## 6. Verify compaction hook
+## 7. Verify compaction hook
 
 In the same live session, trigger compaction:
 
@@ -116,7 +130,7 @@ Expected:
 - the session remains searchable
 - compaction summary text is indexed on the next hook flush
 
-## 7. Verify tree-navigation hook
+## 8. Verify tree-navigation hook
 
 In the same live session, navigate with:
 
@@ -131,7 +145,7 @@ Expected:
 - a branch summary entry is created
 - branch summary text becomes searchable after the hook flush
 
-## 8. Recovery test
+## 9. Recovery test
 
 If hooks were disabled or the DB was removed/corrupted:
 
@@ -145,7 +159,7 @@ Expected:
 - historical sessions are restored to the sidecar index
 - search works again without query-time repair behavior
 
-## 9. Verify auto-titling
+## 10. Verify auto-titling
 
 In a fresh unnamed session:
 

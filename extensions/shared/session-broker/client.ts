@@ -1,20 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import net from "node:net";
-import { readFrames, writeFrame } from "../shared/framing.ts";
-import {
-  BROKER_FRAME_SCHEMA,
-  type SessionMessagingBrokerFrame,
-  type SessionMessagingSessionInfo,
-} from "../shared/protocol.ts";
-import { getSessionMessagingSocketPath } from "../shared/socket-path.ts";
+import { readFrames, writeFrame } from "./framing.ts";
+import { BROKER_FRAME_SCHEMA, type SessionMessagingBrokerFrame } from "./protocol.ts";
+import { getSessionMessagingSocketPath } from "./socket-path.ts";
+
 export const INCOMING_SESSION_MESSAGE_EVENT = "session_messaging.incoming_message";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const SOCKET_PATH = getSessionMessagingSocketPath();
 
 interface PendingListRequest {
-  resolve(sessions: SessionMessagingSessionInfo[]): void;
+  resolve(sessionIds: string[]): void;
   reject(error: Error): void;
   timeout: NodeJS.Timeout;
 }
@@ -42,19 +39,19 @@ export interface SendSessionMessageOptions {
 
 export class SessionMessagingClient extends EventEmitter {
   private socket: net.Socket | undefined;
-  private session: SessionMessagingSessionInfo | undefined;
+  private sessionId: string | undefined;
   private pendingLists = new Map<string, PendingListRequest>();
   private pendingSends = new Map<string, PendingSendRequest>();
 
   get isConnected(): boolean {
-    return Boolean(this.socket && !this.socket.destroyed && this.socket.writable && this.session);
+    return Boolean(this.socket && !this.socket.destroyed && this.socket.writable && this.sessionId);
   }
 
-  get registeredSession(): SessionMessagingSessionInfo | undefined {
-    return this.session;
+  get registeredSessionId(): string | undefined {
+    return this.sessionId;
   }
 
-  async connect(session: SessionMessagingSessionInfo): Promise<void> {
+  async connect(sessionId: string): Promise<void> {
     if (this.isConnected) {
       return;
     }
@@ -112,7 +109,7 @@ export class SessionMessagingClient extends EventEmitter {
       void this.readSocket(socket);
 
       socket.setKeepAlive(true, 5_000);
-      writeFrame(socket, { type: "register", session });
+      writeFrame(socket, { type: "register", sessionId });
     });
   }
 
@@ -128,7 +125,7 @@ export class SessionMessagingClient extends EventEmitter {
     this.cleanup();
   }
 
-  listSessions(): Promise<SessionMessagingSessionInfo[]> {
+  listSessionIds(): Promise<string[]> {
     const socket = this.requireSocket();
     const requestId = randomUUID();
 
@@ -197,7 +194,7 @@ export class SessionMessagingClient extends EventEmitter {
   private handleFrame(frame: SessionMessagingBrokerFrame): void {
     switch (frame.type) {
       case "registered":
-        this.session = frame.session;
+        this.sessionId = frame.sessionId;
         this.emit("registered");
         break;
       case "register_failed":
@@ -208,7 +205,7 @@ export class SessionMessagingClient extends EventEmitter {
         if (!pending) return;
         clearTimeout(pending.timeout);
         this.pendingLists.delete(frame.requestId);
-        pending.resolve(frame.sessions);
+        pending.resolve(frame.sessionIds);
         break;
       }
       case "incoming":
@@ -233,7 +230,7 @@ export class SessionMessagingClient extends EventEmitter {
   }
 
   private requireSocket(): net.Socket {
-    if (!this.socket || this.socket.destroyed || !this.socket.writable || !this.session) {
+    if (!this.socket || this.socket.destroyed || !this.socket.writable || !this.sessionId) {
       throw new Error("Session messaging is not connected.");
     }
 
@@ -241,7 +238,7 @@ export class SessionMessagingClient extends EventEmitter {
   }
 
   private cleanup(): void {
-    this.session = undefined;
+    this.sessionId = undefined;
     for (const pending of this.pendingLists.values()) {
       clearTimeout(pending.timeout);
       pending.reject(new Error("Session messaging disconnected."));

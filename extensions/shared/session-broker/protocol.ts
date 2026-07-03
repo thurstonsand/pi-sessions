@@ -1,15 +1,9 @@
 import { type Static, Type } from "typebox";
 
-const SESSION_INFO_SCHEMA = Type.Object({
-  sessionId: Type.String(),
-  sessionName: Type.Optional(Type.String()),
-  cwd: Type.String(),
-});
-
 export const SESSION_MESSAGE_PAYLOAD_SCHEMA = Type.Object({
   messageId: Type.String(),
-  source: SESSION_INFO_SCHEMA,
-  target: SESSION_INFO_SCHEMA,
+  source: Type.String(),
+  target: Type.String(),
   body: Type.String(),
   requestResponse: Type.Optional(Type.Boolean()),
   sentAt: Type.String(),
@@ -18,7 +12,7 @@ export const SESSION_MESSAGE_PAYLOAD_SCHEMA = Type.Object({
 
 const REGISTER_CLIENT_FRAME_SCHEMA = Type.Object({
   type: Type.Literal("register"),
-  session: SESSION_INFO_SCHEMA,
+  sessionId: Type.String(),
 });
 const UNREGISTER_CLIENT_FRAME_SCHEMA = Type.Object({
   type: Type.Literal("unregister"),
@@ -47,7 +41,7 @@ const INCOMING_ACK_CLIENT_FRAME_SCHEMA = Type.Object({
 
 const REGISTERED_BROKER_FRAME_SCHEMA = Type.Object({
   type: Type.Literal("registered"),
-  session: SESSION_INFO_SCHEMA,
+  sessionId: Type.String(),
 });
 const REGISTER_FAILED_BROKER_FRAME_SCHEMA = Type.Object({
   type: Type.Literal("register_failed"),
@@ -56,7 +50,7 @@ const REGISTER_FAILED_BROKER_FRAME_SCHEMA = Type.Object({
 const SESSIONS_BROKER_FRAME_SCHEMA = Type.Object({
   type: Type.Literal("sessions"),
   requestId: Type.String(),
-  sessions: Type.Array(SESSION_INFO_SCHEMA),
+  sessionIds: Type.Array(Type.String()),
 });
 const INCOMING_BROKER_FRAME_SCHEMA = Type.Object({
   type: Type.Literal("incoming"),
@@ -92,7 +86,6 @@ export const BROKER_FRAME_SCHEMA = Type.Union([
   ERROR_BROKER_FRAME_SCHEMA,
 ]);
 
-export type SessionMessagingSessionInfo = Static<typeof SESSION_INFO_SCHEMA>;
 export type SessionMessagePayload = Static<typeof SESSION_MESSAGE_PAYLOAD_SCHEMA>;
 export type SessionMessagingSendClientFrame = Static<typeof SEND_CLIENT_FRAME_SCHEMA>;
 export type SessionMessagingIncomingAckClientFrame = Static<

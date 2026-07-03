@@ -17,12 +17,12 @@ afterAll(() => {
   }
 });
 
-test("broker lists sessions and routes messages after target acknowledgement", async () => {
+test("broker lists session ids and routes messages after target acknowledgement", async () => {
   const { spawnSessionMessagingBrokerIfNeeded } = await import(
     "../extensions/session-messaging/broker/spawn.ts"
   );
   const { INCOMING_SESSION_MESSAGE_EVENT, SessionMessagingClient } = await import(
-    "../extensions/session-messaging/pi/client.ts"
+    "../extensions/shared/session-broker/client.ts"
   );
 
   await spawnSessionMessagingBrokerIfNeeded();
@@ -30,16 +30,8 @@ test("broker lists sessions and routes messages after target acknowledgement", a
   const source = new SessionMessagingClient();
   const target = new SessionMessagingClient();
   try {
-    await source.connect({
-      sessionId: "source-session",
-      sessionName: "Source",
-      cwd: "/tmp/source",
-    });
-    await target.connect({
-      sessionId: "target-session",
-      sessionName: "Target",
-      cwd: "/tmp/target",
-    });
+    await source.connect("source-session");
+    await target.connect("target-session");
 
     const incoming = new Promise<unknown>((resolve) => {
       target.once(INCOMING_SESSION_MESSAGE_EVENT, (requestId, message) => {
@@ -48,11 +40,8 @@ test("broker lists sessions and routes messages after target acknowledgement", a
       });
     });
 
-    const sessions = await source.listSessions();
-    expect(sessions.map((session) => session.sessionId).sort()).toEqual([
-      "source-session",
-      "target-session",
-    ]);
+    const sessionIds = await source.listSessionIds();
+    expect(sessionIds.sort()).toEqual(["source-session", "target-session"]);
 
     const result = await source.sendMessage({
       messageId: "message-1",
@@ -70,8 +59,8 @@ test("broker lists sessions and routes messages after target acknowledgement", a
       body: "Investigation complete.",
       requestResponse: true,
       sourceToolCallId: "tool-1",
-      source: { sessionId: "source-session", sessionName: "Source", cwd: "/tmp/source" },
-      target: { sessionId: "target-session", sessionName: "Target", cwd: "/tmp/target" },
+      source: "source-session",
+      target: "target-session",
     });
   } finally {
     source.disconnect();
@@ -79,19 +68,123 @@ test("broker lists sessions and routes messages after target acknowledgement", a
   }
 });
 
+test("service enriches incoming receipts from the session index", async () => {
+  if (!cleanupDir) {
+    throw new Error("Missing messaging temp directory");
+  }
+
+  const { SessionMessagingService } = await import("../extensions/session-messaging/pi/service.ts");
+  const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
+  const { initializeSchema, insertSession, openIndexDatabase, rebuildSessionLineageRelations } =
+    await import("../extensions/shared/session-index/index.ts");
+
+  const indexPath = join(cleanupDir, "receipt-enrichment.sqlite");
+  const sourceId = "receipt-source-session";
+  const targetId = "receipt-target-session";
+  const db = openIndexDatabase(indexPath, { create: true });
+  initializeSchema(db);
+  insertSession(
+    db,
+    {
+      sessionId: sourceId,
+      sessionPath: "/tmp/receipt-source.jsonl",
+      sessionName: "Receipt Source",
+      cwd: "/repo/source",
+      repoRoots: ["/repo"],
+      startedAt: "2026-03-22T00:00:00.000Z",
+      modifiedAt: "2026-03-22T00:10:00.000Z",
+      messageCount: 2,
+      entryCount: 2,
+    },
+    "full_reindex",
+  );
+  insertSession(
+    db,
+    {
+      sessionId: targetId,
+      sessionPath: "/tmp/receipt-target.jsonl",
+      sessionName: "Receipt Target",
+      cwd: "/repo/target",
+      repoRoots: ["/repo"],
+      startedAt: "2026-03-22T00:20:00.000Z",
+      modifiedAt: "2026-03-22T00:30:00.000Z",
+      messageCount: 3,
+      entryCount: 3,
+      parentSessionPath: "/tmp/receipt-source.jsonl",
+      parentSessionId: sourceId,
+      sessionOrigin: "handoff",
+    },
+    "full_reindex",
+  );
+  rebuildSessionLineageRelations(db);
+  db.close();
+
+  const receivedMessages: unknown[] = [];
+  const service = new SessionMessagingService(
+    indexPath,
+    {
+      deliver(received: unknown) {
+        receivedMessages.push(received);
+        return { delivered: true as const };
+      },
+    } as never,
+    () => {},
+  );
+  const source = new SessionMessagingClient();
+
+  try {
+    await service.start({ sessionManager: { getSessionId: () => targetId } } as never);
+    await source.connect(sourceId);
+
+    const result = await source.sendMessage({
+      messageId: "receipt-message",
+      target: targetId,
+      body: "Receipt enrichment check.",
+      sentAt: "2026-03-22T00:31:00.000Z",
+      requestResponse: true,
+      sourceToolCallId: "tool-receipt",
+    });
+
+    expect(result).toMatchObject({ delivered: true, messageId: "receipt-message" });
+    expect(receivedMessages).toHaveLength(1);
+    expect(receivedMessages[0]).toMatchObject({
+      messageId: "receipt-message",
+      source: {
+        sessionId: sourceId,
+        sessionName: "Receipt Source",
+        cwd: "/repo/source",
+      },
+      target: {
+        sessionId: targetId,
+        sessionName: "Receipt Target",
+        cwd: "/repo/target",
+      },
+      body: "Receipt enrichment check.",
+      sentAt: "2026-03-22T00:31:00.000Z",
+      requestResponse: true,
+      sourceToolCallId: "tool-receipt",
+      relation: "parent",
+      receivedAt: expect.any(String),
+    });
+  } finally {
+    source.disconnect();
+    service.stop();
+  }
+});
+
 test("broker requires exact target session ids", async () => {
   const { spawnSessionMessagingBrokerIfNeeded } = await import(
     "../extensions/session-messaging/broker/spawn.ts"
   );
-  const { SessionMessagingClient } = await import("../extensions/session-messaging/pi/client.ts");
+  const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
 
   await spawnSessionMessagingBrokerIfNeeded();
 
   const source = new SessionMessagingClient();
   const target = new SessionMessagingClient();
   try {
-    await source.connect({ sessionId: "exact-source", cwd: "/tmp/source" });
-    await target.connect({ sessionId: "exact-target", cwd: "/tmp/target" });
+    await source.connect("exact-source");
+    await target.connect("exact-target");
 
     const result = await source.sendMessage({
       messageId: "message-prefix-rejected",
@@ -115,18 +208,16 @@ test("broker rejects duplicate live session registrations", async () => {
   const { spawnSessionMessagingBrokerIfNeeded } = await import(
     "../extensions/session-messaging/broker/spawn.ts"
   );
-  const { SessionMessagingClient } = await import("../extensions/session-messaging/pi/client.ts");
+  const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
 
   await spawnSessionMessagingBrokerIfNeeded();
 
   const first = new SessionMessagingClient();
   const duplicate = new SessionMessagingClient();
   try {
-    await first.connect({ sessionId: "duplicate-session", cwd: "/tmp/one" });
+    await first.connect("duplicate-session");
 
-    await expect(
-      duplicate.connect({ sessionId: "duplicate-session", cwd: "/tmp/two" }),
-    ).rejects.toThrow("already registered");
+    await expect(duplicate.connect("duplicate-session")).rejects.toThrow("already registered");
   } finally {
     first.disconnect();
     duplicate.disconnect();
@@ -138,7 +229,7 @@ test("broker fails pending sends when target disconnects before acknowledgement"
     "../extensions/session-messaging/broker/spawn.ts"
   );
   const { INCOMING_SESSION_MESSAGE_EVENT, SessionMessagingClient } = await import(
-    "../extensions/session-messaging/pi/client.ts"
+    "../extensions/shared/session-broker/client.ts"
   );
 
   await spawnSessionMessagingBrokerIfNeeded();
@@ -146,8 +237,8 @@ test("broker fails pending sends when target disconnects before acknowledgement"
   const source = new SessionMessagingClient();
   const target = new SessionMessagingClient();
   try {
-    await source.connect({ sessionId: "disconnect-source", cwd: "/tmp/source" });
-    await target.connect({ sessionId: "disconnect-target", cwd: "/tmp/target" });
+    await source.connect("disconnect-source");
+    await target.connect("disconnect-target");
 
     target.once(INCOMING_SESSION_MESSAGE_EVENT, () => {
       target.disconnect();

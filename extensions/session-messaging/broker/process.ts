@@ -1,15 +1,17 @@
 import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
-import { readFrames, writeFrame } from "../shared/framing.ts";
+import { readFrames, writeFrame } from "../../shared/session-broker/framing.ts";
 import {
   CLIENT_FRAME_SCHEMA,
   type SessionMessagingClientFrame,
   type SessionMessagingIncomingAckClientFrame,
   type SessionMessagingSendClientFrame,
-  type SessionMessagingSessionInfo,
-} from "../shared/protocol.ts";
-import { getSessionMessagingDir, getSessionMessagingSocketPath } from "../shared/socket-path.ts";
+} from "../../shared/session-broker/protocol.ts";
+import {
+  getSessionMessagingDir,
+  getSessionMessagingSocketPath,
+} from "../../shared/session-broker/socket-path.ts";
 
 const SEND_TIMEOUT_MS = 10_000;
 const EXIT_IDLE_MS = 5_000;
@@ -19,11 +21,6 @@ const messagingDir = getSessionMessagingDir();
 const socketPath = getSessionMessagingSocketPath();
 const pidPath = join(messagingDir, "broker.pid");
 
-interface ConnectedSession {
-  socket: Socket;
-  session: SessionMessagingSessionInfo;
-}
-
 interface PendingSend {
   source: Socket;
   timeout: NodeJS.Timeout;
@@ -31,7 +28,7 @@ interface PendingSend {
   targetSessionId: string;
 }
 
-const sessions = new Map<string, ConnectedSession>();
+const sessions = new Map<string, Socket>();
 const pendingSends = new Map<string, PendingSend>();
 let idleTimer: NodeJS.Timeout | undefined;
 let server: ReturnType<typeof createServer> | undefined;
@@ -63,9 +60,9 @@ function unregister(sessionId: string | undefined): void {
   if (sessions.size === 0) scheduleIdleExit();
 }
 
-function resolveTarget(target: string): { session: ConnectedSession } | { error: string } {
-  const exact = sessions.get(target);
-  if (exact) return { session: exact };
+function resolveTarget(target: string): { sessionId: string; socket: Socket } | { error: string } {
+  const socket = sessions.get(target);
+  if (socket) return { sessionId: target, socket };
 
   return { error: `No live session found for id: ${target}` };
 }
@@ -84,8 +81,8 @@ function handleFrame(
 
   switch (message.type) {
     case "register": {
-      const existing = sessions.get(message.session.sessionId);
-      if (existing && existing.socket !== socket && !existing.socket.destroyed) {
+      const existing = sessions.get(message.sessionId);
+      if (existing && existing !== socket && !existing.destroyed) {
         writeFrame(socket, {
           type: "register_failed",
           reason:
@@ -96,10 +93,10 @@ function handleFrame(
       }
 
       clearIdleExit();
-      setSessionId(message.session.sessionId);
-      sessions.set(message.session.sessionId, { socket, session: message.session });
+      setSessionId(message.sessionId);
+      sessions.set(message.sessionId, socket);
       socket.setKeepAlive(true, KEEPALIVE_DELAY_MS);
-      writeFrame(socket, { type: "registered", session: message.session });
+      writeFrame(socket, { type: "registered", sessionId: message.sessionId });
       break;
     }
 
@@ -113,7 +110,7 @@ function handleFrame(
       writeFrame(socket, {
         type: "sessions",
         requestId: message.requestId,
-        sessions: [...sessions.values()].map(({ session }) => session),
+        sessionIds: [...sessions.keys()],
       });
       break;
 
@@ -135,7 +132,7 @@ function handleSend(
   const source = currentSessionId ? sessions.get(currentSessionId) : undefined;
   const { messageId } = message;
 
-  if (!source) {
+  if (!currentSessionId || !source) {
     writeFrame(socket, {
       type: "send_result",
       requestId: message.requestId,
@@ -158,7 +155,7 @@ function handleSend(
     return;
   }
 
-  if (resolved.session.session.sessionId === source.session.sessionId) {
+  if (resolved.sessionId === currentSessionId) {
     writeFrame(socket, {
       type: "send_result",
       requestId: message.requestId,
@@ -183,16 +180,16 @@ function handleSend(
     source: socket,
     timeout,
     messageId,
-    targetSessionId: resolved.session.session.sessionId,
+    targetSessionId: resolved.sessionId,
   });
 
-  writeFrame(resolved.session.socket, {
+  writeFrame(resolved.socket, {
     type: "incoming",
     requestId: message.requestId,
     message: {
       messageId,
-      source: source.session,
-      target: resolved.session.session,
+      source: currentSessionId,
+      target: resolved.sessionId,
       body: message.body,
       ...(message.requestResponse === undefined
         ? {}
@@ -274,7 +271,7 @@ async function readConnection(
 }
 
 function shutdown(): void {
-  for (const { socket } of sessions.values()) socket.end();
+  for (const socket of sessions.values()) socket.end();
   sessions.clear();
   for (const pending of pendingSends.values()) clearTimeout(pending.timeout);
   pendingSends.clear();

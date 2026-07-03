@@ -1,7 +1,6 @@
 import { stripSearchSnippetMarkers } from "../shared/search-snippet.ts";
 import {
   getIndexStatus,
-  getLineageRelationMap,
   getSessionByPath,
   INDEX_SCHEMA_VERSION,
   openIndexDatabase,
@@ -20,7 +19,6 @@ const MAX_TREE_DEPTH = 3;
 
 interface SessionPickerPresentationContext {
   currentSessionId?: string | undefined;
-  relationBySessionId: Map<string, SessionLineageRelation>;
 }
 
 export interface SessionPickerSessionItem {
@@ -84,8 +82,8 @@ export function listSessionPickerItems(
     const currentSession = options.currentSessionPath
       ? getSessionByPath(db, options.currentSessionPath)
       : undefined;
-    const context = buildPresentationContext(db, currentSession?.sessionId);
-    const searchResults = searchSessionsSafely(db, options);
+    const context = buildPresentationContext(currentSession?.sessionId);
+    const searchResults = searchSessionsSafely(db, options, currentSession?.sessionId);
     const rankedResults =
       options.mode === "browse" ? prioritizeSessionResults(searchResults, context) : searchResults;
 
@@ -127,24 +125,20 @@ export function listSessionPickerItems(
 function searchSessionsSafely(
   db: SessionIndexDatabase,
   options: ListSessionPickerItemsOptions,
+  currentSessionId?: string | undefined,
 ): SearchSessionResult[] {
   return searchSessions(db, {
     cwd: options.includeAll ? undefined : options.currentCwd,
     query: options.mode === "search" ? options.query : undefined,
     limit: options.limit,
+    relativeToSessionId: currentSessionId,
   });
 }
 
 function buildPresentationContext(
-  db: SessionIndexDatabase,
   currentSessionId?: string | undefined,
 ): SessionPickerPresentationContext {
-  return {
-    currentSessionId,
-    relationBySessionId: currentSessionId
-      ? getLineageRelationMap(db, currentSessionId)
-      : new Map<string, SessionLineageRelation>(),
-  };
+  return { currentSessionId };
 }
 
 function prioritizeSessionResults(
@@ -299,7 +293,7 @@ function getSessionRelation(
     return "self";
   }
 
-  return context.relationBySessionId.get(result.sessionId);
+  return result.relation;
 }
 
 function getSessionMarker(

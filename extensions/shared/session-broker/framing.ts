@@ -1,7 +1,7 @@
 import type { Socket } from "node:net";
 import { createInterface } from "node:readline";
 import type { Static, TSchema } from "typebox";
-import { parseTypeBoxValue } from "../../shared/typebox.ts";
+import { parseTypeBoxValue } from "../typebox.ts";
 
 const MAX_FRAME_BYTES = 256 * 1024;
 

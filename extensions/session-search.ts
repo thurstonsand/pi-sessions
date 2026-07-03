@@ -1,6 +1,6 @@
 import path from "node:path";
 import type { ExtensionAPI, ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { getKeybindings, type Keybinding, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
   stripSearchSnippetMarkers,
@@ -12,7 +12,9 @@ import {
   openIndexDatabase,
   type SearchSessionResult,
   type SearchSessionsParams,
+  type SearchSort,
   type SessionIndexStatus,
+  type SessionSearchEvidence,
   searchSessions,
 } from "./shared/session-index/index.ts";
 import { formatSessionTitleOrShortId } from "./shared/session-ui.ts";
@@ -22,6 +24,7 @@ interface SessionSearchToolParams {
   query?: string;
   files?: {
     touched?: string[];
+    changed?: string[];
   };
   repo?: string;
   cwd?: string;
@@ -29,11 +32,11 @@ interface SessionSearchToolParams {
     after?: string;
     before?: string;
   };
+  sort?: SearchSort;
   limit?: number;
 }
 
 interface SessionSearchToolDetails {
-  error: boolean;
   params?: SessionSearchToolParams | undefined;
   results: SearchSessionResult[];
   status?: SessionIndexStatus | undefined;
@@ -51,14 +54,14 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
     description: "Search prior Pi sessions",
     promptSnippet: "Use when you need to locate an earlier session to do a detailed follow-up",
     promptGuidelines: [
-      "query is plain text only. Do not use boolean operators like OR/AND, parentheses, regex, or other search syntax",
-      "If you want alternatives, run multiple session_search calls with different queries",
+      "Omit query to list matching sessions chronologically",
       "Once you have the right session id, switch to session_ask for questions about that session",
     ],
     parameters: Type.Object({
       query: Type.Optional(
         Type.String({
-          description: "Free-text terms to match against",
+          description:
+            "Free-text terms to match against. Supports quoted phrases for exact matching, AND/OR/NOT, parentheses, -term negation; use plain terms for prefix matching",
         }),
       ),
       files: Type.Optional(
@@ -66,7 +69,14 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
           touched: Type.Optional(
             Type.Array(
               Type.String({
-                description: "File path touched in the session",
+                description: "File path read or changed in the session",
+              }),
+            ),
+          ),
+          changed: Type.Optional(
+            Type.Array(
+              Type.String({
+                description: "File path changed in the session",
               }),
             ),
           ),
@@ -79,22 +89,30 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
       ),
       cwd: Type.Optional(
         Type.String({
-          description: "Directory the session was started in",
+          description: "Directory of the session",
         }),
       ),
       time: Type.Optional(
         Type.Object({
           after: Type.Optional(
             Type.String({
-              description: "Inclusive lower bound for session modified time, in ISO format",
+              description: "Inclusive lower bound for the session activity interval, in ISO format",
             }),
           ),
           before: Type.Optional(
             Type.String({
-              description: "Inclusive upper bound for session modified time, in ISO format",
+              description: "Inclusive upper bound for the session activity interval, in ISO format",
             }),
           ),
         }),
+      ),
+      sort: Type.Optional(
+        Type.Union(
+          [Type.Literal("relevance"), Type.Literal("modified_desc"), Type.Literal("modified_asc")],
+          {
+            description: "Display order for returned matches",
+          },
+        ),
       ),
       limit: Type.Optional(
         Type.Number({
@@ -105,19 +123,10 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params: SessionSearchToolParams, _signal, onUpdate, ctx) {
       const validationError = validateSearchParams(params);
       if (validationError) {
-        const details: SessionSearchToolDetails = {
-          error: true,
-          params,
-          results: [],
-        };
-        return {
-          content: [{ type: "text", text: validationError }],
-          details,
-        };
+        throw new Error(validationError);
       }
 
       const progressDetails: SessionSearchToolDetails = {
-        error: false,
         params,
         results: [],
       };
@@ -129,21 +138,9 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
       const indexPath = settings.index.path;
       const status = getIndexStatus(indexPath);
       if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
-        const details: SessionSearchToolDetails = {
-          error: true,
-          params,
-          status,
-          results: [],
-        };
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Session index missing or incompatible at ${indexPath}. Run /session-index and press r to rebuild it.`,
-            },
-          ],
-          details,
-        };
+        throw new Error(
+          `Session index missing or incompatible at ${indexPath}. Run /session-index and press r to rebuild it.`,
+        );
       }
 
       const db = openIndexDatabase(status.dbPath, { create: false });
@@ -152,52 +149,53 @@ export default function sessionSearchExtension(pi: ExtensionAPI): void {
 
         if (results.length === 0) {
           const details: SessionSearchToolDetails = {
-            error: false,
             params,
             status,
             results: [],
           };
           return {
-            content: [{ type: "text", text: "No matching sessions found." }],
+            content: [{ type: "text", text: formatSearchResultsForModel(details) }],
             details,
           };
         }
 
         const details: SessionSearchToolDetails = {
-          error: false,
           params,
           status,
           results,
         };
         return {
-          content: [{ type: "text", text: formatSearchResults(results) }],
+          content: [{ type: "text", text: formatSearchResultsForModel(details) }],
           details,
         };
       } finally {
         db.close();
       }
     },
-    renderResult(result, { expanded, isPartial }, theme) {
+    renderResult(result, { expanded, isPartial }, theme, context) {
       const details = result.details as SessionSearchToolDetails | undefined;
       const content = result.content[0];
       if (content?.type !== "text") {
         return new Text(theme.fg("error", "No search output"), 0, 0);
       }
 
+      if (context.isError) {
+        return new Text(theme.fg("error", content.text), 0, 0);
+      }
+
       if (isPartial) {
-        const lines = [theme.bold(theme.fg("warning", "Searching sessions..."))];
-        lines.push(...formatSessionSearchContextLines(details?.params, theme));
+        const lines = formatSessionSearchContextLines(details?.params, theme);
         return new Text(lines.join("\n"), 0, 0);
       }
 
-      if (!details || details.error) {
+      if (!details) {
         return new Text(theme.fg("error", content.text), 0, 0);
       }
 
       const lines = formatSessionSearchContextLines(details.params, theme);
       if (details.results.length === 0) {
         if (lines.length > 0) lines.push("");
-        lines.push(theme.fg("warning", content.text));
+        lines.push(theme.fg("warning", "No matching sessions found."));
         return new Text(lines.join("\n"), 0, 0);
       }
 
@@ -219,10 +217,12 @@ function buildSearchParams(
   return {
     query: params.query,
     touched: params.files?.touched,
+    changed: params.files?.changed,
     repo: params.repo,
     cwd: params.cwd,
     after: params.time?.after,
     before: params.time?.before,
+    sort: params.sort,
     limit: params.limit ?? DEFAULT_SESSION_SEARCH_LIMIT,
     excludeSessionIds: currentSessionId ? [currentSessionId] : undefined,
   };
@@ -242,7 +242,11 @@ function formatSessionSearchContextLines(
   const filters: string[] = [];
   if (params.repo?.trim()) filters.push(`repo: ${params.repo.trim()}`);
   if (params.cwd?.trim()) filters.push(`cwd: ${params.cwd.trim()}`);
-  if (params.files?.touched?.length) filters.push(`files: ${params.files.touched.join(", ")}`);
+  if (params.files?.touched?.length)
+    filters.push(`files.touched: ${params.files.touched.join(", ")}`);
+  if (params.files?.changed?.length)
+    filters.push(`files.changed: ${params.files.changed.join(", ")}`);
+  if (params.sort) filters.push(`sort: ${params.sort}`);
   if (params.time?.after?.trim()) filters.push(`after: ${params.time.after.trim()}`);
   if (params.time?.before?.trim()) filters.push(`before: ${params.time.before.trim()}`);
   if (params.limit !== undefined) filters.push(`limit: ${params.limit}`);
@@ -268,12 +272,14 @@ function formatSessionSearchPanelResults(
   const lines = visibleResults.flatMap((result, index) => {
     const location = formatSearchResultLocation(result.cwd);
     const heading = `${index + 1}. ${theme.bold(formatSearchResultLabel(result))}${location ? ` ${theme.fg("dim", `(${location})`)}` : ""}`;
-    const snippet = params?.query ? formatSearchSnippet(result) : undefined;
-    return snippet ? [heading, theme.fg("dim", `  - ${snippet}`)] : [heading];
+    const snippets = params?.query ? formatSearchSnippets(result).slice(0, 3) : [];
+    return snippets.length > 0
+      ? [heading, ...snippets.map((snippet) => theme.fg("dim", `  - ${snippet}`))]
+      : [heading];
   });
 
   if (!expanded && results.length > visibleResults.length) {
-    lines.push(theme.fg("dim", `... ${results.length - visibleResults.length} more`));
+    lines.push(formatOverflowHint(results.length - visibleResults.length, results.length, theme));
   }
 
   return lines;
@@ -289,76 +295,70 @@ function formatSearchResultLocation(cwd: string | undefined): string | undefined
   return base || cwd;
 }
 
-function formatSearchSnippet(result: SearchSessionResult): string | undefined {
-  const plainSnippet = stripSearchSnippetMarkers(result.snippet)?.replace(/\s+/g, " ").trim();
+function formatSearchSnippets(result: SearchSessionResult): string[] {
+  return result.evidence
+    .filter((evidence): evidence is SearchTextEvidence => evidence.kind === "text")
+    .map((evidence) => formatSearchSnippetText(evidence.snippet))
+    .filter((snippet): snippet is string => Boolean(snippet));
+}
+
+interface SearchTextEvidence {
+  kind: "text";
+  sourceKind: string;
+  snippet: string;
+  score: number;
+  entryId?: string | undefined;
+}
+
+function formatSearchSnippetText(snippet: string): string | undefined {
+  const plainSnippet = stripSearchSnippetMarkers(snippet)?.replace(/\s+/g, " ").trim();
   if (!plainSnippet) return undefined;
-  if (plainSnippet === result.sessionName || plainSnippet === result.cwd) return undefined;
-  return transformSearchSnippetMatches(result.snippet, (match) => `[${match}]`)
+  return transformSearchSnippetMatches(snippet, (match) => `[${match}]`)
     ?.replace(/\s+/g, " ")
     .trim();
 }
 
-interface SearchResultTextStyles {
-  cwd: (text: string) => string;
-  primary: (text: string) => string;
-  secondary: (text: string) => string;
+function formatSearchResultsForModel(details: SessionSearchToolDetails): string {
+  return JSON.stringify(
+    {
+      params: details.params,
+      status: details.status,
+      results: details.results.map(formatSearchResultForModel),
+    },
+    null,
+    2,
+  );
 }
 
-function formatSearchResults(
-  results: SearchSessionResult[],
-  styles: SearchResultTextStyles = defaultSearchResultTextStyles,
-): string {
-  const groups = new Map<string, SearchSessionResult[]>();
-
-  for (const result of results) {
-    const bucket = groups.get(result.cwd);
-    if (bucket) {
-      bucket.push(result);
-      continue;
-    }
-
-    groups.set(result.cwd, [result]);
-  }
-
-  return [...groups.entries()]
-    .flatMap(([cwd, groupResults], groupIndex) => {
-      const lines = [styles.cwd(`cwd: ${cwd}`)];
-      for (const result of groupResults) {
-        lines.push(...formatSearchResult(result, styles));
-      }
-      if (groupIndex < groups.size - 1) {
-        lines.push("");
-      }
-      return lines;
-    })
-    .join("\n")
-    .trim();
+function formatSearchResultForModel(result: SearchSessionResult): SearchSessionResult {
+  return {
+    ...result,
+    snippet: stripSearchSnippetMarkers(result.snippet) ?? result.snippet,
+    evidence: result.evidence.map(formatEvidenceForModel),
+  };
 }
 
-function formatSearchResult(result: SearchSessionResult, styles: SearchResultTextStyles): string[] {
-  const lines = [styles.primary(`${result.sessionName || "[unnamed]"}: ${result.sessionId}`)];
-
-  if (result.matchedFiles.length > 0) {
-    lines.push(styles.secondary(`matched_files: ${result.matchedFiles.join(", ")}`));
+function formatEvidenceForModel(evidence: SessionSearchEvidence): SessionSearchEvidence {
+  if (evidence.kind !== "text") {
+    return evidence;
   }
 
-  if (result.score > 0 || result.hitCount > 0) {
-    lines.push(styles.secondary(`score: ${result.score.toFixed(2)} / hits: ${result.hitCount}`));
-  }
-
-  const plainSnippet = stripSearchSnippetMarkers(result.snippet)?.replace(/\s+/g, " ").trim();
-  if (plainSnippet && plainSnippet !== result.sessionName && plainSnippet !== result.cwd) {
-    lines.push(styles.secondary(`snippet: ${plainSnippet}`));
-  }
-
-  return lines;
+  return {
+    ...evidence,
+    snippet: stripSearchSnippetMarkers(evidence.snippet) ?? evidence.snippet,
+  };
 }
 
-const defaultSearchResultTextStyles: SearchResultTextStyles = {
-  cwd: (text) => text,
-  primary: (text) => text,
-  secondary: (text) => text,
-};
+function formatOverflowHint(remaining: number, total: number, theme: Theme): string {
+  return `${theme.fg("muted", `... (${remaining} more lines, ${total} total,`)} ${theme.fg(
+    "dim",
+    formatKeyHint("app.tools.expand"),
+  )}${theme.fg("muted", " to expand)")}`;
+}
+
+function formatKeyHint(keybinding: Keybinding): string {
+  return getKeybindings().getKeys(keybinding).join("/");
+}
 
 function validateSearchParams(params: SessionSearchToolParams): string | undefined {
   if (params.time?.after && !isValidIsoDateLike(params.time.after)) {

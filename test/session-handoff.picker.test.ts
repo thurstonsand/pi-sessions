@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { KeybindingsManager, Theme } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
+import stripAnsi from "strip-ansi";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionReferencePickerComponent } from "../extensions/session-handoff/picker.ts";
 import { listSessionPickerItems } from "../extensions/session-handoff/query.ts";
@@ -126,6 +127,43 @@ describe("session handoff picker", () => {
     expect(done).toHaveBeenCalledWith({ kind: "cancel" });
   });
 
+  it("shows a query syntax notice instead of throwing while search input is incomplete", () => {
+    const dbPath = createPickerDb();
+
+    const result = listSessionPickerItems({
+      currentSessionPath: "/tmp/current.jsonl",
+      currentCwd: "/repo/app",
+      includeAll: true,
+      indexPath: dbPath,
+      mode: "search",
+      query: '"session search',
+    });
+
+    expect(result.items).toEqual([
+      {
+        kind: "error",
+        title: "Invalid search query",
+        description: "Unclosed quote at offset 0",
+      },
+    ]);
+
+    const picker = new SessionReferencePickerComponent(
+      createFakeTui(),
+      createFakeTheme(),
+      createFakeKeybindings(),
+      vi.fn(),
+      {
+        indexPath: dbPath,
+        shortcut: "alt+o",
+        getCurrentSessionPath: () => "/tmp/current.jsonl",
+        getCurrentCwd: () => "/repo/app",
+      },
+    );
+
+    expect(() => picker.handleInput('"')).not.toThrow();
+    expect(stripAnsi(picker.render(120).join("\n"))).toContain("Invalid search query");
+  });
+
   it("uses a flat ranked list in search mode", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-03-23T02:00:00.000Z"));
@@ -143,13 +181,13 @@ describe("session handoff picker", () => {
     const sessionItems = result.items.filter((item) => item.kind === "session");
     expect(sessionItems).toMatchObject([
       {
-        sessionId: "22222222-2222-4222-8222-222222222222",
-        marker: "current",
+        sessionId: "66666666-6666-4666-8666-666666666666",
+        marker: "sibling",
         prefix: "",
       },
       {
-        sessionId: "11111111-1111-4111-8111-111111111111",
-        marker: "parent",
+        sessionId: "44444444-4444-4444-8444-444444444444",
+        marker: "44444444",
         prefix: "",
       },
       {
@@ -158,13 +196,13 @@ describe("session handoff picker", () => {
         prefix: "",
       },
       {
-        sessionId: "66666666-6666-4666-8666-666666666666",
-        marker: "sibling",
+        sessionId: "22222222-2222-4222-8222-222222222222",
+        marker: "current",
         prefix: "",
       },
       {
-        sessionId: "44444444-4444-4444-8444-444444444444",
-        marker: "44444444",
+        sessionId: "11111111-1111-4111-8111-111111111111",
+        marker: "parent",
         prefix: "",
       },
     ]);

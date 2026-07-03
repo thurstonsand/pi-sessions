@@ -73,6 +73,20 @@ describe("session-search db", () => {
       pathScope: "relative",
       ts: "2026-03-22T00:05:00.000Z",
     });
+    insertSessionFileTouch(db, {
+      sessionId: "session-1",
+      entryId: "assistant-2",
+      op: "changed",
+      source: "tool_call",
+      rawPath: "src/index.ts",
+      absPath: `${repoRoot}/app/src/index.ts`,
+      cwdRelPath: "src/index.ts",
+      repoRoot,
+      repoRelPath: "app/src/index.ts",
+      basename: "index.ts",
+      pathScope: "relative",
+      ts: "2026-03-22T00:06:00.000Z",
+    });
     db.close();
 
     const status = getIndexStatus(dbPath);
@@ -91,9 +105,104 @@ describe("session-search db", () => {
 
     expect(repoHits).toHaveLength(1);
     expect(fileHits).toHaveLength(1);
-    expect(fileHits[0]?.matchedFiles).toEqual(["app/src/index.ts"]);
+    expect(fileHits[0]?.evidence).toEqual([
+      {
+        kind: "file_touch",
+        op: "changed",
+        query: "src/index.ts",
+        path: "app/src/index.ts",
+        entryId: "assistant-1",
+      },
+    ]);
     expect(fileHits[0]?.score).toBe(0);
-    expect(fileHits[0]?.hitCount).toBe(0);
+    expect(fileHits[0]?.hitCount).toBe(1);
+  });
+
+  it("filters changed files separately from touched files", () => {
+    const dir = testFs.createTempDir();
+    const dbPath = path.join(dir, "index.sqlite");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    insertSession(
+      db,
+      {
+        sessionId: "read-session",
+        sessionPath: "/tmp/read.jsonl",
+        sessionName: "Read",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:05:00.000Z",
+        messageCount: 1,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    insertSessionFileTouch(db, {
+      sessionId: "read-session",
+      entryId: "read-entry",
+      op: "read",
+      source: "tool_call",
+      rawPath: "src/search.ts",
+      absPath: "/repo/app/src/search.ts",
+      cwdRelPath: "src/search.ts",
+      repoRoot: "/repo",
+      repoRelPath: "app/src/search.ts",
+      basename: "search.ts",
+      pathScope: "relative",
+      ts: "2026-03-22T00:01:00.000Z",
+    });
+    insertSession(
+      db,
+      {
+        sessionId: "changed-session",
+        sessionPath: "/tmp/changed.jsonl",
+        sessionName: "Changed",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:10:00.000Z",
+        modifiedAt: "2026-03-22T00:15:00.000Z",
+        messageCount: 1,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    insertSessionFileTouch(db, {
+      sessionId: "changed-session",
+      entryId: "changed-entry",
+      op: "changed",
+      source: "tool_call",
+      rawPath: "src/search.ts",
+      absPath: "/repo/app/src/search.ts",
+      cwdRelPath: "src/search.ts",
+      repoRoot: "/repo",
+      repoRelPath: "app/src/search.ts",
+      basename: "search.ts",
+      pathScope: "relative",
+      ts: "2026-03-22T00:11:00.000Z",
+    });
+    db.close();
+
+    const searchDb = openIndexDatabase(dbPath, { create: false });
+    const touchedHits = searchSessions(searchDb, { touched: ["src/search.ts"], limit: 10 });
+    const changedHits = searchSessions(searchDb, { changed: ["src/search.ts"], limit: 10 });
+    searchDb.close();
+
+    expect(touchedHits.map((result) => result.sessionId)).toEqual([
+      "changed-session",
+      "read-session",
+    ]);
+    expect(changedHits.map((result) => result.sessionId)).toEqual(["changed-session"]);
+    expect(changedHits[0]?.evidence).toEqual([
+      {
+        kind: "file_touch",
+        op: "changed",
+        query: "src/search.ts",
+        path: "app/src/search.ts",
+        entryId: "changed-entry",
+      },
+    ]);
   });
 
   it("uses session time overlap for after/before filtering", () => {
@@ -249,6 +358,240 @@ describe("session-search db", () => {
     expect(compactHits[0]?.hitCount).toBe(1);
     expect(canonicalHits[0]?.sessionId).toBe(targetId);
     expect(canonicalHits[0]?.hitCount).toBe(1);
+  });
+
+  it("supports boolean expressions, exact quotes, prefix terms, and session-level negation", () => {
+    const dir = testFs.createTempDir();
+    const dbPath = path.join(dir, "index.sqlite");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    insertSession(
+      db,
+      {
+        sessionId: "excluded-session",
+        sessionPath: "/tmp/excluded.jsonl",
+        sessionName: "Excluded",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:05:00.000Z",
+        messageCount: 1,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "excluded-session",
+      entryId: "excluded-entry",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:01:00.000Z",
+      sourceKind: "assistant_text",
+      text: "sqlite ranking bm25 schema",
+    });
+    insertSession(
+      db,
+      {
+        sessionId: "included-session",
+        sessionPath: "/tmp/included.jsonl",
+        sessionName: "Included",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:10:00.000Z",
+        modifiedAt: "2026-03-22T00:15:00.000Z",
+        messageCount: 1,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "included-session",
+      entryId: "included-entry",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:11:00.000Z",
+      sourceKind: "assistant_text",
+      text: "sqlite ranking bm25",
+    });
+    insertSession(
+      db,
+      {
+        sessionId: "phrase-session",
+        sessionPath: "/tmp/phrase.jsonl",
+        sessionName: "Phrase",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:20:00.000Z",
+        modifiedAt: "2026-03-22T00:25:00.000Z",
+        messageCount: 1,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "phrase-session",
+      entryId: "phrase-entry",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:21:00.000Z",
+      sourceKind: "assistant_text",
+      text: "session search sqlite3",
+    });
+    insertSession(
+      db,
+      {
+        sessionId: "scattered-session",
+        sessionPath: "/tmp/scattered.jsonl",
+        sessionName: "Scattered",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:30:00.000Z",
+        modifiedAt: "2026-03-22T00:35:00.000Z",
+        messageCount: 1,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "scattered-session",
+      entryId: "scattered-entry",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:31:00.000Z",
+      sourceKind: "assistant_text",
+      text: "session with search sqlite",
+    });
+    db.close();
+
+    const searchDb = openIndexDatabase(dbPath, { create: false });
+    const negatedHits = searchSessions(searchDb, {
+      query: "sqlite AND (ranking OR bm25) -schema",
+      limit: 10,
+    });
+    const phraseHits = searchSessions(searchDb, { query: '"session search"', limit: 10 });
+    const prefixHits = searchSessions(searchDb, { query: "sqlite", limit: 10 });
+    const exactHits = searchSessions(searchDb, { query: '"sqlite"', limit: 10 });
+    searchDb.close();
+
+    expect(negatedHits.map((result) => result.sessionId)).toEqual(["included-session"]);
+    expect(phraseHits.map((result) => result.sessionId)).toEqual(["phrase-session"]);
+    expect(prefixHits.map((result) => result.sessionId)).toContain("phrase-session");
+    expect(exactHits.map((result) => result.sessionId)).not.toContain("phrase-session");
+    expect(exactHits.map((result) => result.sessionId)).toContain("scattered-session");
+  });
+
+  it("rejects invalid time filters and negative-only queries in the shared layer", () => {
+    const dir = testFs.createTempDir();
+    const dbPath = path.join(dir, "index.sqlite");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+
+    expect(() => searchSessions(db, { after: "not-a-date" })).toThrow("Invalid time filter");
+    expect(() => searchSessions(db, { after: "2026-03-23", before: "2026-03-22" })).toThrow(
+      "time.after must be less than or equal to time.before",
+    );
+    expect(() => searchSessions(db, { query: "-schema" })).toThrow("Negative-only searches");
+
+    db.close();
+  });
+
+  it("uses modified sort as display ordering after relevance selection", () => {
+    const dir = testFs.createTempDir();
+    const dbPath = path.join(dir, "index.sqlite");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    insertSession(
+      db,
+      {
+        sessionId: "older-strong",
+        sessionPath: "/tmp/older-strong.jsonl",
+        sessionName: "Older strong",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-20T00:00:00.000Z",
+        modifiedAt: "2026-03-20T00:05:00.000Z",
+        messageCount: 1,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "older-strong",
+      entryId: "older-strong-entry",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-20T00:01:00.000Z",
+      sourceKind: "session_name",
+      text: "selector ranking",
+    });
+    insertSession(
+      db,
+      {
+        sessionId: "newer-strong",
+        sessionPath: "/tmp/newer-strong.jsonl",
+        sessionName: "Newer strong",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:05:00.000Z",
+        messageCount: 1,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "newer-strong",
+      entryId: "newer-strong-entry",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-22T00:01:00.000Z",
+      sourceKind: "assistant_text",
+      text: "selector ranking",
+    });
+    insertSession(
+      db,
+      {
+        sessionId: "newest-weak",
+        sessionPath: "/tmp/newest-weak.jsonl",
+        sessionName: "Newest weak",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-23T00:00:00.000Z",
+        modifiedAt: "2026-03-23T00:05:00.000Z",
+        messageCount: 1,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "newest-weak",
+      entryId: "newest-weak-entry",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-23T00:01:00.000Z",
+      sourceKind: "assistant_text",
+      text: "selector",
+    });
+    db.close();
+
+    const searchDb = openIndexDatabase(dbPath, { create: false });
+    const relevanceHits = searchSessions(searchDb, { query: "selector ranking", limit: 2 });
+    const modifiedAscHits = searchSessions(searchDb, {
+      query: "selector ranking",
+      sort: "modified_asc",
+      limit: 2,
+    });
+    searchDb.close();
+
+    expect(relevanceHits.map((result) => result.sessionId)).not.toContain("newest-weak");
+    expect(modifiedAscHits.map((result) => result.sessionId)).toEqual(
+      [...relevanceHits]
+        .sort((a, b) => a.modifiedAt.localeCompare(b.modifiedAt))
+        .map((result) => result.sessionId),
+    );
   });
 
   it("weights recency strongly for non-UUID search results", () => {

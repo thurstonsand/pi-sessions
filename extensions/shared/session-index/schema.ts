@@ -61,6 +61,17 @@ export function initializeSchema(db: SessionIndexDatabase): void {
     CREATE INDEX IF NOT EXISTS sessions_parent_id_idx ON sessions(parent_session_id);
     CREATE INDEX IF NOT EXISTS sessions_parent_path_idx ON sessions(parent_session_path);
 
+    CREATE TABLE IF NOT EXISTS session_repo_roots (
+      session_id TEXT NOT NULL,
+      repo_root TEXT NOT NULL,
+      repo_basename TEXT NOT NULL,
+      PRIMARY KEY (session_id, repo_root),
+      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS session_repo_roots_root_idx ON session_repo_roots(repo_root);
+    CREATE INDEX IF NOT EXISTS session_repo_roots_basename_idx ON session_repo_roots(repo_basename);
+
     CREATE TABLE IF NOT EXISTS session_lineage_relations (
       session_id TEXT NOT NULL,
       related_session_id TEXT NOT NULL,
@@ -94,7 +105,8 @@ export function initializeSchema(db: SessionIndexDatabase): void {
     CREATE VIRTUAL TABLE IF NOT EXISTS session_text_chunks_fts USING fts5(
       text,
       content='session_text_chunks',
-      content_rowid='id'
+      content_rowid='id',
+      tokenize = 'unicode61 remove_diacritics 2 tokenchars ''_'''
     );
 
     CREATE TRIGGER IF NOT EXISTS session_text_chunks_fts_ai

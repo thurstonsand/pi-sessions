@@ -1,10 +1,6 @@
 import path from "node:path";
 import { type Static, Type } from "typebox";
-import {
-  type FileTouchOp,
-  matchesRepoRoot,
-  normalizeSearchPath,
-} from "../../session-search/normalize.ts";
+import { normalizeSearchPath } from "../../session-search/normalize.ts";
 import {
   SEARCH_SNIPPET_ELLIPSIS,
   SEARCH_SNIPPET_MATCH_END,
@@ -12,8 +8,6 @@ import {
 } from "../search-snippet.ts";
 import { parseTypeBoxRows } from "../typebox.ts";
 import {
-  boostIndependentHits,
-  buildFtsQuery,
   compactSearchValue,
   compactSessionId,
   escapeLikePrefix,
@@ -23,10 +17,23 @@ import {
   SESSION_ORIGIN_SCHEMA,
   type SearchSessionResult,
   type SearchSessionsParams,
+  type SearchSort,
   type SessionIndexDatabase,
   sanitizeFilterValues,
-  tokenizeSearchTerms,
+  tokenizeSearchText,
 } from "./common.ts";
+import { type CompiledSearchQuery, compileSearchQuery } from "./query/compiler.ts";
+import {
+  buildTextOverfetchLimit,
+  MAX_FILTERED_SESSION_CANDIDATES,
+  MAX_SCORING_TEXT_HITS_PER_SESSION,
+  MAX_TEXT_EVIDENCE_PER_SESSION,
+  normalizeResultLimit,
+  type SessionIdMatchKind,
+  scoreRecency,
+  scoreSessionIdMatch,
+  scoreTextHit,
+} from "./scoring.ts";
 
 const SESSION_LIST_ROW_SCHEMA = Type.Object({
   sessionId: Type.String(),
@@ -49,19 +56,6 @@ type SessionListRow = Static<typeof SESSION_LIST_ROW_SCHEMA>;
 
 const SEARCH_CHUNK_ROW_SCHEMA = Type.Object({
   sessionId: Type.String(),
-  sessionName: Type.String(),
-  sessionPath: Type.String(),
-  cwd: Type.String(),
-  repoRootsJson: Type.String(),
-  startedAt: Type.String(),
-  modifiedAt: Type.String(),
-  messageCount: Type.Number(),
-  parentSessionPath: NULLABLE_STRING_SCHEMA,
-  parentSessionId: NULLABLE_STRING_SCHEMA,
-  firstUserPrompt: NULLABLE_STRING_SCHEMA,
-  sessionOrigin: Type.Union([SESSION_ORIGIN_SCHEMA, Type.Null()]),
-  handoffGoal: NULLABLE_STRING_SCHEMA,
-  handoffNextTask: NULLABLE_STRING_SCHEMA,
   snippet: Type.String(),
   rank: Type.Number(),
   entryId: NULLABLE_STRING_SCHEMA,
@@ -72,6 +66,7 @@ type SearchChunkRow = Static<typeof SEARCH_CHUNK_ROW_SCHEMA>;
 
 const FILE_TOUCH_MATCH_ROW_SCHEMA = Type.Object({
   sessionId: Type.String(),
+  entryId: NULLABLE_STRING_SCHEMA,
   rawPath: Type.String(),
   absPath: NULLABLE_STRING_SCHEMA,
   cwdRelPath: NULLABLE_STRING_SCHEMA,
@@ -89,147 +84,164 @@ interface SearchFilters {
   cwdLike: string | undefined;
   repo: string | undefined;
   touched: string[];
-  limit: number | undefined;
+  changed: string[];
+  limit: number;
+  sort: SearchSort | undefined;
   query: string | undefined;
-  excludeSessionIds: Set<string>;
+  excludeSessionIds: string[];
+}
+
+interface FileFilterQuery {
+  query: string;
+  normalized: string;
+  basename: string;
+  op: "touched" | "changed";
 }
 
 interface FileMatchSummary {
-  matchedFiles: string[];
+  evidence: FileTouchEvidence[];
 }
 
 interface FileMatchAccumulator {
-  matchedFiles: Set<string>;
+  evidence: FileTouchEvidence[];
   evidenceKeys: Set<string>;
 }
 
 interface FilePathMatch {
   displayPath: string;
-  score: number;
+}
+
+interface FileTouchEvidence {
+  kind: "file_touch";
+  op: "read" | "changed";
+  query: string;
+  path: string;
+  entryId?: string | undefined;
 }
 
 interface SearchResultAccumulator {
   result: SearchSessionResult;
   evidenceKeys: Set<string>;
-  snippetScore: number;
+  textEvidenceCount: number;
+  textScoreContributionCount: number;
+  bestSnippetScore: number;
 }
 
-const SESSION_ID_EXACT_SCORE = 1_500;
-const SESSION_ID_PREFIX_SCORE = 1_250;
-const SESSION_ID_SUBSTRING_SCORE = 1_000;
-const RECENCY_BASE_SCORE = 220;
-const SESSION_NAME_SCORE = 80;
-const HANDOFF_NEXT_TASK_SCORE = 60;
-const HANDOFF_GOAL_SCORE = 50;
-const DEFAULT_TEXT_SCORE = 20;
+interface SqlClause {
+  sql: string;
+  args: Array<string | number | null>;
+}
 
 export function searchSessions(
   db: SessionIndexDatabase,
   params: SearchSessionsParams,
-  _options?: { defaultLimit?: number | undefined },
 ): SearchSessionResult[] {
   const filters = buildSearchFilters(params);
-  const fileMatches = hasFileFilters(filters)
-    ? collectFileMatches(getCandidateFileTouches(db, filters), filters)
-    : new Map<string, FileMatchSummary>();
-  const candidates = applySessionFilters(
-    getFilteredSessionCandidates(db, filters),
-    filters,
-    fileMatches,
-  );
+  const compiledQuery = filters.query ? compileSearchQuery(filters.query) : undefined;
+  const hasPositiveQuery = compiledQuery !== undefined;
+  const fileQueries = buildFileFilterQueries(filters);
+  const fileMatches =
+    fileQueries.length > 0
+      ? collectFileMatches(getCandidateFileTouches(db, filters, fileQueries), fileQueries)
+      : new Map<string, FileMatchSummary>();
+
+  if (fileQueries.length > 0 && fileMatches.size === 0) {
+    return [];
+  }
+
+  const candidates = getFilteredSessionCandidates(db, filters, {
+    candidateLimit:
+      hasPositiveQuery || fileQueries.length > 0 ? MAX_FILTERED_SESSION_CANDIDATES : filters.limit,
+    sort: getBrowseSort(filters),
+  }).filter((row) => fileQueries.length === 0 || fileMatches.has(row.sessionId));
 
   if (candidates.length === 0) {
     return [];
   }
 
-  return filters.query
-    ? limitSearchResults(searchFilteredSessions(db, candidates, fileMatches, filters), filters)
-    : limitSearchResults(browseFilteredSessions(candidates, fileMatches), filters);
+  if (!compiledQuery) {
+    return limitBrowseResults(
+      candidates.map((row) => buildSearchResult(row, 0, fileMatches)),
+      filters,
+    );
+  }
+
+  const ranked = searchFilteredSessions(db, candidates, fileMatches, filters, compiledQuery);
+  const selected = ranked.slice(0, filters.limit);
+  return applyDisplaySort(selected, filters, true);
 }
 
 function buildSearchFilters(params: SearchSessionsParams): SearchFilters {
   const cwd = params.cwd?.trim();
+  const after = normalizeTimeFilter(params.after);
+  const before = normalizeTimeFilter(params.before);
+  if (after && before && after > before) {
+    throw new Error("time.after must be less than or equal to time.before");
+  }
 
   return {
-    after: normalizeTimeFilter(params.after),
-    before: normalizeTimeFilter(params.before),
+    after,
+    before,
     cwd,
     cwdLike: cwd ? `${escapeLikePrefix(cwd)}%` : undefined,
     repo: params.repo?.trim(),
     touched: sanitizeFilterValues(params.touched),
-    limit: params.limit,
-    query: params.query?.trim(),
-    excludeSessionIds: new Set(sanitizeFilterValues(params.excludeSessionIds)),
+    changed: sanitizeFilterValues(params.changed),
+    limit: normalizeResultLimit(params.limit),
+    sort: normalizeSort(params.sort),
+    query: params.query?.trim() || undefined,
+    excludeSessionIds: sanitizeFilterValues(params.excludeSessionIds),
   };
+}
+
+function normalizeSort(value: SearchSort | undefined): SearchSort | undefined {
+  switch (value) {
+    case "relevance":
+    case "modified_asc":
+    case "modified_desc":
+      return value;
+    default:
+      return undefined;
+  }
 }
 
 function getFilteredSessionCandidates(
   db: SessionIndexDatabase,
   filters: SearchFilters,
+  options: { candidateLimit: number; sort: "modified_desc" | "modified_asc" },
 ): SessionListRow[] {
+  const where = buildSessionWhereClause("s", filters);
+  const orderDirection = options.sort === "modified_asc" ? "ASC" : "DESC";
+
   return parseTypeBoxRows(
     SESSION_LIST_ROW_SCHEMA,
     db
       .prepare(
         `
           SELECT
-            session_id as sessionId,
-            session_name as sessionName,
-            session_path as sessionPath,
-            cwd,
-            repo_roots_json as repoRootsJson,
-            created_ts as startedAt,
-            modified_ts as modifiedAt,
-            message_count as messageCount,
-            parent_session_path as parentSessionPath,
-            parent_session_id as parentSessionId,
-            first_user_prompt as firstUserPrompt,
-            session_origin as sessionOrigin,
-            handoff_goal as handoffGoal,
-            handoff_next_task as handoffNextTask
-          FROM sessions
-          WHERE (? IS NULL OR modified_ts >= ?)
-            AND (? IS NULL OR created_ts <= ?)
-            AND (? IS NULL OR cwd = ? OR cwd LIKE ? ESCAPE '\\')
-          ORDER BY modified_ts DESC
+            s.session_id as sessionId,
+            s.session_name as sessionName,
+            s.session_path as sessionPath,
+            s.cwd,
+            s.repo_roots_json as repoRootsJson,
+            s.created_ts as startedAt,
+            s.modified_ts as modifiedAt,
+            s.message_count as messageCount,
+            s.parent_session_path as parentSessionPath,
+            s.parent_session_id as parentSessionId,
+            s.first_user_prompt as firstUserPrompt,
+            s.session_origin as sessionOrigin,
+            s.handoff_goal as handoffGoal,
+            s.handoff_next_task as handoffNextTask
+          FROM sessions s
+          ${where.sql}
+          ORDER BY s.modified_ts ${orderDirection}
+          LIMIT ?
         `,
       )
-      .all(...getSearchFilterBindings(filters)),
+      .all(...where.args, options.candidateLimit),
     "Invalid recent session rows",
   );
-}
-
-function applySessionFilters(
-  rows: SessionListRow[],
-  filters: SearchFilters,
-  fileMatches: Map<string, FileMatchSummary>,
-): SessionListRow[] {
-  return rows.filter((row) => {
-    if (filters.excludeSessionIds.has(row.sessionId)) {
-      return false;
-    }
-
-    const repoQuery = filters.repo;
-    if (
-      repoQuery &&
-      !parseRepoRoots(row.repoRootsJson).some((repoRoot) => matchesRepoRoot(repoRoot, repoQuery))
-    ) {
-      return false;
-    }
-
-    if (hasFileFilters(filters) && !fileMatches.has(row.sessionId)) {
-      return false;
-    }
-
-    return true;
-  });
-}
-
-function browseFilteredSessions(
-  rows: SessionListRow[],
-  fileMatches: Map<string, FileMatchSummary>,
-): SearchSessionResult[] {
-  return rows.map((row) => buildSearchResult(row, "", 0, 0, fileMatches));
 }
 
 function searchFilteredSessions(
@@ -237,73 +249,60 @@ function searchFilteredSessions(
   candidates: SessionListRow[],
   fileMatches: Map<string, FileMatchSummary>,
   filters: SearchFilters,
+  compiledQuery: CompiledSearchQuery,
 ): SearchSessionResult[] {
-  const candidateById = new Map(
-    candidates.map((candidate, index) => [candidate.sessionId, { candidate, index }]),
-  );
+  const nowMs = Date.now();
+  const candidateById = new Map(candidates.map((candidate) => [candidate.sessionId, candidate]));
   const accumulators = new Map<string, SearchResultAccumulator>();
-  const queryTokens = tokenizeSessionIdQuery(filters.query ?? "");
+  const queryTokens = tokenizeSessionIdQuery(filters.query ?? "", compiledQuery.positiveTerms);
 
   for (const [sessionId, candidate] of candidateById.entries()) {
     const sessionIdEvidence = getSessionIdEvidence(queryTokens, sessionId);
-    if (sessionIdEvidence === undefined) {
+    if (!sessionIdEvidence) {
       continue;
     }
 
-    const accumulator = ensureSearchAccumulator(
-      accumulators,
-      candidate.candidate,
-      candidate.index,
-      fileMatches,
-    );
-    addSearchEvidence(accumulator, "session_id", sessionIdEvidence, undefined, 0);
+    const accumulator = ensureSearchAccumulator(accumulators, candidate, fileMatches, nowMs);
+    addSessionIdEvidence(accumulator, sessionIdEvidence.kind, sessionIdEvidence.score);
   }
 
-  for (const row of getTextMatchRows(db, filters)) {
-    if (row.sourceKind === "session_id") {
-      continue;
-    }
+  const textRows = getTextMatchRows(
+    db,
+    filters,
+    compiledQuery,
+    buildTextOverfetchLimit(filters.limit),
+    hasFileFilters(filters) ? new Set(fileMatches.keys()) : undefined,
+  );
 
+  textRows.forEach((row, rankIndex) => {
     const candidate = candidateById.get(row.sessionId);
     if (!candidate) {
-      continue;
+      return;
     }
 
-    const sourceWeight = getSearchSourceWeight(row.sourceKind);
-    const accumulator = ensureSearchAccumulator(
-      accumulators,
-      candidate.candidate,
-      candidate.index,
-      fileMatches,
-    );
-    addSearchEvidence(
-      accumulator,
-      getSearchEvidenceKey(row),
-      sourceWeight,
-      selectSearchSnippet(row),
-      sourceWeight,
-    );
-  }
+    const score = scoreTextHit(row.sourceKind, rankIndex);
+    const accumulator = ensureSearchAccumulator(accumulators, candidate, fileMatches, nowMs);
+    addTextEvidence(accumulator, row, score);
+  });
 
   return [...accumulators.values()]
     .map(({ result }) => ({
       ...result,
-      score: result.score + boostIndependentHits(result.hitCount),
+      hitCount: result.evidence.length,
     }))
-    .sort((a, b) => {
-      if (b.score !== a.score) {
-        return b.score - a.score;
-      }
-
-      return b.modifiedAt.localeCompare(a.modifiedAt);
-    });
+    .sort(compareByRelevance);
 }
 
-function getTextMatchRows(db: SessionIndexDatabase, filters: SearchFilters): SearchChunkRow[] {
-  const match = buildFtsQuery(filters.query ?? "");
-  if (!match) {
-    return [];
-  }
+function getTextMatchRows(
+  db: SessionIndexDatabase,
+  filters: SearchFilters,
+  compiledQuery: CompiledSearchQuery,
+  limit: number,
+  allowedSessionIds?: Set<string> | undefined,
+): SearchChunkRow[] {
+  const where = buildSessionWhereClause("s", filters);
+  const allowedSessionClause = buildAllowedSessionClause("s", allowedSessionIds);
+  const excludeClause = buildExcludeClause(compiledQuery.excludes);
 
   return parseTypeBoxRows(
     SEARCH_CHUNK_ROW_SCHEMA,
@@ -311,40 +310,31 @@ function getTextMatchRows(db: SessionIndexDatabase, filters: SearchFilters): Sea
       .prepare(
         `
         SELECT
-          s.session_id as sessionId,
-          s.session_name as sessionName,
-          s.session_path as sessionPath,
-          s.cwd as cwd,
-          s.repo_roots_json as repoRootsJson,
-          s.created_ts as startedAt,
-          s.modified_ts as modifiedAt,
-          s.message_count as messageCount,
-          s.parent_session_path as parentSessionPath,
-          s.parent_session_id as parentSessionId,
-          s.first_user_prompt as firstUserPrompt,
-          s.session_origin as sessionOrigin,
-          s.handoff_goal as handoffGoal,
-          s.handoff_next_task as handoffNextTask,
-          snippet(session_text_chunks_fts, 0, ?, ?, ?, 12) as snippet,
+          c.session_id as sessionId,
+          snippet(session_text_chunks_fts, 0, ?, ?, ?, 16) as snippet,
           bm25(session_text_chunks_fts) as rank,
           c.entry_id as entryId,
           c.source_kind as sourceKind
         FROM session_text_chunks_fts
         JOIN session_text_chunks c ON c.id = session_text_chunks_fts.rowid
         JOIN sessions s ON s.session_id = c.session_id
-        WHERE session_text_chunks_fts MATCH ?
-          AND (? IS NULL OR s.modified_ts >= ?)
-          AND (? IS NULL OR s.created_ts <= ?)
-          AND (? IS NULL OR s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\')
+        ${where.sql}
+          ${where.sql ? "AND" : "WHERE"} session_text_chunks_fts MATCH ?
+          ${allowedSessionClause.sql}
+          ${excludeClause.sql}
         ORDER BY rank ASC, s.modified_ts DESC
+        LIMIT ?
       `,
       )
       .all(
         SEARCH_SNIPPET_MATCH_START,
         SEARCH_SNIPPET_MATCH_END,
         SEARCH_SNIPPET_ELLIPSIS,
-        match,
-        ...getSearchFilterBindings(filters),
+        ...where.args,
+        compiledQuery.match,
+        ...allowedSessionClause.args,
+        ...excludeClause.args,
+        limit,
       ),
     "Invalid text search rows",
   );
@@ -353,7 +343,12 @@ function getTextMatchRows(db: SessionIndexDatabase, filters: SearchFilters): Sea
 function getCandidateFileTouches(
   db: SessionIndexDatabase,
   filters: SearchFilters,
+  fileQueries: FileFilterQuery[],
 ): FileTouchMatchRow[] {
+  const where = buildSessionWhereClause("s", filters);
+  const basenames = [...new Set(fileQueries.map((query) => query.basename))];
+  const basenamePlaceholders = basenames.map(() => "?").join(", ");
+
   return parseTypeBoxRows(
     FILE_TOUCH_MATCH_ROW_SCHEMA,
     db
@@ -361,6 +356,7 @@ function getCandidateFileTouches(
         `
           SELECT
             f.session_id as sessionId,
+            f.entry_id as entryId,
             f.raw_path as rawPath,
             f.abs_path as absPath,
             f.cwd_rel_path as cwdRelPath,
@@ -369,41 +365,51 @@ function getCandidateFileTouches(
             f.op as op
           FROM session_file_touches f
           JOIN sessions s ON s.session_id = f.session_id
-          WHERE (? IS NULL OR s.modified_ts >= ?)
-            AND (? IS NULL OR s.created_ts <= ?)
-            AND (? IS NULL OR s.cwd = ? OR s.cwd LIKE ? ESCAPE '\\')
+          ${where.sql}
+            ${where.sql ? "AND" : "WHERE"} f.basename IN (${basenamePlaceholders})
+            AND f.op IN ('read', 'changed')
         `,
       )
-      .all(...getSearchFilterBindings(filters)),
+      .all(...where.args, ...basenames),
     "Invalid file touch match rows",
   );
 }
 
 function collectFileMatches(
   rows: FileTouchMatchRow[],
-  filters: SearchFilters,
+  fileQueries: FileFilterQuery[],
 ): Map<string, FileMatchSummary> {
   const accumulators = new Map<string, FileMatchAccumulator>();
 
-  for (const query of filters.touched) {
+  for (const query of fileQueries) {
     for (const row of rows) {
-      if (!matchesTouchedFileOp(row.op)) {
+      if (query.basename !== row.basename) {
         continue;
       }
 
-      const fileMatch = matchFileTouch(row, query);
+      if (query.op === "changed" && row.op !== "changed") {
+        continue;
+      }
+
+      const fileMatch = matchFileTouch(row, query.normalized);
       if (!fileMatch) {
         continue;
       }
 
       const accumulator = getFileMatchAccumulator(accumulators, row.sessionId);
-      const evidenceKey = `${normalizeSearchPath(query)}:${fileMatch.displayPath}`;
+      const evidenceKey = `${query.normalized}:${fileMatch.displayPath}:${row.op}`;
       if (accumulator.evidenceKeys.has(evidenceKey)) {
         continue;
       }
 
       accumulator.evidenceKeys.add(evidenceKey);
-      accumulator.matchedFiles.add(fileMatch.displayPath);
+      accumulator.evidence.push({
+        kind: "file_touch",
+        op: row.op,
+        query: query.query,
+        path: fileMatch.displayPath,
+        entryId: row.entryId ?? undefined,
+      });
     }
   }
 
@@ -411,24 +417,39 @@ function collectFileMatches(
     [...accumulators.entries()].map(([sessionId, accumulator]) => [
       sessionId,
       {
-        matchedFiles: [...accumulator.matchedFiles].sort(),
+        evidence: accumulator.evidence.sort(compareFileEvidence),
       },
     ]),
   );
 }
 
-function limitSearchResults(
+function limitBrowseResults(
   results: SearchSessionResult[],
   filters: SearchFilters,
 ): SearchSessionResult[] {
-  return typeof filters.limit === "number" ? results.slice(0, filters.limit) : results;
+  return applyDisplaySort(results, filters, false).slice(0, filters.limit);
+}
+
+function applyDisplaySort(
+  results: SearchSessionResult[],
+  filters: SearchFilters,
+  hasPositiveQuery: boolean,
+): SearchSessionResult[] {
+  const sort = filters.sort ?? (hasPositiveQuery ? "relevance" : "modified_desc");
+  if (sort === "modified_asc") {
+    return [...results].sort((a, b) => a.modifiedAt.localeCompare(b.modifiedAt));
+  }
+  if (sort === "modified_desc" || (!hasPositiveQuery && sort === "relevance")) {
+    return [...results].sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
+  }
+  return results;
 }
 
 function ensureSearchAccumulator(
   accumulators: Map<string, SearchResultAccumulator>,
   row: SessionListRow,
-  recencyIndex: number,
   fileMatches: Map<string, FileMatchSummary>,
+  nowMs: number,
 ): SearchResultAccumulator {
   const existing = accumulators.get(row.sessionId);
   if (existing) {
@@ -436,52 +457,75 @@ function ensureSearchAccumulator(
   }
 
   const nextAccumulator: SearchResultAccumulator = {
-    result: buildSearchResult(
-      row,
-      getDefaultSearchSnippet(row),
-      getRecencyScore(recencyIndex),
-      0,
-      fileMatches,
-    ),
+    result: buildSearchResult(row, scoreRecency(row.modifiedAt, nowMs), fileMatches),
     evidenceKeys: new Set<string>(),
-    snippetScore: 0,
+    textEvidenceCount: 0,
+    textScoreContributionCount: 0,
+    bestSnippetScore: Number.NEGATIVE_INFINITY,
   };
   accumulators.set(row.sessionId, nextAccumulator);
   return nextAccumulator;
 }
 
-function addSearchEvidence(
+function addSessionIdEvidence(
   accumulator: SearchResultAccumulator,
-  evidenceKey: string,
+  match: SessionIdMatchKind,
   score: number,
-  snippet: string | undefined,
-  snippetScore: number,
 ): void {
+  const evidenceKey = `session_id:${match}`;
   if (accumulator.evidenceKeys.has(evidenceKey)) {
     return;
   }
 
   accumulator.evidenceKeys.add(evidenceKey);
   accumulator.result.score += score;
-  accumulator.result.hitCount += 1;
+  accumulator.result.evidence.push({ kind: "session_id", match, score });
+}
 
-  if (snippet && snippetScore >= accumulator.snippetScore) {
-    accumulator.result.snippet = snippet;
-    accumulator.snippetScore = snippetScore;
+function addTextEvidence(
+  accumulator: SearchResultAccumulator,
+  row: SearchChunkRow,
+  score: number,
+): void {
+  const evidenceKey = getTextEvidenceKey(row);
+  if (accumulator.evidenceKeys.has(evidenceKey)) {
+    return;
+  }
+
+  accumulator.evidenceKeys.add(evidenceKey);
+
+  if (accumulator.textScoreContributionCount < MAX_SCORING_TEXT_HITS_PER_SESSION) {
+    accumulator.result.score += score;
+    accumulator.textScoreContributionCount += 1;
+  }
+
+  if (accumulator.textEvidenceCount < MAX_TEXT_EVIDENCE_PER_SESSION) {
+    accumulator.result.evidence.push({
+      kind: "text",
+      sourceKind: row.sourceKind,
+      snippet: row.snippet,
+      score,
+      entryId: row.entryId ?? undefined,
+    });
+    accumulator.textEvidenceCount += 1;
+  }
+
+  if (score > accumulator.bestSnippetScore) {
+    accumulator.result.snippet = row.snippet;
+    accumulator.bestSnippetScore = score;
   }
 }
 
-function getSearchEvidenceKey(row: SearchChunkRow): string {
+function getTextEvidenceKey(row: SearchChunkRow): string {
   return row.entryId ? `${row.entryId}:${row.sourceKind}` : `${row.sourceKind}:${row.snippet}`;
 }
 
 function buildSearchResult(
-  row: SessionListRow | SearchChunkRow,
-  snippet: string,
+  row: SessionListRow,
   score: number,
-  hitCount: number,
-  fileMatches: Map<string, FileMatchSummary> = new Map(),
+  fileMatches: Map<string, FileMatchSummary>,
 ): SearchSessionResult {
+  const fileEvidence = fileMatches.get(row.sessionId)?.evidence ?? [];
   return {
     sessionId: row.sessionId,
     sessionName: row.sessionName,
@@ -497,80 +541,74 @@ function buildSearchResult(
     sessionOrigin: row.sessionOrigin ?? undefined,
     handoffGoal: row.handoffGoal ?? undefined,
     handoffNextTask: row.handoffNextTask ?? undefined,
-    snippet,
-    matchedFiles: fileMatches.get(row.sessionId)?.matchedFiles ?? [],
+    snippet: "",
+    evidence: [...fileEvidence],
     score,
-    hitCount,
+    hitCount: fileEvidence.length,
   };
 }
 
-function getDefaultSearchSnippet(row: SessionListRow | SearchChunkRow): string {
-  return row.handoffNextTask || row.handoffGoal || row.sessionName || row.cwd;
-}
-
-function selectSearchSnippet(row: SearchChunkRow): string | undefined {
-  return row.sourceKind === "session_id" ? undefined : row.snippet;
-}
-
-function getSearchSourceWeight(sourceKind: string): number {
-  switch (sourceKind) {
-    case "session_name":
-      return SESSION_NAME_SCORE;
-    case "handoff_next_task":
-      return HANDOFF_NEXT_TASK_SCORE;
-    case "handoff_goal":
-      return HANDOFF_GOAL_SCORE;
-    default:
-      return DEFAULT_TEXT_SCORE;
-  }
-}
-
-function tokenizeSessionIdQuery(query: string): string[] {
-  const trimmed = query.trim();
-  if (!trimmed) {
-    return [];
+function tokenizeSessionIdQuery(query: string, positiveTerms: string[]): string[] {
+  const tokens = new Set<string>();
+  if (query.trim()) {
+    tokens.add(query.trim());
   }
 
-  return [...new Set<string>([trimmed, ...tokenizeSearchTerms(trimmed)])];
+  for (const term of positiveTerms) {
+    tokens.add(term);
+    if (term.startsWith("@session:")) {
+      tokens.add(term.slice("@session:".length));
+    }
+    for (const token of tokenizeSearchText(term)) {
+      tokens.add(token);
+    }
+  }
+
+  return [...tokens];
 }
 
-function getSessionIdEvidence(tokens: string[], sessionId: string): number | undefined {
+function getSessionIdEvidence(tokens: string[], sessionId: string): SessionIdEvidence | undefined {
   if (tokens.length === 0) {
     return undefined;
   }
 
   const canonicalSessionId = sessionId.toLowerCase();
   const compactSessionIdValue = compactSessionId(sessionId);
-  let bestScore: number | undefined;
+  let bestEvidence: SessionIdEvidence | undefined;
 
   for (const token of tokens) {
-    const score = getSessionIdEvidenceForToken(token, canonicalSessionId, compactSessionIdValue);
-    if (score !== undefined && (bestScore === undefined || score > bestScore)) {
-      bestScore = score;
+    const evidence = getSessionIdEvidenceForToken(token, canonicalSessionId, compactSessionIdValue);
+    if (evidence && (!bestEvidence || evidence.score > bestEvidence.score)) {
+      bestEvidence = evidence;
     }
   }
 
-  return bestScore;
+  return bestEvidence;
+}
+
+interface SessionIdEvidence {
+  kind: SessionIdMatchKind;
+  score: number;
 }
 
 function getSessionIdEvidenceForToken(
   token: string,
   canonicalSessionId: string,
   compactSessionIdValue: string,
-): number | undefined {
+): SessionIdEvidence | undefined {
   const canonicalToken = token.trim().toLowerCase();
   const compactToken = compactSearchValue(token);
 
   if (canonicalToken.length >= 8) {
     if (canonicalToken === canonicalSessionId || compactToken === compactSessionIdValue) {
-      return SESSION_ID_EXACT_SCORE;
+      return { kind: "exact", score: scoreSessionIdMatch("exact", compactToken.length) };
     }
 
     if (
       canonicalSessionId.startsWith(canonicalToken) ||
       (compactToken.length >= 8 && compactSessionIdValue.startsWith(compactToken))
     ) {
-      return SESSION_ID_PREFIX_SCORE + canonicalToken.length;
+      return { kind: "prefix", score: scoreSessionIdMatch("prefix", compactToken.length) };
     }
   }
 
@@ -578,35 +616,135 @@ function getSessionIdEvidenceForToken(
     compactToken.length >= 8 &&
     (canonicalSessionId.includes(canonicalToken) || compactSessionIdValue.includes(compactToken))
   ) {
-    return SESSION_ID_SUBSTRING_SCORE + compactToken.length;
+    return { kind: "substring", score: scoreSessionIdMatch("substring", compactToken.length) };
   }
 
   return undefined;
 }
 
-function getRecencyScore(recencyIndex: number): number {
-  return Math.max(1, Math.round(RECENCY_BASE_SCORE / (recencyIndex + 1)));
+function buildSessionWhereClause(alias: string, filters: SearchFilters): SqlClause {
+  const conditions: string[] = [];
+  const args: Array<string | number | null> = [];
+
+  if (filters.after) {
+    conditions.push(`${alias}.modified_ts >= ?`);
+    args.push(filters.after);
+  }
+
+  if (filters.before) {
+    conditions.push(`${alias}.created_ts <= ?`);
+    args.push(filters.before);
+  }
+
+  if (filters.cwd) {
+    conditions.push(`(${alias}.cwd = ? OR ${alias}.cwd LIKE ? ESCAPE '\\')`);
+    args.push(filters.cwd, filters.cwdLike ?? `${escapeLikePrefix(filters.cwd)}%`);
+  }
+
+  if (filters.excludeSessionIds.length > 0) {
+    conditions.push(
+      `${alias}.session_id NOT IN (${filters.excludeSessionIds.map(() => "?").join(", ")})`,
+    );
+    args.push(...filters.excludeSessionIds);
+  }
+
+  const repoClause = buildRepoFilterClause(alias, filters.repo);
+  if (repoClause) {
+    conditions.push(repoClause.sql);
+    args.push(...repoClause.args);
+  }
+
+  return {
+    sql: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "",
+    args,
+  };
 }
 
-function getSearchFilterBindings(
-  filters: SearchFilters,
-): [
-  string | null,
-  string | null,
-  string | null,
-  string | null,
-  string | null,
-  string | null,
-  string | null,
-] {
+function buildRepoFilterClause(alias: string, rawRepo: string | undefined): SqlClause | undefined {
+  if (!rawRepo) {
+    return undefined;
+  }
+
+  const repo = normalizeSearchPath(rawRepo);
+  if (!repo) {
+    return undefined;
+  }
+
+  if (path.isAbsolute(repo) || repo.includes("/")) {
+    return {
+      sql: `EXISTS (
+        SELECT 1 FROM session_repo_roots r
+        WHERE r.session_id = ${alias}.session_id
+          AND (r.repo_root = ? OR r.repo_root LIKE ? ESCAPE '\\')
+      )`,
+      args: [repo, `%${escapeLikePrefix(repo)}`],
+    };
+  }
+
+  return {
+    sql: `EXISTS (
+      SELECT 1 FROM session_repo_roots r
+      WHERE r.session_id = ${alias}.session_id AND r.repo_basename = ?
+    )`,
+    args: [repo],
+  };
+}
+
+function buildAllowedSessionClause(
+  alias: string,
+  allowedSessionIds: Set<string> | undefined,
+): SqlClause {
+  if (!allowedSessionIds || allowedSessionIds.size === 0) {
+    return { sql: "", args: [] };
+  }
+
+  const sessionIds = [...allowedSessionIds];
+  return {
+    sql: `AND ${alias}.session_id IN (${sessionIds.map(() => "?").join(", ")})`,
+    args: sessionIds,
+  };
+}
+
+function buildExcludeClause(excludes: string[]): SqlClause {
+  if (excludes.length === 0) {
+    return { sql: "", args: [] };
+  }
+
+  return {
+    sql: excludes
+      .map(
+        () => `AND s.session_id NOT IN (
+          SELECT excluded_chunks.session_id
+          FROM session_text_chunks_fts
+          JOIN session_text_chunks excluded_chunks ON excluded_chunks.id = session_text_chunks_fts.rowid
+          WHERE session_text_chunks_fts MATCH ?
+        )`,
+      )
+      .join("\n"),
+    args: excludes,
+  };
+}
+
+function buildFileFilterQueries(filters: SearchFilters): FileFilterQuery[] {
   return [
-    filters.after ?? null,
-    filters.after ?? null,
-    filters.before ?? null,
-    filters.before ?? null,
-    filters.cwd ?? null,
-    filters.cwd ?? null,
-    filters.cwdLike ?? null,
+    ...filters.touched.flatMap((query) => buildFileFilterQuery(query, "touched")),
+    ...filters.changed.flatMap((query) => buildFileFilterQuery(query, "changed")),
+  ];
+}
+
+function buildFileFilterQuery(rawQuery: string, op: "touched" | "changed"): FileFilterQuery[] {
+  const normalized = normalizeSearchPath(rawQuery);
+  if (!normalized) {
+    return [];
+  }
+
+  return [
+    {
+      query: rawQuery,
+      normalized,
+      basename: path.basename(normalized.replace(/[/]+$/, "")) || normalized,
+      op,
+    },
   ];
 }
 
@@ -620,23 +758,14 @@ function getFileMatchAccumulator(
   }
 
   const nextAccumulator: FileMatchAccumulator = {
-    matchedFiles: new Set<string>(),
+    evidence: [],
     evidenceKeys: new Set<string>(),
   };
   accumulators.set(sessionId, nextAccumulator);
   return nextAccumulator;
 }
 
-function matchesTouchedFileOp(actualOp: FileTouchOp): boolean {
-  return actualOp === "read" || actualOp === "changed";
-}
-
-function matchFileTouch(row: FileTouchMatchRow, rawQuery: string): FilePathMatch | undefined {
-  const query = normalizeSearchPath(rawQuery);
-  if (!query) {
-    return undefined;
-  }
-
+function matchFileTouch(row: FileTouchMatchRow, query: string): FilePathMatch | undefined {
   if (path.isAbsolute(query)) {
     return matchAbsolutePath(row, query);
   }
@@ -648,7 +777,6 @@ function matchFileTouch(row: FileTouchMatchRow, rawQuery: string): FilePathMatch
   return row.basename === query
     ? {
         displayPath: row.repoRelPath ?? row.cwdRelPath ?? row.absPath ?? row.rawPath,
-        score: 1,
       }
     : undefined;
 }
@@ -658,11 +786,11 @@ function matchAbsolutePath(row: FileTouchMatchRow, query: string): FilePathMatch
     return undefined;
   }
 
-  if (row.absPath === query) {
-    return { displayPath: row.absPath, score: 3 };
+  if (row.absPath === query || row.absPath.endsWith(query)) {
+    return { displayPath: row.absPath };
   }
 
-  return row.absPath.endsWith(query) ? { displayPath: row.absPath, score: 2.5 } : undefined;
+  return undefined;
 }
 
 function matchRelativePath(row: FileTouchMatchRow, query: string): FilePathMatch | undefined {
@@ -671,18 +799,35 @@ function matchRelativePath(row: FileTouchMatchRow, query: string): FilePathMatch
   );
 
   for (const candidate of candidates) {
-    if (candidate === query) {
-      return { displayPath: candidate, score: 2.5 };
-    }
-
-    if (candidate.endsWith(`/${query}`)) {
-      return { displayPath: candidate, score: 2 };
+    if (candidate === query || candidate.endsWith(`/${query}`)) {
+      return { displayPath: candidate };
     }
   }
 
   return undefined;
 }
 
+function compareByRelevance(a: SearchSessionResult, b: SearchSessionResult): number {
+  if (b.score !== a.score) {
+    return b.score - a.score;
+  }
+
+  return b.modifiedAt.localeCompare(a.modifiedAt);
+}
+
+function compareFileEvidence(a: FileTouchEvidence, b: FileTouchEvidence): number {
+  const pathDiff = a.path.localeCompare(b.path);
+  if (pathDiff !== 0) {
+    return pathDiff;
+  }
+
+  return a.op.localeCompare(b.op);
+}
+
+function getBrowseSort(filters: SearchFilters): "modified_desc" | "modified_asc" {
+  return filters.sort === "modified_asc" ? "modified_asc" : "modified_desc";
+}
+
 function hasFileFilters(filters: SearchFilters): boolean {
-  return filters.touched.length > 0;
+  return filters.touched.length > 0 || filters.changed.length > 0;
 }

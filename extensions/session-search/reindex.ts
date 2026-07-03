@@ -66,6 +66,7 @@ function dropIndexTables(db: SessionIndexDatabase): void {
   // implicit DELETE that parent-side constraints would reject.
   db.exec(`
     DROP TABLE IF EXISTS session_lineage_relations;
+    DROP TABLE IF EXISTS session_repo_roots;
     DROP TABLE IF EXISTS session_text_chunks;
     DROP TABLE IF EXISTS session_file_touches;
     DROP TABLE IF EXISTS session_text_chunks_fts;

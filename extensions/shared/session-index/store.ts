@@ -1,7 +1,7 @@
+import path from "node:path";
 import { type Static, Type } from "typebox";
 import { parseTypeBoxValue } from "../typebox.ts";
 import {
-  compactSessionId,
   INDEX_SCHEMA_VERSION,
   NULLABLE_STRING_SCHEMA,
   parseRepoRoots,
@@ -76,7 +76,7 @@ export function insertSession(
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(...sessionRowBindings(row, indexSource));
-  insertSessionIdChunk(db, row);
+  syncSessionRepoRoots(db, row);
 }
 
 export function upsertSession(
@@ -117,7 +117,7 @@ export function upsertSession(
         index_source = excluded.index_source
     `,
   ).run(...sessionRowBindings(row, indexSource));
-  syncSessionIdChunk(db, row);
+  syncSessionRepoRoots(db, row);
 }
 
 export function getSessionRowByPath(
@@ -186,24 +186,15 @@ function buildSessionRow(row: Static<typeof SESSION_ROW_QUERY_SCHEMA>): SessionR
   };
 }
 
-function insertSessionIdChunk(db: SessionIndexDatabase, row: SessionRow): void {
-  insertTextChunk(db, {
-    sessionId: row.sessionId,
-    entryType: "session_info",
-    ts: row.modifiedAt,
-    sourceKind: "session_id",
-    text: buildSessionIdSearchText(row.sessionId),
-  });
-}
+function syncSessionRepoRoots(db: SessionIndexDatabase, row: SessionRow): void {
+  db.prepare(`DELETE FROM session_repo_roots WHERE session_id = ?`).run(row.sessionId);
 
-function syncSessionIdChunk(db: SessionIndexDatabase, row: SessionRow): void {
-  clearSessionChunksBySourceKind(db, row.sessionId, "session_id");
-  insertSessionIdChunk(db, row);
-}
-
-function buildSessionIdSearchText(sessionId: string): string {
-  const compact = compactSessionId(sessionId);
-  return compact === sessionId ? sessionId : `${sessionId} ${compact}`;
+  const insert = db.prepare(
+    `INSERT INTO session_repo_roots(session_id, repo_root, repo_basename) VALUES (?, ?, ?)`,
+  );
+  for (const repoRoot of [...new Set(row.repoRoots)]) {
+    insert.run(row.sessionId, repoRoot, path.basename(repoRoot));
+  }
 }
 
 export function clearSessionChunksBySourceKind(

@@ -847,7 +847,7 @@ describe("session-search hooks", () => {
     ]);
   });
 
-  it("keeps the session-id search chunk after a hook sync", async () => {
+  it("searches session ids without storing session-id FTS chunks after a hook sync", async () => {
     const root = testFs.createTempDir();
     const indexPath = path.join(root, "index.sqlite");
     const cwd = "/repo/app";
@@ -875,9 +875,14 @@ describe("session-search hooks", () => {
         `SELECT COUNT(*) as count FROM session_text_chunks WHERE session_id = ? AND source_kind = 'session_id'`,
       )
       .get("0196fb52-f615-7321-a3b6-9e0e1a90d4c2") as { count: number };
+    const hits = searchSessions(indexedDb, {
+      query: "0196fb52-f615-7321-a3b6-9e0e1a90d4c2",
+      limit: 10,
+    });
     indexedDb.close();
 
-    expect(idChunks.count).toBe(1);
+    expect(idChunks.count).toBe(0);
+    expect(hits[0]?.sessionId).toBe("0196fb52-f615-7321-a3b6-9e0e1a90d4c2");
   });
 });
 

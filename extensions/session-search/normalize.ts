@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-export type FileTouchOp = "changed" | "read" | "touched";
+export type FileTouchOp = "changed" | "read";
 export type FileTouchSource = "tool_call" | "branch_summary_details" | "compaction_details";
 export type PathScope = "absolute" | "relative" | "basename";
 

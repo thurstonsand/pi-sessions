@@ -44,35 +44,26 @@ describe("session_search tool", () => {
   it("returns a validation error for invalid date filters", async () => {
     const tool = registerSessionSearchTool();
 
-    const result = await tool.execute(
-      "tool-1",
-      { time: { after: "not-a-date" } },
-      undefined,
-      undefined,
-      undefined as never,
-    );
-
-    expect(result.details).toMatchObject({ error: true });
-    expect(result.content[0]?.type).toBe("text");
-    expect((result.content[0] as { text: string }).text).toContain("Invalid time.after value");
+    await expect(
+      tool.execute(
+        "tool-1",
+        { time: { after: "not-a-date" } },
+        undefined,
+        undefined,
+        undefined as never,
+      ),
+    ).rejects.toThrow("Invalid time.after value");
   });
 
   it("returns a validation error for non-positive limit", async () => {
     const tool = registerSessionSearchTool();
 
-    const result = await tool.execute(
-      "tool-1",
-      { limit: 0 },
-      undefined,
-      undefined,
-      undefined as never,
-    );
-
-    expect(result.details).toMatchObject({ error: true });
-    expect((result.content[0] as { text: string }).text).toContain("limit must be greater than 0");
+    await expect(
+      tool.execute("tool-1", { limit: 0 }, undefined, undefined, undefined as never),
+    ).rejects.toThrow("limit must be greater than 0");
   });
 
-  it("formats visible output grouped by cwd without path or updated fields", async () => {
+  it("returns structured model output and keeps visible output compact", async () => {
     const agentDir = testFs.createTempDir();
     const cwd = testFs.createTempDir();
     const dir = testFs.createTempDir();
@@ -127,14 +118,39 @@ describe("session_search tool", () => {
       createToolContext(cwd),
     );
     const text = (result.content[0] as { text: string }).text;
+    const modelOutput = JSON.parse(text) as { results: Array<{ sessionId: string; cwd: string }> };
 
-    expect(text).toContain("cwd: /repo/app\nSecond title: session-2");
-    expect(text).toContain("Visible title: session-1");
-    expect(text.match(/cwd: \/repo\/app/g)).toHaveLength(1);
-    expect(text).not.toContain("path:");
-    expect(text).not.toContain("updated:");
-    expect(text).not.toContain("\n\n\n");
-    expect(text).not.toContain("score:");
+    expect(modelOutput.results).toMatchObject([
+      { sessionId: "session-2", cwd: "/repo/app" },
+      { sessionId: "session-1", cwd: "/repo/app" },
+    ]);
+
+    const component = new ToolExecutionComponent(
+      tool.name,
+      "tool-1",
+      { cwd: "/repo" },
+      undefined,
+      tool,
+      createFakeTui(),
+      "/repo",
+    );
+    component.updateResult(
+      {
+        content: result.content,
+        details: result.details,
+        isError: false,
+      },
+      false,
+    );
+    component.setExpanded(true);
+    const rendered = stripAnsi(component.render(120).join("\n"));
+
+    expect(rendered).toContain("1. Second title");
+    expect(rendered).toContain("2. Visible title");
+    expect(rendered).not.toContain("sessionPath");
+    expect(rendered).not.toContain("modifiedAt");
+    expect(rendered).not.toContain("\n\n\n");
+    expect(rendered).not.toContain("score:");
   });
 
   it("strips internal snippet markers from tool text and brackets them in the rendered panel", async () => {
@@ -185,8 +201,18 @@ describe("session_search tool", () => {
       createToolContext("/repo"),
     );
     const text = (result.content[0] as { text: string }).text;
+    const modelOutput = JSON.parse(text) as {
+      results: Array<{ snippet: string; evidence: Array<{ kind: string; snippet?: string }> }>;
+    };
 
-    expect(text).toContain("snippet: search hit");
+    expect(modelOutput.results[0]?.snippet).toBe("search hit");
+    expect(modelOutput.results[0]?.evidence).toContainEqual({
+      kind: "text",
+      sourceKind: "assistant_text",
+      snippet: "search hit",
+      score: expect.any(Number),
+      entryId: "entry-matched",
+    });
     expect(text).not.toContain(SEARCH_SNIPPET_MATCH_START);
     expect(text).not.toContain(SEARCH_SNIPPET_MATCH_END);
 

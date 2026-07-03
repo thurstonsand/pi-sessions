@@ -3,7 +3,7 @@ import type { FileTouchOp, FileTouchSource, PathScope } from "../../session-sear
 import { safeParseTypeBoxJson } from "../typebox.ts";
 import type { SqliteDatabase } from "./sqlite.ts";
 
-export const INDEX_SCHEMA_VERSION = 8;
+export const INDEX_SCHEMA_VERSION = 9;
 
 export type SessionOrigin = "handoff" | "fork" | "unknown_child";
 export type SessionLineageRelation =
@@ -13,6 +13,8 @@ export type SessionLineageRelation =
   | "descendant"
   | "sibling"
   | "ancestor_sibling";
+
+export type SearchSort = "relevance" | "modified_desc" | "modified_asc";
 
 export interface SessionRow {
   sessionId: string;
@@ -89,9 +91,32 @@ export interface SearchSessionsParams {
   after?: string | undefined;
   before?: string | undefined;
   touched?: string[] | undefined;
+  changed?: string[] | undefined;
+  sort?: SearchSort | undefined;
   limit?: number | undefined;
   excludeSessionIds?: string[] | undefined;
 }
+
+export type SessionSearchEvidence =
+  | {
+      kind: "text";
+      sourceKind: string;
+      snippet: string;
+      score: number;
+      entryId?: string | undefined;
+    }
+  | {
+      kind: "file_touch";
+      op: "read" | "changed";
+      query: string;
+      path: string;
+      entryId?: string | undefined;
+    }
+  | {
+      kind: "session_id";
+      match: "exact" | "prefix" | "substring";
+      score: number;
+    };
 
 export interface SearchSessionResult {
   sessionId: string;
@@ -109,7 +134,7 @@ export interface SearchSessionResult {
   handoffGoal?: string | undefined;
   handoffNextTask?: string | undefined;
   snippet: string;
-  matchedFiles: string[];
+  evidence: SessionSearchEvidence[];
   score: number;
   hitCount: number;
 }
@@ -150,7 +175,7 @@ export function parseRepoRoots(value: string): string[] {
 }
 
 export function escapeLikePrefix(value: string): string {
-  return value.replace(/[%_]/g, "\\$&");
+  return value.replace(/[%_\\]/g, "\\$&");
 }
 
 export function normalizeTimeFilter(value?: string): string | undefined {
@@ -160,7 +185,7 @@ export function normalizeTimeFilter(value?: string): string | undefined {
 
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
-    return undefined;
+    throw new Error(`Invalid time filter value: ${value}`);
   }
 
   return date.toISOString();
@@ -174,52 +199,17 @@ export function sanitizeFilterValues(values?: string[]): string[] {
   return values.map((value) => value.trim()).filter((value) => value.length > 0);
 }
 
-export function boostIndependentHits(hitCount: number): number {
-  return hitCount > 1 ? (hitCount - 1) * 0.75 : 0;
-}
-
-export function buildFtsQuery(query: string): string | undefined {
-  const trimmed = query.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-
-  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
-    const exact = sanitizeFtsToken(trimmed.slice(1, -1));
-    return exact ? quoteFtsToken(exact) : undefined;
-  }
-
-  const tokens = tokenizeSearchTerms(trimmed);
-  if (tokens.length === 0) {
-    return undefined;
-  }
-
-  return tokens.map(quoteFtsPrefixToken).join(" AND ");
-}
-
-export function tokenizeSearchTerms(query: string): string[] {
-  return query
-    .split(/\s+/)
-    .flatMap((token) => sanitizeFtsToken(token).split(/\s+/))
-    .filter((token) => token.length > 0);
-}
-
-export function sanitizeFtsToken(token: string): string {
-  return token.replace(/[^A-Za-z0-9_]+/g, " ").trim();
-}
-
-export function quoteFtsToken(token: string): string {
-  return `"${token.replace(/"/g, '""')}"`;
-}
-
-export function quoteFtsPrefixToken(token: string): string {
-  return `${quoteFtsToken(token)}*`;
-}
-
 export function compactSearchValue(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 export function compactSessionId(value: string): string {
   return value.toLowerCase().replace(/-/g, "");
+}
+
+export function tokenizeSearchText(value: string): string[] {
+  return value
+    .split(/[^A-Za-z0-9_]+/g)
+    .map((token) => token.trim())
+    .filter((token) => token.length > 0);
 }

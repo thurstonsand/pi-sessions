@@ -9,7 +9,7 @@ import type {
   ExtensionUIContext,
 } from "@earendil-works/pi-coding-agent";
 import { buildSessionContext, SessionManager } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey } from "@earendil-works/pi-tui";
+import { Key, matchesKey, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import {
   generateHandoffDraft,
@@ -62,7 +62,6 @@ interface HandoffToolParams {
 }
 
 interface HandoffToolDetails {
-  error: boolean;
   sessionId?: string | undefined;
   title?: string | undefined;
   splitDirection?: HandoffSplitDirection | undefined;
@@ -118,6 +117,23 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
           }),
         ),
       }),
+      renderResult(result, _options, theme, context) {
+        const text = getFirstText(result);
+        if (context.isError) {
+          return new Text(theme.fg("error", text), 0, 0);
+        }
+
+        const details = result.details as HandoffToolDetails | undefined;
+        if (!details?.sessionId || !details.splitDirection || !details.cwd) {
+          return new Text(text, 0, 0);
+        }
+
+        return new Text(
+          `Started handoff session ${theme.bold(details.sessionId)} (${details.splitDirection}) in ${theme.fg("dim", details.cwd)}.`,
+          0,
+          0,
+        );
+      },
       async execute(_toolCallId, params: HandoffToolParams, _signal, _onUpdate, ctx) {
         return executeSessionHandoffTool(pi, params, ctx, identifiedGhosttyTerminalId);
       },
@@ -361,30 +377,30 @@ async function executeSessionHandoffTool(
 ) {
   const goal = params.goal.trim();
   if (!goal) {
-    return createHandoffToolError("session_handoff requires a goal.");
+    throw new Error("session_handoff requires a goal.");
   }
 
   if (!ctx.model) {
-    return createHandoffToolError("No model selected.");
+    throw new Error("No model selected.");
   }
 
   const preflightError = await validateSplitHandoffPrerequisites(pi, ctx);
   if (preflightError) {
-    return createHandoffToolError(preflightError);
+    throw new Error(preflightError);
   }
 
   if (!terminalId) {
-    return createHandoffToolError(NO_IDENTIFIED_TERMINAL_MESSAGE);
+    throw new Error(NO_IDENTIFIED_TERMINAL_MESSAGE);
   }
 
   const targetCwd = resolveHandoffCwd(ctx.cwd, params.cwd);
   if (targetCwd.error) {
-    return createHandoffToolError(targetCwd.message);
+    throw new Error(targetCwd.message);
   }
 
   const parentSessionFile = ctx.sessionManager.getSessionFile();
   if (!parentSessionFile) {
-    return createHandoffToolError("Handoff requires a persisted current session.");
+    throw new Error("Handoff requires a persisted current session.");
   }
 
   const sessionContext = buildSessionContext(
@@ -392,7 +408,7 @@ async function executeSessionHandoffTool(
     ctx.sessionManager.getLeafId(),
   );
   if (sessionContext.messages.length === 0) {
-    return createHandoffToolError("No conversation to hand off.");
+    throw new Error("No conversation to hand off.");
   }
 
   const requestResponse = params.requestResponse ?? false;
@@ -425,7 +441,7 @@ async function executeSessionHandoffTool(
   });
 
   if (!launchResult.success) {
-    return createHandoffToolError(
+    throw new Error(
       `${launchResult.error} Created handoff session ${createdSession.sessionId}; start it manually with: ${buildPiResumeCommand(
         ctx.sessionManager.getSessionDir(),
         createdSession.sessionId,
@@ -433,17 +449,10 @@ async function executeSessionHandoffTool(
         TOOL_HANDOFF_PROVISIONAL_TITLE,
         model,
       )}`,
-      {
-        sessionId: createdSession.sessionId,
-        title: TOOL_HANDOFF_PROVISIONAL_TITLE,
-        splitDirection: params.splitDirection,
-        cwd: targetCwd.path,
-      },
     );
   }
 
   const details: HandoffToolDetails = {
-    error: false,
     sessionId: createdSession.sessionId,
     title: TOOL_HANDOFF_PROVISIONAL_TITLE,
     splitDirection: params.splitDirection,
@@ -454,7 +463,7 @@ async function executeSessionHandoffTool(
     content: [
       {
         type: "text" as const,
-        text: `Started handoff session ${createdSession.sessionId} (${params.splitDirection}) in ${targetCwd.path}.`,
+        text: formatHandoffToolResultForModel(details, requestResponse),
       },
     ],
     details,
@@ -527,16 +536,15 @@ async function startChildGeneratedHandoff(
   }
 }
 
-function createHandoffToolError(message: string, details: Partial<HandoffToolDetails> = {}) {
-  const resultDetails: HandoffToolDetails = {
-    error: true,
-    ...details,
-  };
+function formatHandoffToolResultForModel(
+  details: HandoffToolDetails,
+  requestResponse: boolean,
+): string {
+  return JSON.stringify({ ...details, requestResponse }, null, 2);
+}
 
-  return {
-    content: [{ type: "text" as const, text: message }],
-    details: resultDetails,
-  };
+function getFirstText(result: { content: Array<{ type: string; text?: string }> }): string {
+  return result.content.find((item) => item.type === "text")?.text ?? "";
 }
 
 function resolveHandoffCwd(

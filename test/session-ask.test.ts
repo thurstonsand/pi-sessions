@@ -36,35 +36,29 @@ describe("session_ask tool", () => {
   it("requires a non-empty question", async () => {
     const tool = registerSessionAskTool();
 
-    const result = await tool.execute(
-      "tool-1",
-      { session: "12345678-1234-1234-1234-123456789abc", question: "   " },
-      undefined,
-      undefined,
-      createToolContext(testFs.createTempDir()),
-    );
-
-    expect(result.details).toMatchObject({ error: true });
-    expect((result.content[0] as { text: string }).text).toContain(
-      "session_ask requires a question.",
-    );
+    await expect(
+      tool.execute(
+        "tool-1",
+        { session: "12345678-1234-1234-1234-123456789abc", question: "   " },
+        undefined,
+        undefined,
+        createToolContext(testFs.createTempDir()),
+      ),
+    ).rejects.toThrow("session_ask requires a question.");
   });
 
   it("rejects non-uuid session references", async () => {
     const tool = registerSessionAskTool();
 
-    const result = await tool.execute(
-      "tool-1",
-      { session: "@handoff/12345678", question: "What happened?" },
-      undefined,
-      undefined,
-      createToolContext(testFs.createTempDir()),
-    );
-
-    expect(result.details).toMatchObject({ error: true });
-    expect((result.content[0] as { text: string }).text).toContain(
-      "requires an exact session UUID",
-    );
+    await expect(
+      tool.execute(
+        "tool-1",
+        { session: "@handoff/12345678", question: "What happened?" },
+        undefined,
+        undefined,
+        createToolContext(testFs.createTempDir()),
+      ),
+    ).rejects.toThrow("requires an exact session UUID");
   });
 
   it("returns a friendly error for a missing indexed session id", async () => {
@@ -81,16 +75,15 @@ describe("session_ask tool", () => {
     db.close();
 
     const tool = registerSessionAskTool();
-    const result = await tool.execute(
-      "tool-1",
-      { session: "12345678-1234-1234-1234-123456789abc", question: "What happened?" },
-      undefined,
-      undefined,
-      createToolContext(root),
-    );
-
-    expect(result.details).toMatchObject({ error: true });
-    expect((result.content[0] as { text: string }).text).toContain("No indexed session found");
+    await expect(
+      tool.execute(
+        "tool-1",
+        { session: "12345678-1234-1234-1234-123456789abc", question: "What happened?" },
+        undefined,
+        undefined,
+        createToolContext(root),
+      ),
+    ).rejects.toThrow("No indexed session found");
   });
 
   it("resolves an exact session id through the index", async () => {

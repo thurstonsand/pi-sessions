@@ -116,7 +116,15 @@ describe("rebuildSessionIndex", () => {
     expect(hits).toHaveLength(1);
     expect(hits[0]?.snippet).toContain("session");
     expect(fileHits).toHaveLength(1);
-    expect(fileHits[0]?.matchedFiles).toEqual(["app/src/index.ts"]);
+    expect(fileHits[0]?.evidence).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "file_touch",
+          op: "changed",
+          path: "app/src/index.ts",
+        }),
+      ]),
+    );
   });
 
   it("persists unknown child lineage during full reindex", async () => {

@@ -1,7 +1,7 @@
 import type { Message } from "@earendil-works/pi-ai";
 import { complete } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
-import { Text } from "@earendil-works/pi-tui";
+import { getKeybindings, type Keybinding, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type RenderedSessionTree, renderSessionTreeMarkdown } from "./session-search/extract.ts";
 import {
@@ -26,8 +26,6 @@ interface SessionAskToolParams {
 }
 
 interface SessionAskToolDetails {
-  cancelled?: boolean | undefined;
-  error?: boolean | undefined;
   answer?: string | undefined;
   question?: string | undefined;
   sessionId?: string | undefined;
@@ -61,32 +59,26 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
     async execute(_toolCallId, params: SessionAskToolParams, signal, onUpdate, ctx) {
       const sessionId = params.session.trim();
       if (!sessionId) {
-        return errorResult("session_ask requires a session id.", { error: true });
+        throw new Error("session_ask requires a session id.");
       }
 
       const question = params.question.trim();
       if (!question) {
-        return errorResult("session_ask requires a question.", { error: true, sessionId });
+        throw new Error("session_ask requires a question.");
       }
 
       const resolvedTarget = resolveSessionAskTarget(sessionId, settings.index.path);
       if (!resolvedTarget.resolved) {
-        return errorResult(resolvedTarget.error ?? "Unable to resolve session id.", {
-          error: true,
-          sessionId,
-          question,
-        });
+        throw new Error(resolvedTarget.error ?? "Unable to resolve session id.");
       }
 
       if (!ctx.model) {
-        return errorResult("No active model is available for session_ask.", { error: true });
+        throw new Error("No active model is available for session_ask.");
       }
 
       const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
       if (!auth.ok || !auth.apiKey) {
-        return errorResult(`No API key is available for ${ctx.model.provider}/${ctx.model.id}.`, {
-          error: true,
-        });
+        throw new Error(`No API key is available for ${ctx.model.provider}/${ctx.model.id}.`);
       }
 
       const progressDetails: SessionAskToolDetails = {
@@ -104,12 +96,7 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
       try {
         rendered = renderSessionTreeMarkdown(resolvedTarget.resolved.sessionPath);
       } catch (error) {
-        return errorResult(formatSessionAskLoadError(resolvedTarget.resolved.sessionPath, error), {
-          error: true,
-          sessionId,
-          sessionPath: resolvedTarget.resolved.sessionPath,
-          question,
-        });
+        throw new Error(formatSessionAskLoadError(resolvedTarget.resolved.sessionPath, error));
       }
 
       const loadedDetails: SessionAskToolDetails = {
@@ -155,7 +142,7 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
       );
 
       if (response.stopReason === "aborted") {
-        return errorResult("Session ask was cancelled.", { cancelled: true });
+        throw new Error("Session ask was cancelled.");
       }
 
       const answer = collectTextBlocks(response.content).join("\n").trim();
@@ -180,15 +167,19 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         details,
       };
     },
-    renderResult(result, { expanded, isPartial }, theme) {
+    renderResult(result, { expanded, isPartial }, theme, context) {
       const details = result.details as SessionAskToolDetails | undefined;
       const content = result.content[0];
       if (content?.type !== "text") {
         return new Text(theme.fg("error", "No session output"), 0, 0);
       }
 
+      if (context.isError) {
+        return new Text(theme.fg("error", content.text), 0, 0);
+      }
+
       if (isPartial) {
-        const lines = [theme.bold(theme.fg("warning", "Reading session..."))];
+        const lines: string[] = [];
         if (details?.sessionId || details?.sessionName) {
           const identity = formatSessionTitleOrShortId(details.sessionName, details.sessionId);
           lines.push(`title: ${theme.fg("accent", identity)}`);
@@ -197,14 +188,6 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
           lines.push(theme.fg("muted", `prompt: ${details.question}`));
         }
         return new Text(lines.join("\n"), 0, 0);
-      }
-
-      if (details?.cancelled) {
-        return new Text(theme.fg("warning", content.text), 0, 0);
-      }
-
-      if (details?.error) {
-        return new Text(theme.fg("error", content.text), 0, 0);
       }
 
       const answer = (details?.answer ?? "").trim() || "No answer generated.";
@@ -266,23 +249,27 @@ function formatSessionAskHeader(sessionId: string, sessionName: string, question
   ].join("\n");
 }
 
-function errorResult(
-  text: string,
-  details: SessionAskToolDetails,
-): { content: Array<{ type: "text"; text: string }>; details: SessionAskToolDetails } {
-  return {
-    content: [{ type: "text", text }],
-    details,
-  };
-}
-
 function formatSessionAskAnswerPreview(answer: string, expanded: boolean, theme: Theme): string[] {
   const lines = answer.split(/\r?\n/);
   if (expanded || lines.length <= COLLAPSED_ANSWER_PREVIEW_ROWS) {
     return lines;
   }
 
-  return [...lines.slice(0, COLLAPSED_ANSWER_PREVIEW_ROWS), theme.fg("dim", "...")];
+  return [
+    ...lines.slice(0, COLLAPSED_ANSWER_PREVIEW_ROWS),
+    formatOverflowHint(lines.length - COLLAPSED_ANSWER_PREVIEW_ROWS, lines.length, theme),
+  ];
+}
+
+function formatOverflowHint(remaining: number, total: number, theme: Theme): string {
+  return `${theme.fg("muted", `... (${remaining} more lines, ${total} total,`)} ${theme.fg(
+    "dim",
+    formatKeyHint("app.tools.expand"),
+  )}${theme.fg("muted", " to expand)")}`;
+}
+
+function formatKeyHint(keybinding: Keybinding): string {
+  return getKeybindings().getKeys(keybinding).join("/");
 }
 
 function formatSessionAskLoadError(sessionPath: string, error: unknown): string {

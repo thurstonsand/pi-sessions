@@ -32,13 +32,14 @@ Expected:
 Prompt Pi to call the tool:
 
 ```text
-Use session_search with query "session_query" and limit 3.
+Use session_search with query "session_query OR \"session search\"" and limit 3.
 ```
 
 Expected:
 
 - ranked session rows are returned
-- snippets come from indexed session text
+- evidence includes snippets from indexed session text
+- snippet markers are rendered for matched terms
 
 ## 4. Verify follow-up analysis
 
@@ -93,13 +94,13 @@ Verification prompt:
 
 ```bash
 cd "$SMOKE_DIR"
-pi -e ~/Develop/pi-sessions -p "Use session_search with repo \"$SMOKE_DIR\" and files.touched [\"smoke/generated.txt\"]. Return the session id and matched files only."
+pi -e ~/Develop/pi-sessions -p "Use session_search with repo \"$SMOKE_DIR\" and files.changed [\"smoke/generated.txt\"]. Return the session id and file_touch evidence only."
 ```
 
 Expected:
 
 - the just-created session is returned
-- `matched_files` includes `smoke/generated.txt`
+- file-touch evidence includes `smoke/generated.txt` with `op: changed`
 
 ## 6. Verify compaction hook
 

@@ -61,6 +61,17 @@ What session did I implement the db layer?
 | Session Index      | `/session-index` slash command                       | Shows index status and rebuilds the local session index |
 | Session Auto Title | in background, `/title` slash command                | Give sessions titles                                    |
 
+## Session Search
+
+`session_search` searches the local session index by text, repo, cwd, time range, and file evidence.
+
+Queries support quoted phrases, `AND` / `OR` / `NOT`, parentheses, and `-term` negation. Unquoted terms use prefix matching, quoted terms are exact. A search with no query returns matching sessions chronologically, newest first.
+
+File filters distinguish read-or-write evidence from write-only evidence:
+
+- `files.touched`: sessions that read or changed a path
+- `files.changed`: sessions that changed a path
+
 ## Session Handoff
 
 `/handoff <goal>` starts a focused new session. Give pi a goal, and it will generate a prompt for you to review before kicking it off.

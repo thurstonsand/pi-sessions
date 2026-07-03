@@ -10,6 +10,7 @@ import {
   type SessionLineageRelation,
   searchSessions,
 } from "../shared/session-index/index.ts";
+import { SearchQuerySyntaxError } from "../shared/session-index/query/ast.ts";
 import { shortenSessionId } from "../shared/session-ui.ts";
 import { formatCompactRelativeTime } from "../shared/time.ts";
 
@@ -84,18 +85,9 @@ export function listSessionPickerItems(
       ? getSessionByPath(db, options.currentSessionPath)
       : undefined;
     const context = buildPresentationContext(db, currentSession?.sessionId);
-    const rankedResults = prioritizeSessionResults(
-      searchSessions(
-        db,
-        {
-          cwd: options.includeAll ? undefined : options.currentCwd,
-          query: options.mode === "search" ? options.query : undefined,
-          limit: options.limit,
-        },
-        { defaultLimit: undefined },
-      ),
-      context,
-    );
+    const searchResults = searchSessionsSafely(db, options);
+    const rankedResults =
+      options.mode === "browse" ? prioritizeSessionResults(searchResults, context) : searchResults;
 
     if (rankedResults.length === 0) {
       return {
@@ -108,16 +100,39 @@ export function listSessionPickerItems(
     const sessionItems =
       options.mode === "browse"
         ? buildBrowseSessionItems(rankedResults, context)
-        : rankedResults.map((result) => buildSessionItem(result, context, "", result.snippet));
+        : rankedResults.map((result) =>
+            buildSessionItem(result, context, "", getBestTextSnippet(result)),
+          );
 
     return {
       items: sessionItems,
       scopeMode,
       defaultScopeLabel,
     };
+  } catch (error) {
+    if (error instanceof SearchQuerySyntaxError) {
+      return {
+        items: [buildSearchSyntaxErrorItem(error)],
+        scopeMode,
+        defaultScopeLabel,
+      };
+    }
+
+    throw error;
   } finally {
     db.close();
   }
+}
+
+function searchSessionsSafely(
+  db: SessionIndexDatabase,
+  options: ListSessionPickerItemsOptions,
+): SearchSessionResult[] {
+  return searchSessions(db, {
+    cwd: options.includeAll ? undefined : options.currentCwd,
+    query: options.mode === "search" ? options.query : undefined,
+    limit: options.limit,
+  });
 }
 
 function buildPresentationContext(
@@ -251,13 +266,18 @@ function buildSessionItem(
   };
 }
 
+function getBestTextSnippet(result: SearchSessionResult): string | undefined {
+  const textEvidence = result.evidence.find((evidence) => evidence.kind === "text");
+  return textEvidence?.kind === "text" ? textEvidence.snippet : undefined;
+}
+
 function getSessionTitle(result: SearchSessionResult): string {
   return (
     normalizeDisplayText(result.sessionName) ??
     normalizeDisplayText(result.handoffNextTask) ??
     normalizeDisplayText(result.handoffGoal) ??
     normalizeDisplayText(result.firstUserPrompt) ??
-    normalizeDisplayText(stripSearchSnippetMarkers(result.snippet)) ??
+    normalizeDisplayText(stripSearchSnippetMarkers(getBestTextSnippet(result))) ??
     shortenSessionId(result.sessionId)
   );
 }
@@ -305,6 +325,14 @@ function buildIndexErrorItem(): SessionPickerNoticeItem {
     kind: "error",
     title: "Session index missing or incompatible",
     description: "Run /session-index to rebuild it.",
+  };
+}
+
+function buildSearchSyntaxErrorItem(error: SearchQuerySyntaxError): SessionPickerNoticeItem {
+  return {
+    kind: "error",
+    title: "Invalid search query",
+    description: error.message,
   };
 }
 

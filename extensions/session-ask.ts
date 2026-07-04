@@ -179,7 +179,7 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
       }
 
       if (isPartial) {
-        const lines: string[] = [];
+        const lines = [theme.bold(theme.fg("warning", "Reading session..."))];
         if (details?.sessionId || details?.sessionName) {
           const identity = formatSessionTitleOrShortId(details.sessionName, details.sessionId);
           lines.push(`title: ${theme.fg("accent", identity)}`);

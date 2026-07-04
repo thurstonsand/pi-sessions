@@ -204,7 +204,8 @@ export default function sessionSearchExtension(
       }
 
       if (isPartial) {
-        const lines = formatSessionSearchContextLines(details?.params, theme);
+        const lines = [theme.bold(theme.fg("warning", "Searching sessions..."))];
+        lines.push(...formatSessionSearchContextLines(details?.params, theme));
         return new Text(lines.join("\n"), 0, 0);
       }
 

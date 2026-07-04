@@ -89,6 +89,7 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         "Use session_handoff only when it is clear the work should be forked to a new context.",
         "Prefer using session_handoff by direction of the user, not as an unsolicited default.",
         "The goal should capture enough detail to encompass the ask and include any directions the next sessions should consider.",
+        "Only request a response when there is a specific ask-and-response expectation: the user asked for a report back, or the current session needs the child result before it can continue. Do not set requestResponse for independent or unrelated background work; most split-off tasks should run without reporting back.",
         "Only capable of a background handoff; to replace the current session, tell the user to run /handoff instead.",
       ],
       executionMode: "sequential",

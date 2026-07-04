@@ -64,8 +64,8 @@ export class SessionMessagingService {
   async start(ctx: ExtensionContext): Promise<void> {
     const sessionId = ctx.sessionManager.getSessionId();
     this.refreshCachedRelations(sessionId);
-    await this.connection.start(sessionId);
     setActiveSessionBrokerConnection(this.connection);
+    await this.connection.start(sessionId);
   }
 
   stop(): void {

@@ -46,6 +46,26 @@ describe("session handoff extraction", () => {
     expect(draft).not.toContain("## Open Questions");
   });
 
+  it("makes response reporting explicit only when requested", () => {
+    const draft = assembleHandoffDraft(
+      "session-123",
+      "/tmp/session.jsonl",
+      {
+        title: "Research related work",
+        summary: "Relevant context only.",
+        relevantFiles: [],
+        nextTask: "Research unrelated follow-up work.",
+        openQuestions: [],
+      },
+      "Ignored fallback goal",
+      true,
+    );
+
+    expect(draft).toContain(
+      "When this work is complete, send that session a completion report with session_send_message.",
+    );
+  });
+
   it("extracts and normalizes structured tool-call arguments", () => {
     const extraction = extractHandoffContext(
       {

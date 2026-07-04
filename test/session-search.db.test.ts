@@ -13,6 +13,7 @@ import {
   searchSessions,
   setMetadata,
   upsertSession,
+  withSessionIndex,
 } from "../extensions/shared/session-index/index.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
@@ -34,6 +35,21 @@ describe("session-search db", () => {
     const customDb = openIndexDatabase(dbPath, { create: false, timeoutMs: 1234 });
     expect(customDb.prepare("PRAGMA busy_timeout").get()).toEqual({ timeout: 1234 });
     customDb.close();
+  });
+
+  it("opens validated read connections in readonly mode", () => {
+    const dir = testFs.createTempDir();
+    const dbPath = path.join(dir, "index.sqlite");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    db.close();
+
+    expect(() =>
+      withSessionIndex(dbPath, { mode: "read", required: true }, ({ db: readDb }) => {
+        setMetadata(readDb, "should_not_write", "true");
+      }),
+    ).toThrow();
   });
 
   it("creates schema, reports status, and applies repo and file filters without ranking boosts", () => {

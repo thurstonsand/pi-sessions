@@ -1,13 +1,11 @@
 import { stripSearchSnippetMarkers } from "../shared/search-snippet.ts";
 import {
-  getIndexStatus,
   getSessionByPath,
-  INDEX_SCHEMA_VERSION,
-  openIndexDatabase,
   type SearchSessionResult,
   type SessionIndexDatabase,
   type SessionLineageRelation,
   searchSessions,
+  withSessionIndex,
 } from "../shared/session-index/index.ts";
 import { SearchQuerySyntaxError } from "../shared/session-index/query/ast.ts";
 import { shortenSessionId } from "../shared/session-ui.ts";
@@ -31,7 +29,7 @@ export interface SessionPickerSessionItem {
   modifiedAtText?: string | undefined;
   prefix: string;
   snippet?: string | undefined;
-  relation?: SessionLineageRelation | "self" | undefined;
+  relation?: SessionLineageRelation | undefined;
 }
 
 export interface SessionPickerNoticeItem {
@@ -68,45 +66,45 @@ export function listSessionPickerItems(
 ): SessionPickerQueryResult {
   const scopeMode = options.includeAll ? "all" : "default";
   const defaultScopeLabel = options.currentCwd ? "current folder" : undefined;
-  const status = getIndexStatus(options.indexPath);
-  if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
-    return {
-      items: [buildIndexErrorItem()],
-      scopeMode,
-      defaultScopeLabel,
-    };
-  }
-
-  const db = openIndexDatabase(status.dbPath, { create: false });
   try {
-    const currentSession = options.currentSessionPath
-      ? getSessionByPath(db, options.currentSessionPath)
-      : undefined;
-    const context = buildPresentationContext(currentSession?.sessionId);
-    const searchResults = searchSessionsSafely(db, options, currentSession?.sessionId);
-    const rankedResults =
-      options.mode === "browse" ? prioritizeSessionResults(searchResults, context) : searchResults;
+    return (
+      withSessionIndex(options.indexPath, { mode: "read", required: false }, ({ db }) => {
+        const currentSession = options.currentSessionPath
+          ? getSessionByPath(db, options.currentSessionPath)
+          : undefined;
+        const context = buildPresentationContext(currentSession?.sessionId);
+        const searchResults = searchSessionsSafely(db, options, currentSession?.sessionId);
+        const rankedResults =
+          options.mode === "browse"
+            ? prioritizeSessionResults(searchResults, context)
+            : searchResults;
 
-    if (rankedResults.length === 0) {
-      return {
-        items: [buildEmptyResultItem(options.mode)],
+        if (rankedResults.length === 0) {
+          return {
+            items: [buildEmptyResultItem(options.mode)],
+            scopeMode,
+            defaultScopeLabel,
+          };
+        }
+
+        const sessionItems =
+          options.mode === "browse"
+            ? buildBrowseSessionItems(rankedResults, context)
+            : rankedResults.map((result) =>
+                buildSessionItem(result, context, "", getBestTextSnippet(result)),
+              );
+
+        return {
+          items: sessionItems,
+          scopeMode,
+          defaultScopeLabel,
+        };
+      }) ?? {
+        items: [buildIndexErrorItem()],
         scopeMode,
         defaultScopeLabel,
-      };
-    }
-
-    const sessionItems =
-      options.mode === "browse"
-        ? buildBrowseSessionItems(rankedResults, context)
-        : rankedResults.map((result) =>
-            buildSessionItem(result, context, "", getBestTextSnippet(result)),
-          );
-
-    return {
-      items: sessionItems,
-      scopeMode,
-      defaultScopeLabel,
-    };
+      }
+    );
   } catch (error) {
     if (error instanceof SearchQuerySyntaxError) {
       return {
@@ -117,8 +115,6 @@ export function listSessionPickerItems(
     }
 
     throw error;
-  } finally {
-    db.close();
   }
 }
 
@@ -288,7 +284,7 @@ export function normalizeDisplayText(value?: string): string | undefined {
 function getSessionRelation(
   result: SearchSessionResult,
   context: SessionPickerPresentationContext,
-): SessionLineageRelation | "self" | undefined {
+): SessionLineageRelation | undefined {
   if (context.currentSessionId && result.sessionId === context.currentSessionId) {
     return "self";
   }

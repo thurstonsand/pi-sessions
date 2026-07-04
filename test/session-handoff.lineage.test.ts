@@ -109,6 +109,11 @@ describe("session handoff lineage", () => {
     expect(ancestors.map((session) => session.sessionId)).toEqual(["child-a", "root"]);
     expect(children.map((session) => session.sessionId)).toEqual(["child-b", "child-a"]);
     expect(siblings.map((session) => session.sessionId)).toEqual(["child-b"]);
+    expect(lineage[0]).toMatchObject({
+      sessionId: "grandchild",
+      relation: "self",
+      distance: 0,
+    });
     expect(
       lineage.find(
         (session) =>

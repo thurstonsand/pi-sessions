@@ -5,11 +5,9 @@ import { getKeybindings, type Keybinding, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import { type RenderedSessionTree, renderSessionTreeMarkdown } from "./session-search/extract.ts";
 import {
-  getIndexStatus,
   getSessionById,
-  INDEX_SCHEMA_VERSION,
-  openIndexDatabase,
   type SessionLineageRow,
+  withSessionIndex,
 } from "./shared/session-index/index.ts";
 import { formatSessionTitleOrShortId, isExactSessionId } from "./shared/session-ui.ts";
 import { loadSettings } from "./shared/settings.ts";
@@ -217,23 +215,17 @@ function resolveSessionAskTarget(
     };
   }
 
-  const status = getIndexStatus(indexPath);
-  if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
-    return {
-      error: `Session index missing or incompatible at ${indexPath}. Run /session-index and press r to rebuild it.`,
-    };
-  }
-
-  const db = openIndexDatabase(status.dbPath, { create: false });
   try {
-    const row = getSessionById(db, sessionId);
-    if (!row) {
-      return { error: `No indexed session found for id: ${sessionId}` };
-    }
+    return withSessionIndex(indexPath, { mode: "read", required: true }, ({ db }) => {
+      const row = getSessionById(db, sessionId);
+      if (!row) {
+        return { error: `No indexed session found for id: ${sessionId}` };
+      }
 
-    return { resolved: row };
-  } finally {
-    db.close();
+      return { resolved: row };
+    });
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) };
   }
 }
 

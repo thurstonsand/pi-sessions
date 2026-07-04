@@ -843,6 +843,7 @@ describe("session-search hooks", () => {
     expect(famBRowidsAfter).toEqual(famBRowids);
     expect(grandchildRelations).toEqual([
       { relatedId: "fam-a-child", relation: "parent" },
+      { relatedId: "fam-a-grandchild", relation: "self" },
       { relatedId: "fam-a-parent", relation: "ancestor" },
     ]);
   });

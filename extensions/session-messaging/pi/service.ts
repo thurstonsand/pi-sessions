@@ -15,11 +15,9 @@ import type {
   SessionLineageRow,
 } from "../../shared/session-index/index.ts";
 import {
-  getIndexStatus,
   getLineageRelationMap,
   getSessionById,
-  INDEX_SCHEMA_VERSION,
-  openIndexDatabase,
+  withSessionIndex,
 } from "../../shared/session-index/index.ts";
 import { spawnSessionMessagingBrokerIfNeeded } from "../broker/spawn.ts";
 import type { IncomingSessionMessageRuntime } from "./incoming-runtime.ts";
@@ -164,36 +162,30 @@ export class SessionMessagingService {
       source: buildReceivedMessageEndpoint(sourceSessionId),
       target: buildReceivedMessageEndpoint(targetSessionId),
     };
-    const status = getIndexStatus(this.indexPath);
-    if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
-      return fallback;
-    }
+    return (
+      withSessionIndex(this.indexPath, { mode: "read", required: false }, ({ db }) => {
+        const source = getSessionById(db, sourceSessionId);
+        const target = getSessionById(db, targetSessionId);
+        const currentSessionId = this.connection.currentSessionId;
+        const relationBySessionId = currentSessionId
+          ? new Map(getLineageRelationMap(db, currentSessionId))
+          : new Map<string, SessionLineageRelation>();
+        const relation = relationBySessionId.get(sourceSessionId);
 
-    const db = openIndexDatabase(status.dbPath, { create: false });
-    try {
-      const source = getSessionById(db, sourceSessionId);
-      const target = getSessionById(db, targetSessionId);
-      const currentSessionId = this.connection.currentSessionId;
-      const relationBySessionId = currentSessionId
-        ? new Map(getLineageRelationMap(db, currentSessionId))
-        : new Map<string, SessionLineageRelation>();
-      const relation = relationBySessionId.get(sourceSessionId);
-
-      if (currentSessionId) {
-        this.replaceCachedRelations(relationBySessionId);
-        if (!this.relationBySessionId.has(sourceSessionId)) {
-          this.relationBySessionId.set(sourceSessionId, undefined);
+        if (currentSessionId) {
+          this.replaceCachedRelations(relationBySessionId);
+          if (!this.relationBySessionId.has(sourceSessionId)) {
+            this.relationBySessionId.set(sourceSessionId, undefined);
+          }
         }
-      }
 
-      return {
-        source: buildReceivedMessageEndpoint(sourceSessionId, source),
-        target: buildReceivedMessageEndpoint(targetSessionId, target),
-        ...(relation === undefined ? {} : { relation }),
-      };
-    } finally {
-      db.close();
-    }
+        return {
+          source: buildReceivedMessageEndpoint(sourceSessionId, source),
+          target: buildReceivedMessageEndpoint(targetSessionId, target),
+          ...(relation === undefined ? {} : { relation }),
+        };
+      }) ?? fallback
+    );
   }
 
   private refreshCachedRelations(currentSessionId: string): void {
@@ -368,15 +360,11 @@ function getRelationMapForSession(
   indexPath: string,
   sessionId: string,
 ): Map<string, SessionLineageRelation | undefined> {
-  const status = getIndexStatus(indexPath);
-  if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
-    return new Map();
-  }
-
-  const db = openIndexDatabase(status.dbPath, { create: false });
-  try {
-    return new Map(getLineageRelationMap(db, sessionId));
-  } finally {
-    db.close();
-  }
+  return (
+    withSessionIndex(
+      indexPath,
+      { mode: "read", required: false },
+      ({ db }) => new Map(getLineageRelationMap(db, sessionId)),
+    ) ?? new Map()
+  );
 }

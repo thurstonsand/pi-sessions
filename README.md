@@ -51,15 +51,15 @@ What session did I implement the db layer?
 
 ## Features
 
-| Extension          | Surface                                              | What it does                                            |
-| ------------------ | ---------------------------------------------------- | ------------------------------------------------------- |
-| Session Search     | `session_search` pi tool                             | Search through old sessions                             |
-| Session Ask        | `session_ask` pi tool                                | Ask questions about old sessions                        |
-| Session Handoff    | `/handoff`, `session_handoff` pi tool                | Start a focused new session; alternative to compaction  |
-| Session Messaging  | `session_send_message` pi tool                       | Send messages between running Pi sessions               |
-| Session Picker     | `Alt+O`                                              | Reference old sessions in your prompt                   |
-| Session Index      | `/session-index` slash command                       | Shows index status and rebuilds the local session index |
-| Session Auto Title | in background, `/title` slash command                | Give sessions titles                                    |
+| Extension          | Surface                               | What it does                                            |
+| ------------------ | ------------------------------------- | ------------------------------------------------------- |
+| Session Search     | `session_search` pi tool              | Search through old sessions                             |
+| Session Ask        | `session_ask` pi tool                 | Ask questions about old sessions                        |
+| Session Handoff    | `/handoff`, `session_handoff` pi tool | Start a focused new session; alternative to compaction  |
+| Session Messaging  | `session_send_message` pi tool        | Send messages between running Pi sessions               |
+| Session Picker     | `Alt+O`                               | Reference old sessions in your prompt                   |
+| Session Index      | `/session-index` slash command        | Shows index status and rebuilds the local session index |
+| Session Auto Title | in background, `/title` slash command | Give sessions titles                                    |
 
 ## Session Search
 
@@ -102,8 +102,8 @@ If background handoffs ever target the wrong pane, run `/handoff --identify` fro
 
 Agents can coordinate with other currently running Pi sessions:
 
-- `session_search` with `live: true` lists other live sessions
-- `session_send_message` sends a message to a live session
+- `session_search` with `live: true` lists live sessions
+- `session_send_message` sends a message to another live session
 
 Incoming messages start the recipient agent when idle and steer it when already running. Inactive sessions cannot receive messages, but you can still use `session_search` and `session_ask` with them.
 

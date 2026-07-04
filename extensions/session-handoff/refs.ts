@@ -1,12 +1,10 @@
 import path from "node:path";
 import { parseSessionFile } from "../session-search/extract.ts";
 import {
-  getIndexStatus,
   getSessionById,
-  INDEX_SCHEMA_VERSION,
-  openIndexDatabase,
   type SessionLineageRow,
   type SessionOrigin,
+  withSessionIndex,
 } from "../shared/session-index/index.ts";
 
 const HANDOFF_REF_PREFIX = "@handoff/";
@@ -103,23 +101,19 @@ function resolveIndexedReference(
     return { error: `Invalid session reference: ${input}. ${SESSION_REFERENCE_HELP}` };
   }
 
-  const status = getIndexStatus(options.indexPath);
-  if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
-    return {
-      error: `Session reference resolution requires a current index at ${status.dbPath}. Run /session-index and press r to rebuild it.`,
-    };
-  }
-
-  const db = openIndexDatabase(status.dbPath, { create: false });
   try {
-    const exactMatch = getSessionById(db, value);
-    if (exactMatch) {
-      return { resolved: buildResolvedReference(input, kind, exactMatch) };
-    }
+    return withSessionIndex(options.indexPath, { mode: "read", required: true }, ({ db }) => {
+      const exactMatch = getSessionById(db, value);
+      if (exactMatch) {
+        return { resolved: buildResolvedReference(input, kind, exactMatch) };
+      }
 
-    return { error: `No session found for reference: ${input}. ${SESSION_REFERENCE_HELP}` };
-  } finally {
-    db.close();
+      return { error: `No session found for reference: ${input}. ${SESSION_REFERENCE_HELP}` };
+    });
+  } catch {
+    return {
+      error: `Session reference resolution requires a current index at ${options.indexPath}. Run /session-index and press r to rebuild it.`,
+    };
   }
 }
 

@@ -3,10 +3,11 @@ import type { FileTouchOp, FileTouchSource, PathScope } from "../../session-sear
 import { safeParseTypeBoxJson } from "../typebox.ts";
 import type { SqliteDatabase } from "./sqlite.ts";
 
-export const INDEX_SCHEMA_VERSION = 9;
+export const INDEX_SCHEMA_VERSION = 10;
 
 export type SessionOrigin = "handoff" | "fork" | "unknown_child";
 export type SessionLineageRelation =
+  | "self"
   | "parent"
   | "ancestor"
   | "child"
@@ -159,6 +160,7 @@ export const SESSION_ORIGIN_SCHEMA = Type.Union([
   Type.Literal("unknown_child"),
 ]);
 export const SESSION_LINEAGE_RELATION_SCHEMA = Type.Union([
+  Type.Literal("self"),
   Type.Literal("parent"),
   Type.Literal("ancestor"),
   Type.Literal("child"),

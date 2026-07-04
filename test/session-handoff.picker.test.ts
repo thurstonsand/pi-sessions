@@ -128,6 +128,7 @@ describe("session handoff picker", () => {
   });
 
   it("shows a query syntax notice instead of throwing while search input is incomplete", () => {
+    vi.useFakeTimers();
     const dbPath = createPickerDb();
 
     const result = listSessionPickerItems({
@@ -161,6 +162,7 @@ describe("session handoff picker", () => {
     );
 
     expect(() => picker.handleInput('"')).not.toThrow();
+    vi.advanceTimersByTime(200);
     expect(stripAnsi(picker.render(120).join("\n"))).toContain("Invalid search query");
   });
 
@@ -252,6 +254,7 @@ describe("session handoff picker", () => {
     for (const char of "selector") {
       picker.handleInput(char);
     }
+    vi.advanceTimersByTime(200);
 
     const rendered = picker.render(120).join("\n");
     expect(rendered).toContain("<accent><b>selector</b></accent>");
@@ -280,6 +283,7 @@ describe("session handoff picker", () => {
     for (const char of "selector") {
       picker.handleInput(char);
     }
+    vi.advanceTimersByTime(200);
 
     const rendered = picker.render(120).join("\n");
     expect(rendered).toContain("<accent><b>Selector</b></accent> session title");

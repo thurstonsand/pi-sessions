@@ -52,7 +52,7 @@ Use session_search with live true and limit 5. Return session ids, titles, cwd, 
 Expected:
 
 - the other live session is returned if it is present in the session index
-- the current session is not returned
+- the current session is returned with `relation: "self"`
 - results use index metadata, not broker registration metadata
 
 ## 5. Verify follow-up analysis

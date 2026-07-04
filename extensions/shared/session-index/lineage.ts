@@ -346,6 +346,7 @@ function queryRelatedSessions(
           WHERE r.session_id = ?${relationFilter}
           ORDER BY
             CASE r.relation
+              WHEN 'self' THEN 0
               WHEN 'parent' THEN 1
               WHEN 'child' THEN 2
               WHEN 'sibling' THEN 3
@@ -371,6 +372,13 @@ function collectMaterializedLineageRows(
   childrenByParent: Map<string, string[]>,
 ): Map<string, MaterializedLineageRow> {
   const relations = new Map<string, MaterializedLineageRow>();
+  setMaterializedLineageRow(relations, {
+    sessionId,
+    relatedSessionId: sessionId,
+    relation: "self",
+    distance: 0,
+  });
+
   const visitedAncestors = new Set<string>();
   const ancestors: Array<{ sessionId: string; distance: number }> = [];
 
@@ -476,6 +484,8 @@ function setMaterializedLineageRow(
 
 function getLineageRelationPriority(relation: SessionLineageRelation): number {
   switch (relation) {
+    case "self":
+      return 0;
     case "parent":
       return 1;
     case "child":

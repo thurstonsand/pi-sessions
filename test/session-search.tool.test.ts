@@ -242,7 +242,7 @@ describe("session_search tool", () => {
     expect(rendered).not.toContain(SEARCH_SNIPPET_MATCH_END);
   });
 
-  it("excludes the current session from results without consuming the limit", async () => {
+  it("includes the current session and marks it as self", async () => {
     const agentDir = testFs.createTempDir();
     const dir = testFs.createTempDir();
     process.env.PI_CODING_AGENT_DIR = agentDir;
@@ -303,6 +303,7 @@ describe("session_search tool", () => {
       sourceKind: "assistant_text",
       text: "autocomplete parser",
     });
+    rebuildSessionLineageRelations(db);
     db.close();
 
     const tool = registerSessionSearchTool();
@@ -313,11 +314,11 @@ describe("session_search tool", () => {
       undefined,
       createToolContext("/repo", "current-session"),
     );
-    const toolIds = (
-      (result.details as { results: Array<{ sessionId: string }> }).results ?? []
-    ).map((row) => row.sessionId);
+    const results =
+      (result.details as { results: Array<{ sessionId: string; relation?: string }> }).results ??
+      [];
 
-    expect(toolIds).toEqual(["older-session"]);
+    expect(results).toMatchObject([{ sessionId: "current-session", relation: "self" }]);
   });
 
   it("filters live searches through the active broker connection and returns relation metadata", async () => {
@@ -401,8 +402,14 @@ describe("session_search tool", () => {
       results: Array<{ sessionId: string; relation?: string }>;
     };
 
-    expect(modelOutput.results).toMatchObject([{ sessionId: "live-child", relation: "child" }]);
-    expect(modelOutput.results.map((result) => result.sessionId)).toEqual(["live-child"]);
+    expect(modelOutput.results).toMatchObject([
+      { sessionId: "live-child", relation: "child" },
+      { sessionId: "current-session", relation: "self" },
+    ]);
+    expect(modelOutput.results.map((result) => result.sessionId)).toEqual([
+      "live-child",
+      "current-session",
+    ]);
   });
 
   it("fails live search clearly when session messaging is inactive", async () => {

@@ -18,10 +18,11 @@ export function ensureIndexDir(dir: string): string {
 
 export function openIndexDatabase(
   dbPath: string,
-  options?: { create?: boolean; timeoutMs?: number },
+  options?: { create?: boolean; mode?: "read" | "write"; timeoutMs?: number | undefined },
 ): SessionIndexDatabase {
   const create = options?.create ?? true;
-  return openSqlite(dbPath, { create, timeoutMs: options?.timeoutMs });
+  const readonly = options?.mode === "read";
+  return openSqlite(dbPath, { create, readonly, timeoutMs: options?.timeoutMs });
 }
 
 export function initializeSchema(db: SessionIndexDatabase): void {
@@ -176,8 +177,9 @@ export function getIndexStatus(dbPath: string): SessionIndexStatus {
     return { dbPath, exists: false };
   }
 
-  const db = openIndexDatabase(dbPath, { create: false });
+  let db: SessionIndexDatabase | undefined;
   try {
+    db = openIndexDatabase(dbPath, { create: false, mode: "read" });
     const schemaVersionRaw = getMetadata(db, "schema_version");
     const lastFullReindexAt = getMetadata(db, "indexed_at");
     const sessionCountRow = parseTypeBoxValue(
@@ -193,7 +195,9 @@ export function getIndexStatus(dbPath: string): SessionIndexStatus {
       sessionCount: sessionCountRow.count,
       lastFullReindexAt,
     };
+  } catch {
+    return { dbPath, exists: true };
   } finally {
-    db.close();
+    db?.close();
   }
 }

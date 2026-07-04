@@ -11,15 +11,13 @@ import {
   getActiveSessionBrokerConnection,
 } from "./shared/session-broker/active.ts";
 import {
-  getIndexStatus,
-  INDEX_SCHEMA_VERSION,
-  openIndexDatabase,
   type SearchSessionResult,
   type SearchSessionsParams,
   type SearchSort,
   type SessionIndexStatus,
   type SessionSearchEvidence,
   searchSessions,
+  withSessionIndex,
 } from "./shared/session-index/index.ts";
 import { formatSessionTitleOrShortId } from "./shared/session-ui.ts";
 import { loadSettings } from "./shared/settings.ts";
@@ -56,15 +54,17 @@ export interface SessionSearchDeps {
 
 export default function sessionSearchExtension(
   pi: ExtensionAPI,
-  deps: SessionSearchDeps = { getBrokerConnection: getActiveSessionBrokerConnection },
+  deps: SessionSearchDeps = {
+    getBrokerConnection: getActiveSessionBrokerConnection,
+  },
 ): void {
   const settings = loadSettings();
 
   pi.registerTool({
     name: "session_search",
     label: "Session Search",
-    description: "Search prior Pi sessions",
-    promptSnippet: "Use when you need to locate an earlier session to do a detailed follow-up",
+    description: "Search Pi sessions",
+    promptSnippet: "Use when you need to locate a session to do a detailed follow-up",
     promptGuidelines: [
       "Omit query to list matching sessions chronologically",
       "Once you have the right session id, switch to session_ask for questions about that session",
@@ -153,44 +153,27 @@ export default function sessionSearchExtension(
       });
 
       const indexPath = settings.index.path;
-      const status = getIndexStatus(indexPath);
-      if (!status.exists || status.schemaVersion !== INDEX_SCHEMA_VERSION) {
-        throw new Error(
-          `Session index missing or incompatible at ${indexPath}. Run /session-index and press r to rebuild it.`,
-        );
-      }
-
       const liveSessionIds = params.live
         ? await getLiveSessionIds(deps.getBrokerConnection)
         : undefined;
-      const db = openIndexDatabase(status.dbPath, { create: false });
-      try {
+
+      return withSessionIndex(indexPath, { mode: "read", required: true }, ({ db, status }) => {
         const results = searchSessions(db, buildSearchParams(params, ctx, liveSessionIds));
-
-        if (results.length === 0) {
-          const details: SessionSearchToolDetails = {
-            params,
-            status,
-            results: [],
-          };
-          return {
-            content: [{ type: "text", text: formatSearchResultsForModel(details) }],
-            details,
-          };
-        }
-
         const details: SessionSearchToolDetails = {
           params,
           status,
           results,
         };
         return {
-          content: [{ type: "text", text: formatSearchResultsForModel(details) }],
+          content: [
+            {
+              type: "text" as const,
+              text: formatSearchResultsForModel(details),
+            },
+          ],
           details,
         };
-      } finally {
-        db.close();
-      }
+      });
     },
     renderResult(result, { expanded, isPartial }, theme, context) {
       const details = result.details as SessionSearchToolDetails | undefined;
@@ -246,7 +229,6 @@ function buildSearchParams(
     before: params.time?.before,
     sort: params.sort,
     limit: params.limit ?? DEFAULT_SESSION_SEARCH_LIMIT,
-    excludeSessionIds: currentSessionId ? [currentSessionId] : undefined,
     includeSessionIds: liveSessionIds,
     relativeToSessionId: currentSessionId,
   };

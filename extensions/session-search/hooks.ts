@@ -8,13 +8,10 @@ import {
 import {
   clearSessionChunksBySourceKind,
   clearSessionIndexedData,
-  getMetadata,
   getSessionById,
   getSessionRowByPath,
-  INDEX_SCHEMA_VERSION,
   insertSessionFileTouch,
   insertTextChunk,
-  openIndexDatabase,
   refreshSessionLineageRelationsFor,
   type SessionIndexDatabase,
   type SessionLineageRow,
@@ -22,6 +19,7 @@ import {
   type SessionRow,
   setMetadata,
   upsertSession,
+  withSessionIndex,
 } from "../shared/session-index/index.ts";
 import {
   createSessionNameChunk,
@@ -198,24 +196,19 @@ function syncSessionFile(
   state?: SessionHookState,
   sessionOrigin?: SessionOrigin,
 ): boolean {
-  if (!sessionFile || !existsSync(sessionFile) || !existsSync(indexPath)) {
+  if (!sessionFile || !existsSync(sessionFile)) {
     return false;
   }
 
-  const db = openIndexDatabase(indexPath, { create: false });
-  try {
-    if (readIndexSchemaVersion(db) !== INDEX_SCHEMA_VERSION) {
-      return false;
-    }
-
-    const synced = syncSessionFileWithDb(db, sessionFile, eventType, sessionOrigin);
-    if (synced && state) {
-      state.lastFlushedSessionFile = sessionFile;
-    }
-    return synced;
-  } finally {
-    db.close();
-  }
+  return (
+    withSessionIndex(indexPath, { mode: "write", required: false }, ({ db }) => {
+      const synced = syncSessionFileWithDb(db, sessionFile, eventType, sessionOrigin);
+      if (synced && state) {
+        state.lastFlushedSessionFile = sessionFile;
+      }
+      return synced;
+    }) ?? false
+  );
 }
 
 interface TailSyncBaseline extends SessionRow {
@@ -437,11 +430,6 @@ function mergeRepoRoots(baseline: TailSyncBaseline, fileTouches: SessionFileTouc
 function writeHookSyncMetadata(db: SessionIndexDatabase, eventType: string): void {
   setMetadata(db, "hook_updated_at", new Date().toISOString());
   setMetadata(db, "hook_last_event", eventType);
-}
-
-function readIndexSchemaVersion(db: SessionIndexDatabase): number | undefined {
-  const raw = getMetadata(db, "schema_version");
-  return raw === undefined ? undefined : Number(raw);
 }
 
 function mergeSessionLineage(

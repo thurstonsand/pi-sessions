@@ -16,6 +16,7 @@ import { listSessionPickerItems, normalizeDisplayText, type SessionPickerItem } 
 
 const MAX_VISIBLE_BROWSE_ROWS = 10;
 const MAX_VISIBLE_SEARCH_ROWS = 4;
+const SEARCH_RELOAD_DEBOUNCE_MS = 200;
 
 interface PickerRightColumnWidths {
   marker: number;
@@ -65,6 +66,7 @@ export class SessionReferencePickerComponent implements Focusable {
   private includeAll = false;
   private items: SessionPickerItem[] = [];
   private selectedIndex = 0;
+  private searchReloadTimer: ReturnType<typeof setTimeout> | undefined;
 
   get focused(): boolean {
     return this._focused;
@@ -89,17 +91,18 @@ export class SessionReferencePickerComponent implements Focusable {
 
   handleInput(data: string): void {
     if (matchesKey(data, this.options.shortcut)) {
-      this.done({ kind: "cancel" });
+      this.finish({ kind: "cancel" });
       return;
     }
 
     if (this.keybindings.matches(data, "tui.select.cancel")) {
-      this.done({ kind: "cancel" });
+      this.finish({ kind: "cancel" });
       return;
     }
 
     if (this.keybindings.matches(data, "tui.input.tab")) {
       this.includeAll = !this.includeAll;
+      this.cancelSearchReload();
       this.reload();
       this.tui.requestRender();
       return;
@@ -130,9 +133,10 @@ export class SessionReferencePickerComponent implements Focusable {
     }
 
     if (this.keybindings.matches(data, "tui.select.confirm")) {
+      this.flushSearchReload();
       const selected = this.items[this.selectedIndex];
       if (selected?.kind === "session") {
-        this.done({ kind: "insert-session-token", sessionId: selected.sessionId });
+        this.finish({ kind: "insert-session-token", sessionId: selected.sessionId });
       }
       return;
     }
@@ -140,7 +144,7 @@ export class SessionReferencePickerComponent implements Focusable {
     const before = this.input.getValue();
     this.input.handleInput(data);
     if (this.input.getValue() !== before) {
-      this.reload();
+      this.reloadAfterInputChange();
       this.tui.requestRender();
     }
   }
@@ -282,6 +286,48 @@ export class SessionReferencePickerComponent implements Focusable {
     )
       ?.replace(/\s+/g, " ")
       .trim();
+  }
+
+  private reloadAfterInputChange(): void {
+    if (!this.input.getValue().trim()) {
+      this.cancelSearchReload();
+      this.reload();
+      return;
+    }
+
+    this.scheduleSearchReload();
+  }
+
+  private scheduleSearchReload(): void {
+    this.cancelSearchReload();
+    this.searchReloadTimer = setTimeout(() => {
+      this.searchReloadTimer = undefined;
+      this.reload();
+      this.tui.requestRender();
+    }, SEARCH_RELOAD_DEBOUNCE_MS);
+  }
+
+  private flushSearchReload(): void {
+    if (!this.searchReloadTimer) {
+      return;
+    }
+
+    this.cancelSearchReload();
+    this.reload();
+  }
+
+  private cancelSearchReload(): void {
+    if (!this.searchReloadTimer) {
+      return;
+    }
+
+    clearTimeout(this.searchReloadTimer);
+    this.searchReloadTimer = undefined;
+  }
+
+  private finish(result: SessionPickerResult): void {
+    this.cancelSearchReload();
+    this.done(result);
   }
 
   private reload(): void {

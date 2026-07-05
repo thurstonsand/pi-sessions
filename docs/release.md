@@ -155,7 +155,7 @@
 
 ## Release Process
 
-Use this checklist to publish `pi-sessions` to npm.
+Use this checklist to publish `pi-sessions` to npm. Publishing happens in CI (`.github/workflows/release.yml`) when a `vX.Y.Z` tag is pushed via npm trusted publishing (OIDC) — there is no manual `npm publish` step.
 
 ## Patch release
 
@@ -186,20 +186,7 @@ Use this checklist to publish `pi-sessions` to npm.
    git commit
    ```
 
-5. Confirm npm authentication and package contents.
-
-   ```bash
-   npm whoami
-   npm publish --dry-run
-   ```
-
-6. Publish to npm.
-
-   ```bash
-   npm publish
-   ```
-
-7. Create and push the matching git tag.
+5. Push `main` and the matching annotated tag. Pushing the tag triggers CI, which runs the check gate and then publishes.
 
    ```bash
    VERSION=$(node -p "require('./package.json').version")
@@ -208,14 +195,15 @@ Use this checklist to publish `pi-sessions` to npm.
    git push origin "v$VERSION"
    ```
 
-8. Confirm the registry version.
+6. Watch the release workflow and confirm the registry version once it completes.
 
    ```bash
+   gh run watch --workflow=release.yml
    npm view pi-sessions version
    ```
 
 ## Notes
 
 - `npm version patch --no-git-tag-version` updates `package.json` and `package-lock.json` only. It avoids npm's default auto-commit and auto-tag behavior so code changes and the version bump can be committed together.
-- If `npm whoami` returns `E401`, run `npm login` before publishing.
-- If the publish succeeds but git push fails, do not republish. Fix the git push/tag state only.
+- The release workflow re-derives the published version from the pushed tag (`npm version "${GITHUB_REF_NAME#v}"`), so the local version bump and the tag name must match.
+- If the release workflow fails after the tag is pushed, fix the issue and push a new tag. npm rejects republishing an existing version, so a failed tag cannot be reused.

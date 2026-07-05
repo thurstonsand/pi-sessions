@@ -10,9 +10,9 @@ Use this skill when preparing and publishing a new npm release for `pi-sessions`
 ## Release model
 
 - Release from `main`.
-- Publish to npm before creating the git tag.
-- Use the `RELEASE.md` entry as the annotated git tag notes.
-- Push `main` and the tag after npm publish succeeds.
+- Publishing happens in CI: `.github/workflows/release.yml` runs the check gate and publishes to npm via trusted publishing (OIDC) when a `vX.Y.Z` tag is pushed. There is no manual `npm publish` step.
+- Use the `docs/release.md` entry as the annotated git tag notes.
+- Push `main`, then push the tag, to trigger the release.
 
 ## 1. Inspect unreleased changes
 
@@ -30,7 +30,7 @@ Ask the user to confirm the target version unless they already specified it.
 
 ## 2. Prepare release notes
 
-Update `RELEASE.md` with a new top entry, Keep a Changelog style:
+Update `docs/release.md` with a new top entry, Keep a Changelog style:
 
 ```md
 ## [X.Y.Z] - YYYY-MM-DD
@@ -56,7 +56,7 @@ Update `RELEASE.md` with a new top entry, Keep a Changelog style:
 
 Only include the headline bullets for releases with a genuine headline capability worth calling out up top; skip them for patch releases, dependency bumps, or single-bullet changes. Only include the other sections that apply; omit empty ones. Keep notes concise. Do not dump every internal refactor. Prefer what a user needs to know.
 
-If the user edits or cleans up the release notes, use their final `RELEASE.md` text for the tag notes later.
+If the user edits or cleans up the release notes, use their final `docs/release.md` text for the tag notes later.
 
 ## 3. Bump package version
 
@@ -90,38 +90,38 @@ Stage files that should be part of the release and commit.
 
 If hooks modify staged files, let the commit finish and then re-check status.
 
-## 6. Dry-run publish
+## 6. Dry-run pack
 
-Confirm npm identity and package contents:
+Confirm package contents locally before pushing:
 
 ```bash
-npm whoami
-npm publish --dry-run
+npm pack --dry-run
 ```
 
 Read the tarball contents. Make sure expected source files are included and obvious junk is absent.
 
-## 7. Publish to npm
+## 7. Push main and the annotated tag
 
-Ask the user to run:
-
-```bash
-npm publish
-```
-
-After publish, verify npm sees the new version:
+Use the final `docs/release.md` entry for the tag notes.
 
 ```bash
-npm view pi-sessions version dist-tags --json
+VERSION=$(node -p "require('./package.json').version")
+git tag -a "v$VERSION" -m "v$VERSION"
+git push origin main
+git push origin "v$VERSION"
 ```
 
-Do not create the git tag until this verification shows the release is live.
+Pushing the tag triggers `.github/workflows/release.yml`, which runs the check gate and publishes to npm.
 
-## 8. Create annotated git tag and push
+## 8. Watch the release workflow
 
-Use the final `RELEASE.md` entry for the tag notes. Check that the tag notes match the cleaned release notes. If not, delete and recreate before pushing. `git push` the main branch and tag.
+```bash
+gh run watch --workflow=release.yml
+```
 
-## 10. Final verification
+If it fails, fix the issue and push a new tag — npm rejects republishing an existing version, so a failed tag cannot be reused.
+
+## 9. Final verification
 
 Confirm npm and git remote state:
 

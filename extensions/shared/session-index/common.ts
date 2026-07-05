@@ -3,7 +3,7 @@ import type { FileTouchOp, FileTouchSource, PathScope } from "../../session-sear
 import { safeParseTypeBoxJson } from "../typebox.ts";
 import type { SqliteDatabase } from "./sqlite.ts";
 
-export const INDEX_SCHEMA_VERSION = 10;
+export const INDEX_SCHEMA_VERSION = 12;
 
 export type SessionOrigin = "handoff" | "fork" | "unknown_child";
 export type SessionLineageRelation =
@@ -61,7 +61,7 @@ export interface SessionRelatedSessionRow extends SessionLineageRow {
 export interface SessionTextChunkRow {
   id?: number | undefined;
   sessionId: string;
-  entryId?: string | undefined;
+  entryId: string;
   entryType: string;
   role?: string | undefined;
   ts: string;
@@ -106,7 +106,7 @@ export type SessionSearchEvidence =
       sourceKind: string;
       snippet: string;
       score: number;
-      entryId?: string | undefined;
+      entryId: string;
     }
   | {
       kind: "file_touch";

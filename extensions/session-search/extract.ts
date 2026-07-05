@@ -10,13 +10,12 @@ import {
 } from "node:fs";
 import path from "node:path";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, ToolCall, ToolResultMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ToolCall } from "@earendil-works/pi-ai";
 import {
   type CustomEntry,
   parseSessionEntries,
   type SessionEntry,
   type SessionHeader,
-  type SessionMessageEntry,
 } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
@@ -25,6 +24,7 @@ import {
   parseHandoffSessionMetadata,
 } from "../session-handoff/metadata.ts";
 import type { SessionOrigin } from "../shared/session-index/index.ts";
+import { contentToText, isRecord } from "../shared/text.ts";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
 import {
   deriveSessionRepoRoots,
@@ -35,7 +35,7 @@ import {
 } from "./normalize.ts";
 
 export interface SearchTextChunk {
-  entryId?: string | undefined;
+  entryId: string;
   entryType: string;
   role?: string | undefined;
   ts: string;
@@ -44,7 +44,7 @@ export interface SearchTextChunk {
 }
 
 export interface DurableHandoffMetadataRecord {
-  entryId?: string | undefined;
+  entryId: string;
   ts: string;
   metadata: HandoffSessionMetadata;
 }
@@ -94,6 +94,8 @@ export interface SessionEntryScan {
   maxEntryTs?: string | undefined;
   firstUserPrompt?: string | undefined;
   sessionName?: string | undefined;
+  sessionNameEntryId?: string | undefined;
+  sessionNameTs?: string | undefined;
   handoffMetadata?: DurableHandoffMetadataRecord | undefined;
 }
 
@@ -119,6 +121,7 @@ export interface ParsedSessionFile {
 }
 
 const TOOL_RESULT_TEXT_LIMIT = 500;
+const TOOL_CALL_TEXT_LIMIT = 2_000;
 const BASH_OUTPUT_TEXT_LIMIT = 500;
 const FILE_ANCHOR_BYTES = 64;
 const NEWLINE_BYTE = 0x0a;
@@ -165,8 +168,14 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
   const scan = scanSessionEntries(parsed.entries, fallbackTs, parsed.header.cwd);
 
   const chunks: SearchTextChunk[] = [];
-  if (parsed.sessionName) {
-    chunks.push(createSessionNameChunk(parsed.sessionName, fallbackTs));
+  if (parsed.sessionName && scan.sessionNameEntryId) {
+    chunks.push(
+      createSessionNameChunk(
+        parsed.sessionName,
+        scan.sessionNameTs ?? fallbackTs,
+        scan.sessionNameEntryId,
+      ),
+    );
   }
   chunks.push(...scan.chunks);
   appendDurableHandoffMetadataChunks(chunks, scan.handoffMetadata);
@@ -247,8 +256,13 @@ export function extractSessionTail(
   }
 }
 
-export function createSessionNameChunk(sessionName: string, ts: string): SearchTextChunk {
+export function createSessionNameChunk(
+  sessionName: string,
+  ts: string,
+  entryId: string,
+): SearchTextChunk {
   return {
+    entryId,
     entryType: "session_info",
     ts,
     sourceKind: "session_name",
@@ -267,6 +281,8 @@ export function scanSessionEntries(
   let maxEntryTs: string | undefined;
   let firstUserPrompt: string | undefined;
   let sessionName: string | undefined;
+  let sessionNameEntryId: string | undefined;
+  let sessionNameTs: string | undefined;
   let handoffMetadata: DurableHandoffMetadataRecord | undefined;
 
   for (const entry of entries) {
@@ -290,6 +306,8 @@ export function scanSessionEntries(
       case "session_info": {
         if (typeof entry.name === "string") {
           sessionName = entry.name.trim();
+          sessionNameEntryId = entry.id;
+          sessionNameTs = entryTs;
         }
         continue;
       }
@@ -348,6 +366,8 @@ export function scanSessionEntries(
     maxEntryTs,
     firstUserPrompt,
     sessionName,
+    sessionNameEntryId,
+    sessionNameTs,
     handoffMetadata,
   };
 }
@@ -438,26 +458,6 @@ function normalizeParentSessionPath(parentSession: string | undefined): string |
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function findDurableHandoffMetadata(
-  entries: SessionEntry[],
-  fallbackTs: string,
-): DurableHandoffMetadataRecord | undefined {
-  let durableHandoffMetadata: DurableHandoffMetadataRecord | undefined;
-
-  for (const entry of entries) {
-    if (entry.type !== "custom") {
-      continue;
-    }
-
-    const parsed = extractHandoffMetadata(entry, getEntryTimestamp(entry, fallbackTs));
-    if (parsed && !durableHandoffMetadata) {
-      durableHandoffMetadata = parsed;
-    }
-  }
-
-  return durableHandoffMetadata;
-}
-
 function readSessionIdFromPath(sessionPath: string): string | undefined {
   try {
     const parsed = parseSessionFile(sessionPath);
@@ -514,7 +514,7 @@ function appendDurableHandoffMetadataChunks(
 }
 
 function createMetadataChunk(
-  entryId: string | undefined,
+  entryId: string,
   ts: string,
   sourceKind: string,
   text: string,
@@ -634,6 +634,28 @@ function createFileTouch(
   };
 }
 
+function getAssistantToolCalls(content: unknown): ToolCallBlock[] {
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  return content.filter(isToolCallBlock);
+}
+
+function isToolCallBlock(part: unknown): part is ToolCallBlock {
+  return (
+    isRecord(part) &&
+    part.type === "toolCall" &&
+    typeof part.id === "string" &&
+    typeof part.name === "string" &&
+    isRecord(part.arguments)
+  );
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
 function getToolCallFileTouchOp(toolName: string): FileTouchOp | undefined {
   switch (toolName) {
     case "read":
@@ -650,182 +672,15 @@ function trimmedText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function groupEntriesByParent(entries: SessionEntry[]): Map<string | null, SessionEntry[]> {
-  const byParent = new Map<string | null, SessionEntry[]>();
-
-  for (const entry of entries) {
-    const parentId = entry.parentId ?? null;
-    const bucket = byParent.get(parentId);
-    if (bucket) {
-      bucket.push(entry);
-      continue;
-    }
-
-    byParent.set(parentId, [entry]);
+function truncateText(text: string, limit: number): string {
+  if (text.length <= limit) {
+    return text;
   }
-
-  for (const childEntries of byParent.values()) {
-    childEntries.sort((a, b) => (a.timestamp ?? "").localeCompare(b.timestamp ?? ""));
-  }
-
-  return byParent;
-}
-
-function buildSessionTreeHeader(parsed: ParsedSessionFile, sessionPath: string): string[] {
-  const durableHandoffMetadata = findDurableHandoffMetadata(
-    parsed.entries,
-    parsed.header.timestamp,
-  );
-  const lines = [
-    `# Session ${parsed.sessionName || parsed.header.id}`,
-    "",
-    `- session_id: ${parsed.header.id}`,
-    `- session_path: ${sessionPath}`,
-    `- cwd: ${parsed.header.cwd}`,
-    `- started_at: ${parsed.header.timestamp}`,
-  ];
-
-  if (parsed.header.parentSession) {
-    lines.push(`- parent_session: ${parsed.header.parentSession}`);
-  }
-
-  if (durableHandoffMetadata) {
-    lines.push(
-      `- session_origin: ${durableHandoffMetadata.metadata.origin}`,
-      `- handoff_goal: ${durableHandoffMetadata.metadata.goal}`,
-      `- handoff_next_task: ${durableHandoffMetadata.metadata.nextTask}`,
-    );
-  }
-
-  lines.push("", "## Session Tree", "");
-  return lines;
-}
-
-export interface RenderedSessionTree {
-  markdown: string;
-  sessionId: string;
-  sessionName: string;
-}
-
-export function renderSessionTreeMarkdown(
-  sessionPath: string,
-  options?: { maxChars?: number },
-): RenderedSessionTree {
-  const parsed = parseSessionFile(sessionPath);
-  if (!parsed) {
-    throw new Error(`Unable to parse session file: ${sessionPath}`);
-  }
-
-  const byParent = groupEntriesByParent(parsed.entries);
-  const lines = buildSessionTreeHeader(parsed, sessionPath);
-
-  const roots = byParent.get(null) ?? [];
-  for (const root of roots) {
-    renderTreeSegment(root, byParent, lines);
-  }
-
-  const markdown = lines.join("\n");
-  const maxChars = options?.maxChars;
-  if (maxChars === undefined || markdown.length <= maxChars) {
-    return { markdown, sessionId: parsed.header.id, sessionName: parsed.sessionName };
-  }
-
-  return {
-    markdown: `${markdown.slice(0, maxChars)}\n\n[session tree truncated to ${maxChars} characters]`,
-    sessionId: parsed.header.id,
-    sessionName: parsed.sessionName,
-  };
-}
-
-function renderTreeSegment(
-  start: SessionEntry,
-  byParent: Map<string | null, SessionEntry[]>,
-  lines: string[],
-  depth = 0,
-): void {
-  let current: SessionEntry | undefined = start;
-
-  while (current) {
-    appendEntryLines(lines, describeEntry(current, byParent), depth);
-
-    const children = getRenderableChildren(current, byParent);
-    if (children.length === 0) {
-      return;
-    }
-
-    if (children.length === 1) {
-      current = children[0];
-      continue;
-    }
-
-    lines.push(`${"  ".repeat(depth)}  branches:`);
-    for (const child of children) {
-      renderTreeSegment(child, byParent, lines, depth + 1);
-    }
-    return;
-  }
-}
-
-function appendEntryLines(lines: string[], entryLines: string[], depth: number): void {
-  if (entryLines.length === 0) return;
-
-  const indent = "  ".repeat(depth);
-  lines.push(`${indent}- ${entryLines[0]}`);
-  for (let i = 1; i < entryLines.length; i++) {
-    lines.push(`${indent}  ${entryLines[i]}`);
-  }
-}
-
-function describeEntry(
-  entry: SessionEntry,
-  byParent: Map<string | null, SessionEntry[]>,
-): string[] {
-  switch (entry.type) {
-    case "message":
-      return describeMessageEntry(entry, byParent);
-    case "branch_summary":
-      return [describeLabeledText("Branch summary", entry.summary, 220)];
-    case "compaction":
-      return [describeLabeledText("Compaction summary", entry.summary, 220)];
-    case "session_info":
-      return [describeLabeledText("Session name", entry.name, 180)];
-    case "model_change":
-      return [`Model: ${entry.provider}/${entry.modelId}`];
-    case "thinking_level_change":
-      return [`Thinking: ${entry.thinkingLevel}`];
-    default:
-      return [entry.type];
-  }
-}
-
-function describeMessageEntry(
-  entry: MessageEntry,
-  byParent: Map<string | null, SessionEntry[]>,
-): string[] {
-  const { message } = entry;
-
-  switch (message.role) {
-    case "user":
-      return [`User: ${fullText(contentToText(message.content))}`];
-    case "assistant":
-      return describeAssistantMessage(entry, byParent, message);
-    case "toolResult":
-      return [];
-    case "bashExecution":
-      return [`Bash ${previewText(message.command, 120)}: ${previewText(message.output, 220)}`];
-    case "custom":
-      return [`Custom: ${fullText(contentToText(message.content))}`];
-    default:
-      return [describeFallbackMessage(message)];
-  }
-}
-
-function describeLabeledText(label: string, value: unknown, limit: number): string {
-  return `${label}: ${previewText(trimmedText(value), limit)}`;
+  return `${text.slice(0, limit)}…`;
 }
 
 function extractMessageChunks(
-  entryId: string | undefined,
+  entryId: string,
   fallbackTs: string,
   message: AgentMessage,
 ): SearchTextChunk[] {
@@ -842,13 +697,16 @@ function extractMessageChunks(
       );
     }
     case "assistant": {
-      return buildOptionalMessageChunk(
-        entryId,
-        "assistant",
-        ts,
-        "assistant_text",
-        contentToText(message.content),
-      );
+      return [
+        ...buildOptionalMessageChunk(
+          entryId,
+          "assistant",
+          ts,
+          "assistant_text",
+          contentToText(message.content),
+        ),
+        ...extractToolCallChunks(entryId, ts, message),
+      ];
     }
     case "toolResult": {
       return buildOptionalMessageChunk(
@@ -889,8 +747,27 @@ function extractMessageChunks(
   }
 }
 
+function extractToolCallChunks(
+  entryId: string,
+  ts: string,
+  message: AssistantMessage,
+): SearchTextChunk[] {
+  return getAssistantToolCalls(message.content).map((toolCall) =>
+    createMessageChunk(
+      entryId,
+      "assistant",
+      ts,
+      "tool_call",
+      truncateText(
+        `${toolCall.name} ${JSON.stringify(toolCall.arguments ?? {})}`,
+        TOOL_CALL_TEXT_LIMIT,
+      ),
+    ),
+  );
+}
+
 function createMessageChunk(
-  entryId: string | undefined,
+  entryId: string,
   role: string,
   ts: string,
   sourceKind: string,
@@ -907,7 +784,7 @@ function createMessageChunk(
 }
 
 function buildOptionalMessageChunk(
-  entryId: string | undefined,
+  entryId: string,
   role: string,
   ts: string,
   sourceKind: string,
@@ -920,230 +797,13 @@ function buildOptionalMessageChunk(
   return [createMessageChunk(entryId, role, ts, sourceKind, text)];
 }
 
-function contentToText(content: unknown): string {
-  if (typeof content === "string") {
-    return content.trim();
-  }
-
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
-  return content
-    .filter(isTextBlock)
-    .map((part) => part.text)
-    .join("\n")
-    .trim();
-}
-
-function isTextBlock(part: unknown): part is TextBlock {
-  return isRecord(part) && part.type === "text" && typeof part.text === "string";
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
-function describeAssistantMessage(
-  entry: MessageEntry,
-  byParent: Map<string | null, SessionEntry[]>,
-  assistantMessage: AssistantMessage,
-): string[] {
-  const blocks: string[] = [];
-  const text = contentToText(assistantMessage.content);
-  if (text) {
-    blocks.push(`Assistant: ${fullText(text)}`);
-  }
-
-  const toolCalls = getAssistantToolCalls(assistantMessage.content);
-  const toolResults = getToolResults(entry, byParent);
-  const resultsByCallId = new Map<string, ToolResultEntry[]>();
-  for (const result of toolResults) {
-    const toolCallId = result.message.toolCallId;
-    if (!toolCallId) continue;
-    const existing = resultsByCallId.get(toolCallId) ?? [];
-    existing.push(result);
-    resultsByCallId.set(toolCallId, existing);
-  }
-
-  for (const toolCall of toolCalls) {
-    const toolResultGroup = resultsByCallId.get(toolCall.id) ?? [];
-    blocks.push(...describeToolOperation(toolCall, toolResultGroup));
-  }
-
-  return blocks.length > 0 ? blocks : ["Assistant"];
-}
-
-function getAssistantToolCalls(content: unknown): ToolCallBlock[] {
-  if (!Array.isArray(content)) {
-    return [];
-  }
-
-  return content.filter(isToolCallBlock);
-}
-
-function isToolCallBlock(part: unknown): part is ToolCallBlock {
-  return (
-    isRecord(part) &&
-    part.type === "toolCall" &&
-    typeof part.id === "string" &&
-    typeof part.name === "string" &&
-    isRecord(part.arguments)
-  );
-}
-
-function getChildEntries(
-  entryId: string | undefined,
-  byParent: Map<string | null, SessionEntry[]>,
-): SessionEntry[] {
-  return byParent.get(entryId ?? null) ?? [];
-}
-
-function getDescendantChildren(
-  entries: SessionEntry[],
-  byParent: Map<string | null, SessionEntry[]>,
-): SessionEntry[] {
-  const descendants: SessionEntry[] = [];
-
-  for (const entry of entries) {
-    descendants.push(...getChildEntries(entry.id, byParent));
-  }
-
-  return descendants;
-}
-
-function isToolResultEntry(entry: SessionEntry): entry is ToolResultEntry {
-  return entry.type === "message" && entry.message.role === "toolResult";
-}
-
-function getToolResults(
-  entry: MessageEntry,
-  byParent: Map<string | null, SessionEntry[]>,
-): ToolResultEntry[] {
-  const results: ToolResultEntry[] = [];
-  let currentChildren = getChildEntries(entry.id, byParent);
-
-  while (currentChildren.length > 0) {
-    const toolResults = currentChildren.filter(isToolResultEntry);
-
-    if (toolResults.length === 0) {
-      break;
-    }
-
-    results.push(...toolResults);
-    currentChildren = getDescendantChildren(toolResults, byParent);
-  }
-
-  return results;
-}
-
-function getRenderableChildren(
-  entry: SessionEntry,
-  byParent: Map<string | null, SessionEntry[]>,
-): SessionEntry[] {
-  let currentChildren = getChildEntries(entry.id, byParent);
-
-  while (currentChildren.length > 0) {
-    const nonToolResultChildren = currentChildren.filter((child) => !isToolResultEntry(child));
-    if (nonToolResultChildren.length > 0) {
-      return nonToolResultChildren;
-    }
-
-    currentChildren = getDescendantChildren(currentChildren, byParent);
-  }
-
-  return [];
-}
-
-function describeToolOperation(toolCall: ToolCallBlock, toolResults: ToolResultEntry[]): string[] {
-  const args = toolCall.arguments ?? {};
-  const resultLines = summarizeToolResults(toolCall.name, toolResults);
-
-  switch (toolCall.name) {
-    case "read":
-      return formatToolOperation(`Read ${stringArg(args.path, "(unknown path)")}`, resultLines);
-    case "bash":
-      return formatToolOperation(
-        `Bash ${fullText(stringArg(args.command, "(no command)"))}`,
-        resultLines,
-      );
-    case "search_web":
-      return formatToolOperation(`Search web ${fullText(JSON.stringify(args))}`, resultLines);
-    case "fetch_web":
-      return formatToolOperation(`Fetch web ${fullText(JSON.stringify(args))}`, resultLines);
-    case "edit":
-      return formatToolOperation(`Edit ${stringArg(args.path, "(unknown path)")}`, resultLines);
-    case "write":
-      return formatToolOperation(`Write ${stringArg(args.path, "(unknown path)")}`, resultLines);
-    default:
-      return formatToolOperation(toolCall.name, resultLines);
-  }
-}
-
-function stringArg(value: unknown, fallback: string): string {
-  return typeof value === "string" ? value : fallback;
-}
-
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
-}
-
-function summarizeToolResults(toolName: string, toolResults: ToolResultEntry[]): string[] {
-  if (toolResults.length === 0) {
-    return ["(pending result)"];
-  }
-
-  const shouldTruncate = toolName !== "write";
-  const parts = toolResults
-    .map((toolResult) => {
-      const text = contentToText(toolResult.message.content);
-      return shouldTruncate ? truncateText(text, TOOL_RESULT_TEXT_LIMIT) : text;
-    })
-    .filter((text) => text.trim().length > 0);
-
-  if (parts.length === 0) {
-    return ["(no text output)"];
-  }
-
-  return parts;
-}
-
-function formatToolOperation(label: string, resultLines: string[]): string[] {
-  return [label, "```", ...resultLines, "```"];
-}
-
-function truncateText(text: string, limit: number): string {
-  if (text.length <= limit) return text;
-  return `${text.slice(0, limit)}…`;
-}
-
-function fullText(text: string): string {
-  const cleaned = text.replace(/\s+/g, " ").trim();
-  return cleaned || "(no text)";
-}
-
-function previewText(text: string, limit: number): string {
-  return truncateText(fullText(text), limit);
-}
-
-type MessageEntry = SessionMessageEntry;
-
 interface SummaryDetails {
   readFiles?: unknown;
   modifiedFiles?: unknown;
 }
 
-interface TextBlock {
-  type: "text";
-  text: string;
-}
-
 type ToolCallBlock = ToolCall & {
   arguments: Record<string, unknown>;
-};
-
-type ToolResultEntry = MessageEntry & {
-  message: ToolResultMessage;
 };
 
 function isSessionEntry(entry: SessionHeader | SessionEntry): entry is SessionEntry {
@@ -1152,14 +812,4 @@ function isSessionEntry(entry: SessionHeader | SessionEntry): entry is SessionEn
 
 function getSummaryDetails(details: unknown): SummaryDetails | undefined {
   return safeParseTypeBoxValue(SUMMARY_DETAILS_SCHEMA, details);
-}
-
-function describeFallbackMessage(message: AgentMessage): string {
-  return hasMessageContent(message)
-    ? `${message.role}: ${fullText(contentToText(message.content))}`
-    : message.role;
-}
-
-function hasMessageContent(message: AgentMessage): message is AgentMessage & { content: unknown } {
-  return "content" in message;
 }

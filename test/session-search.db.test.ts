@@ -10,6 +10,7 @@ import {
   insertSessionFileTouch,
   insertTextChunk,
   openIndexDatabase,
+  searchSessionChunks,
   searchSessions,
   setMetadata,
   upsertSession,
@@ -132,6 +133,77 @@ describe("session-search db", () => {
     ]);
     expect(fileHits[0]?.score).toBe(0);
     expect(fileHits[0]?.hitCount).toBe(1);
+  });
+
+  it("searches text chunks as scoped entry-level hits", () => {
+    const dir = testFs.createTempDir();
+    const dbPath = path.join(dir, "index.sqlite");
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    insertSession(
+      db,
+      {
+        sessionId: "session-1",
+        sessionPath: "/tmp/session-1.jsonl",
+        sessionName: "First",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:10:00.000Z",
+        messageCount: 1,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    insertSession(
+      db,
+      {
+        sessionId: "session-2",
+        sessionPath: "/tmp/session-2.jsonl",
+        sessionName: "Second",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:20:00.000Z",
+        modifiedAt: "2026-03-22T00:30:00.000Z",
+        messageCount: 1,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
+      sessionId: "session-1",
+      entryId: "entry-1",
+      entryType: "message",
+      role: "user",
+      ts: "2026-03-22T00:01:00.000Z",
+      sourceKind: "user_text",
+      text: "navigation anchor alpha",
+    });
+    insertTextChunk(db, {
+      sessionId: "session-2",
+      entryId: "entry-2",
+      entryType: "message",
+      role: "user",
+      ts: "2026-03-22T00:21:00.000Z",
+      sourceKind: "user_text",
+      text: "navigation anchor alpha",
+    });
+
+    const hits = searchSessionChunks(db, {
+      sessionIds: ["session-1"],
+      query: "navigation alpha",
+      limit: 10,
+    });
+    db.close();
+
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({
+      sessionId: "session-1",
+      entryId: "entry-1",
+      sourceKind: "user_text",
+      ts: "2026-03-22T00:01:00.000Z",
+    });
   });
 
   it("filters changed files separately from touched files", () => {

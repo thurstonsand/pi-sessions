@@ -1,9 +1,7 @@
-import type { Message } from "@earendil-works/pi-ai";
-import { complete } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { getKeybindings, type Keybinding, Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { type RenderedSessionTree, renderSessionTreeMarkdown } from "./session-search/extract.ts";
+import { runSessionAskAgent } from "./session-ask/agent.ts";
 import {
   getSessionById,
   type SessionLineageRow,
@@ -12,10 +10,6 @@ import {
 import { formatSessionTitleOrShortId, isExactSessionId } from "./shared/session-ui.ts";
 import { loadSettings } from "./shared/settings.ts";
 
-const SESSION_ASK_SYSTEM_PROMPT = `You are analyzing a Pi coding session transcript. The transcript includes the entire session tree, including abandoned branches and summaries.
-
-Answer the user's question using only the session contents. Be specific and concise. Include exact file paths, decisions, and outcomes when present. If the answer is not in the session, say so clearly.`;
-
 const COLLAPSED_ANSWER_PREVIEW_ROWS = 6;
 
 interface SessionAskToolParams {
@@ -23,17 +17,19 @@ interface SessionAskToolParams {
   question: string;
 }
 
+interface SessionAskRelevantFile {
+  path: string;
+  reason: string;
+}
+
 interface SessionAskToolDetails {
   answer?: string | undefined;
+  debugSessionPath?: string | undefined;
   question?: string | undefined;
+  relevantFiles?: SessionAskRelevantFile[] | undefined;
   sessionId?: string | undefined;
   sessionName?: string | undefined;
   sessionPath?: string | undefined;
-}
-
-interface TextContentBlock {
-  type: "text";
-  text: string;
 }
 
 export default function sessionAskExtension(pi: ExtensionAPI): void {
@@ -70,15 +66,6 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         throw new Error(resolvedTarget.error ?? "Unable to resolve session id.");
       }
 
-      if (!ctx.model) {
-        throw new Error("No active model is available for session_ask.");
-      }
-
-      const auth = await ctx.modelRegistry.getApiKeyAndHeaders(ctx.model);
-      if (!auth.ok || !auth.apiKey) {
-        throw new Error(`No API key is available for ${ctx.model.provider}/${ctx.model.id}.`);
-      }
-
       const progressDetails: SessionAskToolDetails = {
         question,
         sessionId: resolvedTarget.resolved.sessionId,
@@ -90,63 +77,41 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         details: progressDetails,
       });
 
-      let rendered: RenderedSessionTree;
-      try {
-        rendered = renderSessionTreeMarkdown(resolvedTarget.resolved.sessionPath);
-      } catch (error) {
-        throw new Error(formatSessionAskLoadError(resolvedTarget.resolved.sessionPath, error));
-      }
-
-      const loadedDetails: SessionAskToolDetails = {
-        question,
-        sessionId: rendered.sessionId,
-        sessionName: rendered.sessionName,
-        sessionPath: resolvedTarget.resolved.sessionPath,
-      };
       onUpdate?.({
         content: [
           {
             type: "text",
-            text: formatSessionAskHeader(rendered.sessionId, rendered.sessionName, question),
+            text: formatSessionAskHeader(
+              resolvedTarget.resolved.sessionId,
+              resolvedTarget.resolved.sessionName,
+              question,
+            ),
           },
         ],
-        details: loadedDetails,
+        details: progressDetails,
       });
 
-      const userMessage: Message = {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: [`## Session`, rendered.markdown, "", "## Question", question].join("\n"),
-          },
-        ],
-        timestamp: Date.now(),
-      };
+      const agentResult = await runSessionAskAgent({
+        ctx,
+        target: resolvedTarget.resolved,
+        question,
+        indexPath: settings.index.path,
+        askSettings: settings.ask,
+        thinkingLevel: pi.getThinkingLevel(),
+        signal,
+      });
 
-      const response = await complete(
-        ctx.model,
-        { systemPrompt: SESSION_ASK_SYSTEM_PROMPT, messages: [userMessage] },
-        signal
-          ? {
-              apiKey: auth.apiKey,
-              ...(auth.headers ? { headers: auth.headers } : {}),
-              signal,
-            }
-          : {
-              apiKey: auth.apiKey,
-              ...(auth.headers ? { headers: auth.headers } : {}),
-            },
-      );
-
-      if (response.stopReason === "aborted") {
+      if (signal?.aborted) {
         throw new Error("Session ask was cancelled.");
       }
 
-      const answer = collectTextBlocks(response.content).join("\n").trim();
+      const answer = agentResult?.answer || "Could not determine an answer from the session.";
+      const relevantFiles = agentResult?.relevantFiles ?? [];
 
       const details: SessionAskToolDetails = {
         answer,
+        debugSessionPath: agentResult?.debugSessionPath,
+        relevantFiles,
         sessionId: resolvedTarget.resolved.sessionId,
         sessionName: resolvedTarget.resolved.sessionName,
         sessionPath: resolvedTarget.resolved.sessionPath,
@@ -157,8 +122,12 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
           {
             type: "text",
             text: [
-              formatSessionAskHeader(rendered.sessionId, rendered.sessionName, question),
-              answer || "No answer generated.",
+              formatSessionAskHeader(
+                resolvedTarget.resolved.sessionId,
+                resolvedTarget.resolved.sessionName,
+                question,
+              ),
+              formatSessionAskAnswer(answer, relevantFiles, agentResult?.debugSessionPath),
             ].join("\n\n"),
           },
         ],
@@ -229,16 +198,28 @@ function resolveSessionAskTarget(
   }
 }
 
-function collectTextBlocks(content: Array<{ type: string; text?: string }>): string[] {
-  return content.filter(isTextContentBlock).map((block) => block.text);
-}
-
 function formatSessionAskHeader(sessionId: string, sessionName: string, question: string): string {
   return [
     `session: ${sessionId}`,
     `title: ${sessionName || "[unnamed]"}`,
     `question: ${question}`,
   ].join("\n");
+}
+
+function formatSessionAskAnswer(
+  answer: string,
+  relevantFiles: SessionAskRelevantFile[],
+  debugSessionPath: string | undefined,
+): string {
+  const lines = [answer || "No answer generated."];
+  if (relevantFiles.length > 0) {
+    lines.push("", "Relevant files:");
+    lines.push(...relevantFiles.map((file) => `- ${file.path}: ${file.reason}`));
+  }
+  if (debugSessionPath) {
+    lines.push("", `debug_session: ${debugSessionPath}`);
+  }
+  return lines.join("\n");
 }
 
 function formatSessionAskAnswerPreview(answer: string, expanded: boolean, theme: Theme): string[] {
@@ -262,16 +243,4 @@ function formatOverflowHint(remaining: number, total: number, theme: Theme): str
 
 function formatKeyHint(keybinding: Keybinding): string {
   return getKeybindings().getKeys(keybinding).join("/");
-}
-
-function formatSessionAskLoadError(sessionPath: string, error: unknown): string {
-  if (error instanceof Error && "code" in error && error.code === "ENOENT") {
-    return `Session file not found: ${sessionPath}`;
-  }
-
-  return `Unable to load session file: ${sessionPath}`;
-}
-
-function isTextContentBlock(content: { type: string; text?: string }): content is TextContentBlock {
-  return content.type === "text" && typeof content.text === "string";
 }

@@ -30,6 +30,7 @@ describe("pi-sessions auto-title settings", () => {
     expect(settings.autoTitle.refreshTurns).toBe(DEFAULT_AUTO_TITLE_REFRESH_TURNS);
     expect(settings.autoTitle.model).toBeUndefined();
     expect(settings.autoTitle.prompt).toBe(DEFAULT_AUTO_TITLE_PROMPT);
+    expect(settings.ask.persistRuns).toBe(false);
   });
 
   it("reads explicit auto-title settings from global settings", () => {
@@ -63,6 +64,37 @@ describe("pi-sessions auto-title settings", () => {
     });
     expect(settings.autoTitle.model?.toString()).toBe("openai/gpt-5.4-mini");
     expect(settings.autoTitle.prompt).toBe("Use terse subsystem titles.");
+  });
+
+  it("reads explicit ask settings from global settings", () => {
+    const agentDir = testFs.createTempDir();
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    writeFileSync(
+      path.join(agentDir, "settings.json"),
+      `${JSON.stringify(
+        {
+          sessions: {
+            ask: {
+              model: "anthropic/claude-sonnet-4-5",
+              thinkingLevel: "xhigh",
+              persistRuns: true,
+            },
+          },
+        },
+        null,
+        2,
+      )}
+`,
+    );
+
+    const settings = loadSettings();
+    expect(settings.ask.model).toMatchObject({
+      provider: "anthropic",
+      modelId: "claude-sonnet-4-5",
+    });
+    expect(settings.ask.thinkingLevel).toBe("xhigh");
+    expect(settings.ask.persistRuns).toBe(true);
   });
 
   it("ignores project settings and only reads global auto-title settings", () => {

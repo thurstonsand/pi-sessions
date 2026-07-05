@@ -38,7 +38,7 @@ No build/compile step — The pi framework loads extensions directly from TypeSc
 ## Project structure
 
 - **Session search**: entrypoint at `extensions/session-search.ts`; core logic at `extensions/session-search/` and `extensions/shared/session-index/`.
-- **Session ask**: entrypoint at `extensions/session-ask.ts`; core logic at `extensions/session-search/extract.ts` and `extensions/shared/session-index/`.
+- **Session ask**: entrypoint at `extensions/session-ask.ts`; navigation agent logic at `extensions/session-ask/`; retrieval support at `extensions/shared/session-index/`.
 - **Session index**: entrypoint at `extensions/session-index.ts`; core logic at `extensions/session-search/reindex.ts` and `extensions/shared/session-index/`.
 - **Session hooks**: entrypoint at `extensions/session-hooks.ts`; core logic at `extensions/session-search/hooks.ts`.
 - **Session handoff**: entrypoint at `extensions/session-handoff.ts`; core logic at `extensions/session-handoff/`.

@@ -60,11 +60,12 @@ const SEARCH_CHUNK_ROW_SCHEMA = Type.Object({
   sessionId: Type.String(),
   snippet: Type.String(),
   rank: Type.Number(),
-  entryId: NULLABLE_STRING_SCHEMA,
+  entryId: Type.String(),
   sourceKind: Type.String(),
+  ts: Type.String(),
 });
 
-type SearchChunkRow = Static<typeof SEARCH_CHUNK_ROW_SCHEMA>;
+export type SearchChunkRow = Static<typeof SEARCH_CHUNK_ROW_SCHEMA>;
 
 const FILE_TOUCH_MATCH_ROW_SCHEMA = Type.Object({
   sessionId: Type.String(),
@@ -79,7 +80,7 @@ const FILE_TOUCH_MATCH_ROW_SCHEMA = Type.Object({
 
 type FileTouchMatchRow = Static<typeof FILE_TOUCH_MATCH_ROW_SCHEMA>;
 
-interface SearchFilters {
+interface SearchWhereFilters {
   after: string | undefined;
   before: string | undefined;
   cwd: string | undefined;
@@ -87,11 +88,14 @@ interface SearchFilters {
   repo: string | undefined;
   touched: string[];
   changed: string[];
+  excludeSessionIds: string[];
+  includeSessionIds: string[] | undefined;
+}
+
+interface SearchFilters extends SearchWhereFilters {
   limit: number;
   sort: SearchSort | undefined;
   query: string | undefined;
-  excludeSessionIds: string[];
-  includeSessionIds: string[] | undefined;
 }
 
 interface FileFilterQuery {
@@ -329,9 +333,31 @@ function searchFilteredSessions(
     .sort(compareByRelevance);
 }
 
+export function searchSessionChunks(
+  db: SessionIndexDatabase,
+  params: { sessionIds?: string[] | undefined; query: string; limit?: number | undefined },
+): SearchChunkRow[] {
+  const query = params.query.trim();
+  if (!query) {
+    return [];
+  }
+
+  const compiledQuery = compileSearchQuery(query);
+  if (!compiledQuery) {
+    return [];
+  }
+
+  return getTextMatchRows(
+    db,
+    createSessionIdWhereFilters(params.sessionIds),
+    compiledQuery,
+    normalizeResultLimit(params.limit),
+  );
+}
+
 function getTextMatchRows(
   db: SessionIndexDatabase,
-  filters: SearchFilters,
+  filters: SearchWhereFilters,
   compiledQuery: CompiledSearchQuery,
   limit: number,
   allowedSessionIds?: Set<string> | undefined,
@@ -350,7 +376,8 @@ function getTextMatchRows(
           snippet(session_text_chunks_fts, 0, ?, ?, ?, 16) as snippet,
           bm25(session_text_chunks_fts) as rank,
           c.entry_id as entryId,
-          c.source_kind as sourceKind
+          c.source_kind as sourceKind,
+          c.ts as ts
         FROM session_text_chunks_fts
         JOIN session_text_chunks c ON c.id = session_text_chunks_fts.rowid
         JOIN sessions s ON s.session_id = c.session_id
@@ -374,6 +401,20 @@ function getTextMatchRows(
       ),
     "Invalid text search rows",
   );
+}
+
+function createSessionIdWhereFilters(sessionIds: string[] | undefined): SearchWhereFilters {
+  return {
+    after: undefined,
+    before: undefined,
+    cwd: undefined,
+    cwdLike: undefined,
+    repo: undefined,
+    touched: [],
+    changed: [],
+    excludeSessionIds: [],
+    includeSessionIds: sessionIds === undefined ? undefined : sanitizeFilterValues(sessionIds),
+  };
 }
 
 function getCandidateFileTouches(
@@ -547,7 +588,7 @@ function addTextEvidence(
       sourceKind: row.sourceKind,
       snippet: row.snippet,
       score,
-      entryId: row.entryId ?? undefined,
+      entryId: row.entryId,
     });
     accumulator.textEvidenceCount += 1;
   }
@@ -559,7 +600,7 @@ function addTextEvidence(
 }
 
 function getTextEvidenceKey(row: SearchChunkRow): string {
-  return row.entryId ? `${row.entryId}:${row.sourceKind}` : `${row.sourceKind}:${row.snippet}`;
+  return `${row.entryId}:${row.sourceKind}`;
 }
 
 function buildSearchResult(
@@ -666,7 +707,7 @@ function getSessionIdEvidenceForToken(
   return undefined;
 }
 
-function buildSessionWhereClause(alias: string, filters: SearchFilters): SqlClause {
+function buildSessionWhereClause(alias: string, filters: SearchWhereFilters): SqlClause {
   const conditions: string[] = [];
   const args: Array<string | number | null> = [];
 

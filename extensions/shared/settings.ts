@@ -1,5 +1,6 @@
 import os from "node:os";
 import path from "node:path";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
@@ -22,7 +23,15 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
     Type.Object({
       refreshTurns: Type.Optional(Type.Integer({ minimum: 1 })),
       model: Type.Optional(Type.String()),
+      thinkingLevel: Type.Optional(Type.String()),
       prompt: Type.Optional(Type.String()),
+    }),
+  ),
+  ask: Type.Optional(
+    Type.Object({
+      model: Type.Optional(Type.String()),
+      thinkingLevel: Type.Optional(Type.String()),
+      persistRuns: Type.Optional(Type.Boolean()),
     }),
   ),
 });
@@ -41,10 +50,18 @@ export class ModelReference {
   }
 }
 
-export interface AutoTitleSettings {
+export interface AgentModelSettings {
+  model?: ModelReference | undefined;
+  thinkingLevel?: ThinkingLevel | undefined;
+}
+
+export interface AutoTitleSettings extends AgentModelSettings {
   refreshTurns: number;
-  model: ModelReference | undefined;
   prompt: string;
+}
+
+export interface AskSettings extends AgentModelSettings {
+  persistRuns: boolean;
 }
 
 export interface SessionSettings {
@@ -55,6 +72,7 @@ export interface SessionSettings {
     path: string;
   };
   autoTitle: AutoTitleSettings;
+  ask: AskSettings;
 }
 
 type SessionFileSettings = Static<typeof SESSION_FILE_SETTINGS_SCHEMA>;
@@ -65,6 +83,10 @@ export function getDefaultIndexDir(): string {
 
 export function getDefaultIndexPath(): string {
   return path.join(getDefaultIndexDir(), "index.sqlite");
+}
+
+export function getDefaultSessionAskRunsDir(): string {
+  return path.join(getDefaultIndexDir(), "session-ask");
 }
 
 function expandHome(rawPath: string): string {
@@ -102,7 +124,7 @@ function normalizePickerShortcut(value: string | undefined): KeyId {
   return (trimmed ? trimmed : "alt+o") as KeyId;
 }
 
-function parseModelReference(value: string | undefined): ModelReference | undefined {
+export function parseModelReference(value: string | undefined): ModelReference | undefined {
   const trimmed = value?.trim();
   if (!trimmed) {
     return undefined;
@@ -114,6 +136,37 @@ function parseModelReference(value: string | undefined): ModelReference | undefi
   }
 
   return new ModelReference(trimmed.slice(0, slashIndex), trimmed.slice(slashIndex + 1));
+}
+
+function parseThinkingLevel(value: string | undefined): ThinkingLevel | undefined {
+  const trimmed = value?.trim();
+  switch (trimmed) {
+    case "off":
+    case "minimal":
+    case "low":
+    case "medium":
+    case "high":
+    case "xhigh":
+      return trimmed;
+    default:
+      return undefined;
+  }
+}
+
+function resolveAgentModelSettings(
+  value:
+    | {
+        model?: string | undefined;
+        thinkingLevel?: string | undefined;
+      }
+    | undefined,
+): AgentModelSettings {
+  const model = parseModelReference(value?.model);
+  const thinkingLevel = parseThinkingLevel(value?.thinkingLevel);
+  return {
+    ...(model ? { model } : {}),
+    ...(thinkingLevel ? { thinkingLevel } : {}),
+  };
 }
 
 function normalizeAutoTitlePrompt(value: string | undefined): string {
@@ -138,9 +191,13 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
       path: path.join(indexDir, "index.sqlite"),
     },
     autoTitle: {
+      ...resolveAgentModelSettings(fileSettings.autoTitle),
       refreshTurns: fileSettings.autoTitle?.refreshTurns ?? DEFAULT_AUTO_TITLE_REFRESH_TURNS,
-      model: parseModelReference(fileSettings.autoTitle?.model),
       prompt: normalizeAutoTitlePrompt(fileSettings.autoTitle?.prompt),
+    },
+    ask: {
+      ...resolveAgentModelSettings(fileSettings.ask),
+      persistRuns: fileSettings.ask?.persistRuns ?? false,
     },
   };
 }

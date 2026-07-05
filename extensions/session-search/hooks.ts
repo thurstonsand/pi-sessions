@@ -339,10 +339,14 @@ function applyTailSync(
 
       if (scan.sessionName !== undefined && scan.sessionName !== baseline.sessionName) {
         clearSessionChunksBySourceKind(db, baseline.sessionId, "session_name");
-        if (scan.sessionName) {
+        if (scan.sessionName && scan.sessionNameEntryId) {
           insertTextChunk(db, {
             sessionId: baseline.sessionId,
-            ...createSessionNameChunk(scan.sessionName, baseline.startedAt),
+            ...createSessionNameChunk(
+              scan.sessionName,
+              scan.sessionNameTs ?? baseline.startedAt,
+              scan.sessionNameEntryId,
+            ),
           });
         }
       }

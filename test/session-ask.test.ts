@@ -11,19 +11,19 @@ import {
 } from "../extensions/shared/session-index/index.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
-const { completeMock } = vi.hoisted(() => ({
-  completeMock: vi.fn(),
+const { runSessionAskAgentMock } = vi.hoisted(() => ({
+  runSessionAskAgentMock: vi.fn(),
 }));
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({
-  complete: completeMock,
+vi.mock("../extensions/session-ask/agent.ts", () => ({
+  runSessionAskAgent: runSessionAskAgentMock,
 }));
 
 const testFs = createTestFilesystem("pi-sessions-ask-");
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 afterEach(() => {
-  completeMock.mockReset();
+  runSessionAskAgentMock.mockReset();
   if (originalAgentDir === undefined) {
     delete process.env.PI_CODING_AGENT_DIR;
   } else {
@@ -134,9 +134,9 @@ describe("session_ask tool", () => {
     );
     db.close();
 
-    completeMock.mockResolvedValue({
-      content: [{ type: "text", text: "Resolved by exact id." }],
-      stopReason: "stop",
+    runSessionAskAgentMock.mockResolvedValue({
+      answer: "Resolved by exact id.",
+      relevantFiles: [],
     });
 
     const tool = registerSessionAskTool();
@@ -210,9 +210,9 @@ describe("session_ask tool", () => {
     );
     db.close();
 
-    completeMock.mockResolvedValue({
-      content: [{ type: "text", text: "Decisions were made carefully." }],
-      stopReason: "stop",
+    runSessionAskAgentMock.mockResolvedValue({
+      answer: "Decisions were made carefully.",
+      relevantFiles: [],
     });
 
     const tool = registerSessionAskTool();
@@ -246,6 +246,9 @@ function registerSessionAskTool() {
   sessionAskExtension({
     registerTool(tool: ToolDefinition) {
       registeredTool = tool;
+    },
+    getThinkingLevel() {
+      return "off";
     },
   } as unknown as ExtensionAPI);
 

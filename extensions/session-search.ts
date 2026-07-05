@@ -332,7 +332,7 @@ interface SearchTextEvidence {
   sourceKind: string;
   snippet: string;
   score: number;
-  entryId?: string | undefined;
+  entryId: string;
 }
 
 function formatSearchSnippetText(snippet: string): string | undefined {

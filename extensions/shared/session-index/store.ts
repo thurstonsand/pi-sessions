@@ -222,7 +222,7 @@ export function insertTextChunk(db: SessionIndexDatabase, row: SessionTextChunkR
     `,
   ).run(
     row.sessionId,
-    row.entryId ?? null,
+    row.entryId,
     row.entryType,
     row.role ?? null,
     row.ts,

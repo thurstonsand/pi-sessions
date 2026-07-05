@@ -1,5 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { findModelByReference } from "../shared/model.ts";
 import { ModelReference } from "../shared/settings.ts";
 
 const DEFAULT_AUTO_TITLE_FALLBACK_MODELS: readonly ModelReference[] = [
@@ -22,7 +23,7 @@ export function resolveAutoTitleModel(
   const availableModels = ctx.modelRegistry.getAvailable();
 
   if (configuredModel) {
-    const configuredMatch = findMatchingModel(availableModels, configuredModel);
+    const configuredMatch = findModelByReference(availableModels, configuredModel);
     if (configuredMatch) {
       return {
         model: configuredMatch,
@@ -32,7 +33,7 @@ export function resolveAutoTitleModel(
   }
 
   for (const fallbackReference of DEFAULT_AUTO_TITLE_FALLBACK_MODELS) {
-    const fallbackMatch = findMatchingModel(availableModels, fallbackReference);
+    const fallbackMatch = findModelByReference(availableModels, fallbackReference);
     if (fallbackMatch) {
       return {
         model: fallbackMatch,
@@ -49,13 +50,4 @@ export function resolveAutoTitleModel(
     model: ctx.model,
     source: "current",
   };
-}
-
-function findMatchingModel(
-  availableModels: Model<Api>[],
-  reference: ModelReference,
-): Model<Api> | undefined {
-  return availableModels.find(
-    (model) => model.provider === reference.provider && model.id === reference.modelId,
-  );
 }

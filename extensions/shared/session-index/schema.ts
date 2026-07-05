@@ -91,7 +91,7 @@ export function initializeSchema(db: SessionIndexDatabase): void {
     CREATE TABLE IF NOT EXISTS session_text_chunks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL,
-      entry_id TEXT,
+      entry_id TEXT NOT NULL,
       entry_type TEXT NOT NULL,
       role TEXT,
       ts TEXT NOT NULL,

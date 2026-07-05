@@ -73,7 +73,7 @@ export default function sessionSearchExtension(
       query: Type.Optional(
         Type.String({
           description:
-            "Free-text terms to match against. Supports quoted phrases for exact matching, AND/OR/NOT, parentheses, -term negation; use plain terms for prefix matching",
+            "Use plain adjacent terms for normal search. Supports quoted phrases, AND/OR/NOT, parentheses, and -term negation when matching needs to be stricter.",
         }),
       ),
       files: Type.Optional(

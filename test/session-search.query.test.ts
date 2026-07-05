@@ -4,10 +4,16 @@ import { compileSearchQuery } from "../extensions/shared/session-index/query/com
 
 function expectCompiled(
   query: string,
-  expected: { match: string; excludes?: string[]; positiveTerms?: string[] },
+  expected: {
+    match: string;
+    relaxedMatch?: string | undefined;
+    excludes?: string[];
+    positiveTerms?: string[];
+  },
 ): void {
   expect(compileSearchQuery(query)).toEqual({
     match: expected.match,
+    relaxedMatch: expected.relaxedMatch,
     excludes: expected.excludes ?? [],
     positiveTerms: expected.positiveTerms ?? expect.any(Array),
   });
@@ -17,6 +23,7 @@ describe("session search query compiler", () => {
   it("compiles implicit and explicit boolean expressions", () => {
     expectCompiled("sqlite ranking", {
       match: '("sqlite"* AND "ranking"*)',
+      relaxedMatch: '("sqlite"* OR "ranking"*)',
       positiveTerms: ["sqlite", "ranking"],
     });
     expectCompiled("sqlite AND (ranking OR bm25)", {
@@ -32,6 +39,7 @@ describe("session search query compiler", () => {
   it("preserves paths and hyphenated terms as quoted FTS phrases", () => {
     expectCompiled("extensions/session-search.ts session-handoff query*", {
       match: '("extensions/session-search.ts"* AND "session-handoff"* AND "query"*)',
+      relaxedMatch: '("extensions/session-search.ts"* OR "session-handoff"* OR "query"*)',
       positiveTerms: ["extensions/session-search.ts", "session-handoff", "query"],
     });
   });
@@ -40,6 +48,29 @@ describe("session search query compiler", () => {
     expectCompiled('"sqlite" "session search" "query plan"*', {
       match: '("sqlite" AND "session search" AND "query plan"*)',
       positiveTerms: ["sqlite", "session search", "query plan"],
+    });
+  });
+
+  it("only relaxes adjacent unquoted term runs", () => {
+    expectCompiled("foo AND bar baz fud", {
+      match: '("foo"* AND ("bar"* AND "baz"* AND "fud"*))',
+      relaxedMatch: '("foo"* AND ("bar"* OR "baz"* OR "fud"*))',
+      positiveTerms: ["foo", "bar", "baz", "fud"],
+    });
+    expectCompiled("foo AND bar -baz fud", {
+      match: '("foo"* AND "bar"* AND "fud"*)',
+      excludes: ['"baz"*'],
+      positiveTerms: ["foo", "bar", "fud"],
+    });
+    expectCompiled('"session search" ranking cleanup', {
+      match: '("session search" AND ("ranking"* AND "cleanup"*))',
+      relaxedMatch: '("session search" AND ("ranking"* OR "cleanup"*))',
+      positiveTerms: ["session search", "ranking", "cleanup"],
+    });
+    expectCompiled("(a b) OR c", {
+      match: '(("a"* AND "b"*) OR "c"*)',
+      relaxedMatch: '(("a"* OR "b"*) OR "c"*)',
+      positiveTerms: ["a", "b", "c"],
     });
   });
 

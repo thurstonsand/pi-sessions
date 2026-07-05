@@ -55,7 +55,7 @@ Rules:
 const SEARCH_SESSION_PARAMETERS = Type.Object({
   query: Type.String({
     description:
-      "Free-text terms to match within the target session. Supports quoted phrases for exact matching, AND/OR/NOT, parentheses, -term negation; use plain terms for prefix matching.",
+      "Use plain adjacent terms for normal search within the target session. Supports quoted phrases, AND/OR/NOT, parentheses, and -term negation when matching needs to be stricter.",
   }),
   limit: Type.Optional(Type.Number({ description: "Maximum hits to return." })),
 });
@@ -110,7 +110,6 @@ interface SessionAskSearchHit {
   timestamp: string;
   size: number;
   snippet: string;
-  rank: number;
   branch: SessionSearchHitBranch[];
   span?: SessionSearchHitSpan | undefined;
 }
@@ -178,7 +177,6 @@ export async function runSessionAskAgent(params: {
         timestamp: hit.ts,
         size: navigationData.entrySizes.get(hit.entryId) ?? 0,
         snippet: hit.snippet,
-        rank: hit.rank,
         branch: findBranchesForEntry(navigationData, hit.entryId),
         span: findSpanForEntry(navigationData, hit.entryId),
       }));

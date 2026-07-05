@@ -65,7 +65,7 @@ What session did I implement the db layer?
 
 `session_search` searches the local session index by text, repo, cwd, time range, file evidence, and whether a session is currently running.
 
-Queries support quoted phrases, `AND` / `OR` / `NOT`, parentheses, and `-term` negation. Unquoted terms use prefix matching, quoted terms are exact. A search with no query returns matching sessions chronologically, newest first. Use `live: true` to restrict results to currently running sessions.
+Queries support regular text for normal usage, quoted phrases, `AND` / `OR` / `NOT`, parentheses, and `-term` negation when matching needs to be stricter. Unquoted terms use prefix matching, quoted terms are exact. A search with no query returns matching sessions chronologically, newest first. Use `live: true` to restrict results to currently running sessions.
 
 File filters distinguish read-or-write evidence from write-only evidence:
 

@@ -1,4 +1,5 @@
 import {
+  type QueryAdjacencyNode,
   type QueryAndNode,
   type QueryNotNode,
   type QueryOrNode,
@@ -43,16 +44,16 @@ class Parser {
   }
 
   private parseAnd(): SearchQueryNode {
-    const children = [this.parseUnary()];
+    const children = [this.parseAdjacencyRun()];
 
     while (true) {
       if (this.match("and")) {
-        children.push(this.parseUnary());
+        children.push(this.parseAdjacencyRun());
         continue;
       }
 
       if (this.startsUnary(this.peek())) {
-        children.push(this.parseUnary());
+        children.push(this.parseAdjacencyRun());
         continue;
       }
 
@@ -60,6 +61,31 @@ class Parser {
     }
 
     return buildAndNode(children);
+  }
+
+  private parseAdjacencyRun(): SearchQueryNode {
+    const first = this.peek();
+    if (!isUnquotedTerm(first)) {
+      return this.parseUnary();
+    }
+
+    const children: QueryTermNode[] = [];
+    while (true) {
+      const token = this.peek();
+      if (!isUnquotedTerm(token)) {
+        break;
+      }
+
+      this.index += 1;
+      children.push({
+        kind: "term",
+        value: token.value,
+        quoted: token.quoted,
+        prefix: token.prefix,
+      });
+    }
+
+    return buildAdjacencyNode(children);
   }
 
   private parseUnary(): SearchQueryNode {
@@ -135,4 +161,18 @@ function buildOrNode(children: SearchQueryNode[]): SearchQueryNode {
   }
 
   return { kind: "or", children } satisfies QueryOrNode;
+}
+
+function buildAdjacencyNode(children: QueryTermNode[]): SearchQueryNode {
+  if (children.length === 1) {
+    return children[0] as SearchQueryNode;
+  }
+
+  return { kind: "adjacency", children } satisfies QueryAdjacencyNode;
+}
+
+function isUnquotedTerm(
+  token: QueryToken | undefined,
+): token is Extract<QueryToken, { kind: "term" }> {
+  return token?.kind === "term" && !token.quoted;
 }

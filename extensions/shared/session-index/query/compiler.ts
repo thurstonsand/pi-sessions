@@ -3,6 +3,7 @@ import { parseSearchQuery } from "./parser.ts";
 
 export interface CompiledSearchQuery {
   match: string;
+  relaxedMatch?: string | undefined;
   excludes: string[];
   positiveTerms: string[];
 }
@@ -25,9 +26,13 @@ export function compileSearchQuery(input: string): CompiledSearchQuery | undefin
     validateNoNestedNegation(exclude);
   }
 
+  const match = compilePositiveNode(positive);
+  const relaxedMatch = compilePositiveNode(positive, "OR");
+
   return {
-    match: compilePositiveNode(positive),
-    excludes: excludes.map(compilePositiveNode),
+    match,
+    relaxedMatch: relaxedMatch === match ? undefined : relaxedMatch,
+    excludes: excludes.map((exclude) => compilePositiveNode(exclude)),
     positiveTerms: collectPositiveTerms(positive),
   };
 }
@@ -92,6 +97,7 @@ function validateNoNestedNegation(node: SearchQueryNode): void {
       );
     case "and":
     case "or":
+    case "adjacency":
       for (const child of node.children) {
         validateNoNestedNegation(child);
       }
@@ -101,14 +107,16 @@ function validateNoNestedNegation(node: SearchQueryNode): void {
   }
 }
 
-function compilePositiveNode(node: SearchQueryNode): string {
+function compilePositiveNode(node: SearchQueryNode, adjacencyOp: "AND" | "OR" = "AND"): string {
   switch (node.kind) {
     case "term":
       return compileTerm(node.value, node.prefix);
     case "and":
-      return `(${node.children.map(compilePositiveNode).join(" AND ")})`;
+      return `(${node.children.map((child) => compilePositiveNode(child, adjacencyOp)).join(" AND ")})`;
     case "or":
-      return `(${node.children.map(compilePositiveNode).join(" OR ")})`;
+      return `(${node.children.map((child) => compilePositiveNode(child, adjacencyOp)).join(" OR ")})`;
+    case "adjacency":
+      return `(${node.children.map((child) => compileTerm(child.value, child.prefix)).join(` ${adjacencyOp} `)})`;
     case "not":
       throw new SearchQuerySyntaxError(
         "Negation is only supported as a top-level AND clause in this release.",
@@ -130,6 +138,7 @@ function collectPositiveTerms(node: SearchQueryNode): string[] {
       return [node.value];
     case "and":
     case "or":
+    case "adjacency":
       return node.children.flatMap(collectPositiveTerms);
     case "not":
       return [];

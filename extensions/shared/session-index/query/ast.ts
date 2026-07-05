@@ -15,12 +15,22 @@ export interface QueryOrNode {
   children: SearchQueryNode[];
 }
 
+export interface QueryAdjacencyNode {
+  kind: "adjacency";
+  children: QueryTermNode[];
+}
+
 export interface QueryNotNode {
   kind: "not";
   child: SearchQueryNode;
 }
 
-export type SearchQueryNode = QueryTermNode | QueryAndNode | QueryOrNode | QueryNotNode;
+export type SearchQueryNode =
+  | QueryTermNode
+  | QueryAndNode
+  | QueryOrNode
+  | QueryAdjacencyNode
+  | QueryNotNode;
 
 export class SearchQuerySyntaxError extends Error {
   constructor(message: string) {

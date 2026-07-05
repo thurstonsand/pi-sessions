@@ -10,6 +10,7 @@
 - **Active branch**: The conversation branch ending at the session's current leaf; the live history. Other branches are abandoned.
 - **Session index**: The local, rebuildable store derived from Pi session transcripts; contains session metadata, searchable text, file-touch evidence, and lineage data. Not the source of truth.
 - **Rank**: The ordering of session results by relevance, recency, and contextual priority.
+- **Query relaxation**: The search behavior for unquoted adjacent terms: chunks matching every term rank first, and partial matches backfill the remaining result budget. Quoted terms, explicit operators, and negation always keep their strict meaning.
 - **Session reference**: An `@session:<uuid>` token inserted into a prompt to refer to a specific prior session. Tools that consume the reference should use the bare UUID value.
 - **Session reference picker**: The interactive picker opened from the prompt editor to find a prior session and insert its session reference.
 - **Handoff**: A transfer of work from one session into a new child session using a generated prompt based on the current session's context.

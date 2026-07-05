@@ -57,9 +57,9 @@ const SESSION_LIST_ROW_SCHEMA = Type.Object({
 type SessionListRow = Static<typeof SESSION_LIST_ROW_SCHEMA>;
 
 const SEARCH_CHUNK_ROW_SCHEMA = Type.Object({
+  chunkId: Type.Number(),
   sessionId: Type.String(),
   snippet: Type.String(),
-  rank: Type.Number(),
   entryId: Type.String(),
   sourceKind: Type.String(),
   ts: Type.String(),
@@ -362,9 +362,42 @@ function getTextMatchRows(
   limit: number,
   allowedSessionIds?: Set<string> | undefined,
 ): SearchChunkRow[] {
+  const strictRows = queryTextMatchRows(
+    db,
+    filters,
+    compiledQuery.match,
+    compiledQuery.excludes,
+    limit,
+    allowedSessionIds,
+  );
+  if (strictRows.length >= limit || !compiledQuery.relaxedMatch) {
+    return strictRows;
+  }
+
+  const seenChunkIds = new Set(strictRows.map((row) => row.chunkId));
+  const relaxedRows = queryTextMatchRows(
+    db,
+    filters,
+    compiledQuery.relaxedMatch,
+    compiledQuery.excludes,
+    limit,
+    allowedSessionIds,
+  ).filter((row) => !seenChunkIds.has(row.chunkId));
+
+  return [...strictRows, ...relaxedRows].slice(0, limit);
+}
+
+function queryTextMatchRows(
+  db: SessionIndexDatabase,
+  filters: SearchWhereFilters,
+  match: string,
+  excludes: string[],
+  limit: number,
+  allowedSessionIds?: Set<string> | undefined,
+): SearchChunkRow[] {
   const where = buildSessionWhereClause("s", filters);
   const allowedSessionClause = buildAllowedSessionClause("s", allowedSessionIds);
-  const excludeClause = buildExcludeClause(compiledQuery.excludes);
+  const excludeClause = buildExcludeClause(excludes);
 
   return parseTypeBoxRows(
     SEARCH_CHUNK_ROW_SCHEMA,
@@ -372,9 +405,9 @@ function getTextMatchRows(
       .prepare(
         `
         SELECT
+          c.id as chunkId,
           c.session_id as sessionId,
           snippet(session_text_chunks_fts, 0, ?, ?, ?, 16) as snippet,
-          bm25(session_text_chunks_fts) as rank,
           c.entry_id as entryId,
           c.source_kind as sourceKind,
           c.ts as ts
@@ -385,7 +418,7 @@ function getTextMatchRows(
           ${where.sql ? "AND" : "WHERE"} session_text_chunks_fts MATCH ?
           ${allowedSessionClause.sql}
           ${excludeClause.sql}
-        ORDER BY rank ASC, s.modified_ts DESC
+        ORDER BY bm25(session_text_chunks_fts) ASC, s.modified_ts DESC
         LIMIT ?
       `,
       )
@@ -394,7 +427,7 @@ function getTextMatchRows(
         SEARCH_SNIPPET_MATCH_END,
         SEARCH_SNIPPET_ELLIPSIS,
         ...where.args,
-        compiledQuery.match,
+        match,
         ...allowedSessionClause.args,
         ...excludeClause.args,
         limit,

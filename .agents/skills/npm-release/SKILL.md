@@ -30,18 +30,31 @@ Ask the user to confirm the target version unless they already specified it.
 
 ## 2. Prepare release notes
 
-Update `RELEASE.md` with a new top entry:
+Update `RELEASE.md` with a new top entry, Keep a Changelog style:
 
 ```md
-## vX.Y.Z
+## [X.Y.Z] - YYYY-MM-DD
 
-Short release summary.
+- **Short feature title** - One-sentence description of the headline capability.
 
-- User-facing change.
-- Another user-facing change.
+### Added
+
+- User-facing addition.
+
+### Changed
+
+- User-facing behavior change, including breaking changes (spell out the impact and migration in the bullet itself).
+
+### Fixed
+
+- User-facing bug fix.
+
+### Removed
+
+- User-facing removal.
 ```
 
-Keep notes concise. Do not dump every internal refactor. Prefer what a user needs to know.
+Only include the headline bullets for releases with a genuine headline capability worth calling out up top; skip them for patch releases, dependency bumps, or single-bullet changes. Only include the other sections that apply; omit empty ones. Keep notes concise. Do not dump every internal refactor. Prefer what a user needs to know.
 
 If the user edits or cleans up the release notes, use their final `RELEASE.md` text for the tag notes later.
 

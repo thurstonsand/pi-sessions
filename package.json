@@ -1,6 +1,6 @@
 {
   "name": "pi-sessions",
-  "version": "0.7.0",
+  "version": "0.6.0",
   "type": "module",
   "description": "Pi session search, ask, handoff, messaging, auto-titling, and indexing tools",
   "license": "MIT",

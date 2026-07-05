@@ -155,55 +155,31 @@
 
 ## Release Process
 
-Use this checklist to publish `pi-sessions` to npm. Publishing happens in CI (`.github/workflows/release.yml`) when a `vX.Y.Z` tag is pushed via npm trusted publishing (OIDC) — there is no manual `npm publish` step.
+`pi-sessions` publishes to npm from GitHub Actions when a stable `v*` tag is pushed.
 
-## Patch release
+## Release flow
 
-1. Confirm the working tree contains only intended changes.
+1. Prepare `docs/release.md` with a new `## [X.Y.Z] - YYYY-MM-DD` entry.
+2. Verify locally with `npm run check` and `npm pack --dry-run`.
+3. Commit the release prep.
+4. Push `main`.
+5. Create an annotated `vX.Y.Z` tag using the matching `docs/release.md` entry as the tag body.
+6. Push the tag.
+7. The `Release` workflow runs CI, sets the package version from the tag, packs the package, and publishes it to npm with the `latest` dist-tag.
 
-   ```bash
-   git status --short
-   ```
+## Release note extraction
 
-2. Run the full quality gate.
+Use the helper script to extract the exact release entry for the git tag body:
 
-   ```bash
-   npm run check
-   ```
-
-3. Bump the package version without letting npm create its own commit or tag.
-
-   ```bash
-   npm version patch --no-git-tag-version
-   ```
-
-   Use `minor` or `major` instead of `patch` when appropriate.
-
-4. Commit the release.
-
-   ```bash
-   git add package.json package-lock.json <changed-files>
-   git commit
-   ```
-
-5. Push `main` and the matching annotated tag. Pushing the tag triggers CI, which runs the check gate and then publishes.
-
-   ```bash
-   VERSION=$(node -p "require('./package.json').version")
-   git tag -a "v$VERSION" -m "v$VERSION"
-   git push origin main
-   git push origin "v$VERSION"
-   ```
-
-6. Watch the release workflow and confirm the registry version once it completes.
-
-   ```bash
-   gh run watch --workflow=release.yml
-   npm view pi-sessions version
-   ```
+```bash
+VERSION=X.Y.Z
+scripts/extract-release-notes.sh "v${VERSION}" > "/tmp/pi-sessions-v${VERSION}-notes.md"
+git tag -a "v${VERSION}" --cleanup=verbatim -F "/tmp/pi-sessions-v${VERSION}-notes.md"
+git push origin main
+git push origin "v${VERSION}"
+```
 
 ## Notes
 
-- `npm version patch --no-git-tag-version` updates `package.json` and `package-lock.json` only. It avoids npm's default auto-commit and auto-tag behavior so code changes and the version bump can be committed together.
-- The release workflow re-derives the published version from the pushed tag (`npm version "${GITHUB_REF_NAME#v}"`), so the local version bump and the tag name must match.
-- If the release workflow fails after the tag is pushed, fix the issue and push a new tag. npm rejects republishing an existing version, so a failed tag cannot be reused.
+- `package.json`'s version field is not bumped locally. The tag is the sole source of truth: CI sets the version from the tag (`npm version "${GITHUB_REF_NAME#v}"`) in its own ephemeral checkout before publishing, and that bump is never committed back to `main`.
+- Stable package tags are immutable — never force-push one. The one exception is a tag whose release workflow never successfully published: fix the issue, commit it, then delete and recreate that tag.

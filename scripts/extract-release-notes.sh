@@ -2,7 +2,7 @@
 set -euo pipefail
 
 usage() {
-  echo "usage: $0 vX.Y.Z [docs/release.md]" >&2
+  echo "usage: $0 vX.Y.Z [CHANGELOG.md]" >&2
 }
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
@@ -11,7 +11,7 @@ if [[ $# -lt 1 || $# -gt 2 ]]; then
 fi
 
 version="${1#v}"
-release_file="${2:-docs/release.md}"
+release_file="${2:-CHANGELOG.md}"
 
 if [[ ! -f "${release_file}" ]]; then
   echo "release notes file not found: ${release_file}" >&2

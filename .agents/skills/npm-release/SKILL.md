@@ -11,8 +11,8 @@ Use this skill when preparing and publishing a new release for `pi-sessions`.
 
 - Release from `main`.
 - npm publishing is tag-driven through `.github/workflows/release.yml`.
-- Use `docs/release.md` for human release notes.
-- Use the exact same release-note text from `docs/release.md` for the annotated git tag body.
+- Record the changelog in `CHANGELOG.md`
+- Use the exact same release-note text from `CHANGELOG.md` for the annotated git tag body.
 - Stable releases are `vX.Y.Z` tags.
 - Stable package tags are immutable. Never force-push a stable release tag.
 - The GitHub Action uses npm Trusted Publishing through OIDC.
@@ -33,7 +33,7 @@ Ask the user to confirm the target version unless they already specified it.
 
 ## 2. Prepare release notes
 
-Update `docs/release.md` with a new top entry, Keep a Changelog style:
+Update `CHANGELOG.md` with a new top entry, Keep a Changelog style:
 
 ```md
 ## [X.Y.Z] - YYYY-MM-DD
@@ -59,9 +59,9 @@ Update `docs/release.md` with a new top entry, Keep a Changelog style:
 
 Only include the headline bullets for releases with a genuine headline capability worth calling out up top; skip them for patch releases, dependency bumps, or single-bullet changes. Only include the other sections that apply; omit empty ones. Keep notes concise. Do not dump every internal refactor. Prefer what a user needs to know.
 
-If the user edits or cleans up the release notes, use their final `docs/release.md` text for the tag notes later.
+If the user edits or cleans up the release notes, use their final `CHANGELOG.md` text for the tag notes later.
 
-If release mechanics change, update this skill and `docs/release.md`'s Release Process section.
+If release mechanics change, update this skill and `docs/release.md`.
 
 ## 3. Verify locally
 
@@ -88,7 +88,7 @@ Push the release prep commit to `main`.
 
 ## 6. Create and push the stable tag
 
-Use the final `docs/release.md` entry for the tag notes:
+Use the final `CHANGELOG.md` entry for the tag notes:
 
 ```sh
 VERSION=X.Y.Z

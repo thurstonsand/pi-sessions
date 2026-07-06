@@ -39,7 +39,7 @@ export async function spawnSessionMessagingBrokerIfNeeded(): Promise<void> {
       detached: true,
       stdio: "ignore",
       windowsHide: process.platform === "win32",
-      env: { ...process.env, NODE_NO_WARNINGS: "1" },
+      env: brokerSpawnEnv(),
     });
     child.unref();
     await waitForBroker();
@@ -161,4 +161,20 @@ function releaseSpawnLock(): void {
   try {
     unlinkSync(brokerSpawnLockPath);
   } catch {}
+}
+
+function brokerSpawnEnv(): NodeJS.ProcessEnv {
+  // NODE_NO_WARNINGS silences Node's experimental-TypeScript warning when the
+  // broker is launched as `node process.ts`. Redundant while stdio is ignored,
+  // but cheap insurance if that changes or an older Node revives the warning.
+  const env: NodeJS.ProcessEnv = { ...process.env, NODE_NO_WARNINGS: "1" };
+  // process.execPath is the Pi executable. As a Bun-compiled binary it treats a
+  // positional path as a file argument to the agent, not a script to run, which
+  // would relaunch a full agent session and recurse. BUN_BE_BUN makes it behave
+  // as the Bun CLI and execute process.ts directly. It is set whenever Bun is the
+  // runtime (compiled binary or `bun run`) and ignored by a plain Node launch.
+  if (process.versions.bun) {
+    env.BUN_BE_BUN = "1";
+  }
+  return env;
 }

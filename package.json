@@ -41,6 +41,9 @@
     "check": "biome check . && tsc --noEmit && vitest run",
     "prepare": "husky || true"
   },
+  "dependencies": {
+    "typebox": "^1.1.38"
+  },
   "devDependencies": {
     "@biomejs/biome": "^2.4.14",
     "@earendil-works/pi-agent-core": "^0.80.2",
@@ -50,7 +53,6 @@
     "@types/node": "^25.6.2",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.3",
-    "typebox": "^1.1.38",
     "typescript": "^6.0.3",
     "vitest": "^4.1.5"
   },
@@ -58,8 +60,7 @@
     "@earendil-works/pi-agent-core": ">=0.80.2",
     "@earendil-works/pi-ai": ">=0.80.2",
     "@earendil-works/pi-coding-agent": ">=0.80.2",
-    "@earendil-works/pi-tui": ">=0.80.2",
-    "typebox": ">=1.1.24"
+    "@earendil-works/pi-tui": ">=0.80.2"
   },
   "lint-staged": {
     "*.{js,cjs,mjs,jsx,ts,tsx,json,jsonc}": "biome check --write --no-errors-on-unmatched"

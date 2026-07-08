@@ -87,16 +87,15 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         "Start a background pi session in a terminal split based on the current session",
       promptGuidelines: [
         "Use session_handoff only when it is clear the work should be forked to a new context.",
-        "Prefer using session_handoff by direction of the user, not as an unsolicited default.",
-        "The goal should capture enough detail to encompass the ask and include any directions the next sessions should consider.",
-        "Only request a response when there is a specific ask-and-response expectation: the user asked for a report back, or the current session needs the child result before it can continue. Do not set requestResponse for independent or unrelated background work; most split-off tasks should run without reporting back.",
-        "Only capable of a background handoff; to replace the current session, tell the user to run /handoff instead.",
+        "Reach for session_handoff by direction of the user, not as an unsolicited default.",
+        "session_handoff should only request a response when there is a specific ask-and-response expectation: the user asked for a report back, or this session needs the child result to continue. Leave it off by default and for independent background work.",
+        "session_handoff can only fork a background session; to replace the current session, tell the user to run /handoff instead.",
       ],
       executionMode: "sequential",
       parameters: Type.Object({
         goal: Type.String({
           description:
-            "Goal for the new session, including enough detail to capture the user's ask and any directions the next prompt should consider.",
+            "Goal for the new session. Capture enough detail to encompass the ask and any directions the next session should consider.",
         }),
         splitDirection: Type.Union(
           [Type.Literal("left"), Type.Literal("right"), Type.Literal("up"), Type.Literal("down")],

@@ -14,7 +14,7 @@ export function registerSessionMessagingTools(
     description: "Send a message to another live pi session",
     promptSnippet: "Send a message to another live pi session",
     promptGuidelines: [
-      "Use session_search with live: true to discover targetable sessions. Usually it is best to exclude all other filters and simply get a list of all live sessions",
+      "Before session_send_message, use session_search with live: true (no other filters) to list all live sessions and find the target.",
     ],
     parameters: SEND_MESSAGE_PARAMS,
     renderCall(args, theme, context) {

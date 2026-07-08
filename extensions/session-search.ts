@@ -64,10 +64,10 @@ export default function sessionSearchExtension(
     name: "session_search",
     label: "Session Search",
     description: "Search Pi sessions",
-    promptSnippet: "Use when you need to locate a session to do a detailed follow-up",
+    promptSnippet: "Locate Pi sessions for follow-up",
     promptGuidelines: [
-      "Omit query to list matching sessions chronologically",
-      "Once you have the right session id, switch to session_ask for questions about that session",
+      "Omit queries in session_search to list matching sessions chronologically.",
+      "After session_search finds a session id, switch to session_ask for questions about it.",
     ],
     parameters: Type.Object({
       query: Type.Optional(

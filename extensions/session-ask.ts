@@ -39,9 +39,8 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
     name: "session_ask",
     label: "Session Ask",
     description: "Interrogate a Pi session",
-    promptSnippet:
-      "Use when you have a session id and want to recall information, decisions, reasoning, etc from it",
-    promptGuidelines: ["Prefer focused follow-up questions over broad recap requests"],
+    promptSnippet: "Recall information, decisions, or reasoning from a Pi session by id",
+    promptGuidelines: ["Use session_ask with focused questions rather than broad recap requests."],
     parameters: Type.Object({
       session: Type.String({
         description: "Bare UUID for the session",

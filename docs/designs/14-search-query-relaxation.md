@@ -2,7 +2,7 @@
 
 ## Status
 
-Approved
+Accepted
 
 ## Decision Summary
 

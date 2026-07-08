@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.8.0] - 2026-07-08
+
+### Added
+
+- Added `sessions.autoTitle.timeoutSecs` setting to configure the auto-title request timeout; default stays 15s.
+
 ## [0.7.2] - 2026-07-08
 
 ### Changed

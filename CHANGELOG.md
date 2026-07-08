@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.7.2] - 2026-07-08
+
+### Changed
+
+- Tightened the tool prompt copy for `session_ask`, `session_handoff`, `session_search`, and `session_send_message` so the injected agent guidance is terser and more consistent.
+
 ## [0.7.1] - 2026-07-06
 
 ### Fixed

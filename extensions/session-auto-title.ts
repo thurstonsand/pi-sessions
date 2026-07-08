@@ -75,6 +75,7 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
           model,
           invocation,
           settings.autoTitle.prompt,
+          settings.autoTitle.timeoutMs,
         );
       },
     ),
@@ -104,6 +105,7 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
       getSessionEpoch: () => sessionEpoch,
       notifyOnSuccess: false,
       systemPrompt: settings.autoTitle.prompt,
+      timeoutMs: settings.autoTitle.timeoutMs,
     })
       .then((outcome) => {
         if (outcome.ok) {
@@ -139,6 +141,7 @@ async function handleTitleInvocation(
   model: Model<Api> | undefined,
   invocation: RetitleCommandInvocation,
   systemPrompt: string,
+  timeoutMs: number,
 ): Promise<RetitleCommandOutcome> {
   const retitleOpts = {
     pi,
@@ -147,6 +150,7 @@ async function handleTitleInvocation(
     model,
     isManual: true,
     systemPrompt,
+    timeoutMs,
     getSessionEpoch: state.getSessionEpoch,
   };
 
@@ -165,7 +169,15 @@ async function handleTitleInvocation(
       return retitleCurrentSession();
     }
 
-    return showRetitleWizard(pi, state.controller, ctx, model, state.getSessionEpoch, systemPrompt);
+    return showRetitleWizard(
+      pi,
+      state.controller,
+      ctx,
+      model,
+      state.getSessionEpoch,
+      systemPrompt,
+      timeoutMs,
+    );
   }
 
   if (invocation.scope === "this") {
@@ -180,6 +192,7 @@ async function handleTitleInvocation(
       model,
       state.getSessionEpoch,
       systemPrompt,
+      timeoutMs,
       {
         initialInvocation: {
           scope: invocation.scope,
@@ -201,6 +214,7 @@ async function handleTitleInvocation(
       mode,
       state.getSessionEpoch,
       systemPrompt,
+      timeoutMs,
     );
     notifyBulkRetitleResult(ctx, scan, mode, result);
     return "success";

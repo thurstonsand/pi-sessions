@@ -58,6 +58,7 @@ export async function runBulkRetitle(
   mode: RetitleMode,
   getSessionEpoch: () => number,
   systemPrompt: string,
+  timeoutMs: number,
 ): Promise<BulkRetitleResult> {
   const result: BulkRetitleResult = {
     attempted: 0,
@@ -85,6 +86,7 @@ export async function runBulkRetitle(
         model,
         isManual: true,
         systemPrompt,
+        timeoutMs,
         getSessionEpoch,
         notifyOnSuccess: false,
       });
@@ -92,7 +94,7 @@ export async function runBulkRetitle(
       continue;
     }
 
-    const outcome = await retitleStoredSession(ctx, model, session.path, systemPrompt);
+    const outcome = await retitleStoredSession(ctx, model, session.path, systemPrompt, timeoutMs);
     result[outcome] += 1;
   }
 
@@ -165,6 +167,7 @@ export interface RetitlePlanOptions {
   model: Model<Api> | undefined;
   isManual: boolean;
   systemPrompt: string;
+  timeoutMs: number;
   existingPlan?: AutoTitleTriggerPlan;
   getSessionEpoch?: () => number;
   notifyOnSuccess?: boolean;
@@ -173,8 +176,17 @@ export interface RetitlePlanOptions {
 export async function runRetitlePlan(
   options: RetitlePlanOptions,
 ): Promise<AutoTitleGenerationResult> {
-  const { pi, controller, ctx, model, isManual, systemPrompt, existingPlan, getSessionEpoch } =
-    options;
+  const {
+    pi,
+    controller,
+    ctx,
+    model,
+    isManual,
+    systemPrompt,
+    timeoutMs,
+    existingPlan,
+    getSessionEpoch,
+  } = options;
   const notifyOnSuccess = options.notifyOnSuccess ?? isManual;
 
   const plan = existingPlan ?? controller.handleManualRetitle(ctx);
@@ -211,6 +223,7 @@ export async function runRetitlePlan(
     titleContext,
     plan.reason,
     systemPrompt,
+    timeoutMs,
   );
   if (!generatedTitle.ok) {
     return generatedTitle;
@@ -257,6 +270,7 @@ async function retitleStoredSession(
   model: Model<Api>,
   sessionPath: string,
   systemPrompt: string,
+  timeoutMs: number,
 ): Promise<"retitled" | "unchanged" | "failed"> {
   const sessionManager = SessionManager.open(sessionPath);
   const currentTitle = sessionManager.getSessionName();
@@ -279,6 +293,7 @@ async function retitleStoredSession(
     titleContext,
     plan.reason,
     systemPrompt,
+    timeoutMs,
   );
   if (!generatedTitle.ok) {
     return "failed";

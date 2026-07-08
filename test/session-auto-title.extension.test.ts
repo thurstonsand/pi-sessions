@@ -29,6 +29,7 @@ beforeEach(() => {
   loadSettingsMock.mockReturnValue({
     autoTitle: {
       refreshTurns: 4,
+      timeoutMs: 15_000,
       model: {
         provider: "google",
         modelId: "gemini-flash-lite-latest",
@@ -74,6 +75,7 @@ describe("session auto-title extension", () => {
     loadSettingsMock.mockReturnValue({
       autoTitle: {
         refreshTurns: 4,
+        timeoutMs: 15_000,
         model: {
           provider: "google",
           modelId: "gemini-flash-lite-latest",
@@ -138,6 +140,7 @@ describe("session auto-title extension", () => {
       },
       "manual",
       "Name this coding session.",
+      15_000,
     );
     await generateAutoTitle(
       ctx as never,
@@ -151,6 +154,7 @@ describe("session auto-title extension", () => {
       },
       "periodic",
       "Name this coding session.",
+      15_000,
     );
 
     const manualRequestContext = completeSimpleMock.mock.calls[0]?.[1];

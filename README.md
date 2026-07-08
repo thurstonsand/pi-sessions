@@ -190,6 +190,7 @@ To change auto-titling settings, edit `~/.pi/agent/settings.json`:
   "sessions": {
     "autoTitle": {
       "refreshTurns": 4,
+      "timeoutSecs": 15,
       "model": "anthropic/claude-haiku-4-5",
       "prompt": "Custom prompt that overrides the default."
     }

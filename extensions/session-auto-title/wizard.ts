@@ -57,6 +57,7 @@ export async function showRetitleWizard(
   model: Model<Api> | undefined,
   getSessionEpoch: () => number,
   systemPrompt: string,
+  timeoutMs: number,
   options?: RetitleWizardOptions,
 ): Promise<RetitleCommandOutcome> {
   return ctx.ui.custom<RetitleCommandOutcome>(
@@ -70,6 +71,7 @@ export async function showRetitleWizard(
         model,
         getSessionEpoch,
         systemPrompt,
+        timeoutMs,
         done,
         options,
       ),
@@ -99,6 +101,7 @@ class RetitleWizardPanel implements Focusable {
     private readonly model: Model<Api> | undefined,
     private readonly getSessionEpoch: () => number,
     private readonly systemPrompt: string,
+    private readonly timeoutMs: number,
     private readonly done: (result: RetitleCommandOutcome) => void,
     options?: RetitleWizardOptions,
   ) {
@@ -250,6 +253,7 @@ class RetitleWizardPanel implements Focusable {
       model: this.model,
       isManual: true,
       systemPrompt: this.systemPrompt,
+      timeoutMs: this.timeoutMs,
       getSessionEpoch: this.getSessionEpoch,
     });
     if (result.ok) {
@@ -310,6 +314,7 @@ class RetitleWizardPanel implements Focusable {
       mode,
       this.getSessionEpoch,
       this.systemPrompt,
+      this.timeoutMs,
     );
     notifyBulkRetitleResult(this.ctx, scan, mode, result);
     this.done(

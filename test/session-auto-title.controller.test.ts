@@ -78,6 +78,7 @@ describe("session auto-title controller", () => {
   it("triggers the initial title after the first completed user turn regardless of refreshTurns", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 4,
+      timeoutMs: 15_000,
       model: undefined,
       prompt: "Default auto-title prompt",
     });
@@ -103,6 +104,7 @@ describe("session auto-title controller", () => {
   it("only triggers periodic retitling after the configured number of new user turns", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 3,
+      timeoutMs: 15_000,
       model: undefined,
       prompt: "Default auto-title prompt",
     });
@@ -154,6 +156,7 @@ describe("session auto-title controller", () => {
   it("does not trigger on sessions that already have a user title and no auto-title state", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 2,
+      timeoutMs: 15_000,
       model: undefined,
       prompt: "Default auto-title prompt",
     });
@@ -176,6 +179,7 @@ describe("session auto-title controller", () => {
   it("pauses automation when the current session name diverges from the last auto title", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 4,
+      timeoutMs: 15_000,
       model: undefined,
       prompt: "Default auto-title prompt",
     });
@@ -209,6 +213,7 @@ describe("session auto-title controller", () => {
   it("allows manual retitling even when automation is paused", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 4,
+      timeoutMs: 15_000,
       model: undefined,
       prompt: "Default auto-title prompt",
     });
@@ -243,6 +248,7 @@ describe("session auto-title controller", () => {
   it("reactivates automation after a successful manual retitle", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 4,
+      timeoutMs: 15_000,
       model: undefined,
       prompt: "Default auto-title prompt",
     });
@@ -269,6 +275,7 @@ describe("session auto-title controller", () => {
   it("tracks the latest failure and dedupes repeated notifications until success", () => {
     const controller = createSessionAutoTitleController({
       refreshTurns: 4,
+      timeoutMs: 15_000,
       model: undefined,
       prompt: "Default auto-title prompt",
     });

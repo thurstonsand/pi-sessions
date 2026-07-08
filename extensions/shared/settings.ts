@@ -7,6 +7,7 @@ import { type Static, Type } from "typebox";
 import { parseTypeBoxValue } from "./typebox.ts";
 
 export const DEFAULT_AUTO_TITLE_REFRESH_TURNS = 4;
+export const DEFAULT_AUTO_TITLE_TIMEOUT_SECONDS = 15;
 export const DEFAULT_AUTO_TITLE_PROMPT = `Name this coding session (under 80 chars). Be specific to what is being discussed. Your exact output will be displayed to the user, so make sure that it contains ONLY the title itself and nothing else.`;
 const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
   handoff: Type.Optional(
@@ -22,6 +23,7 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
   autoTitle: Type.Optional(
     Type.Object({
       refreshTurns: Type.Optional(Type.Integer({ minimum: 1 })),
+      timeoutSecs: Type.Optional(Type.Integer({ minimum: 1 })),
       model: Type.Optional(Type.String()),
       thinkingLevel: Type.Optional(Type.String()),
       prompt: Type.Optional(Type.String()),
@@ -57,6 +59,7 @@ export interface AgentModelSettings {
 
 export interface AutoTitleSettings extends AgentModelSettings {
   refreshTurns: number;
+  timeoutMs: number;
   prompt: string;
 }
 
@@ -193,6 +196,7 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
     autoTitle: {
       ...resolveAgentModelSettings(fileSettings.autoTitle),
       refreshTurns: fileSettings.autoTitle?.refreshTurns ?? DEFAULT_AUTO_TITLE_REFRESH_TURNS,
+      timeoutMs: (fileSettings.autoTitle?.timeoutSecs ?? DEFAULT_AUTO_TITLE_TIMEOUT_SECONDS) * 1000,
       prompt: normalizeAutoTitlePrompt(fileSettings.autoTitle?.prompt),
     },
     ask: {

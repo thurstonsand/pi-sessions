@@ -7,7 +7,6 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { AutoTitleContext } from "./context.ts";
 import type { AutoTitleTrigger } from "./state.ts";
 
-const AUTO_TITLE_REQUEST_TIMEOUT_MS = 15_000;
 const AUTO_TITLE_MAX_TOKENS = 64;
 const AUTO_TITLE_CHAR_MAX = 80;
 
@@ -34,6 +33,7 @@ export async function generateAutoTitle(
   context: AutoTitleContext,
   trigger: AutoTitleTrigger,
   systemPrompt: string,
+  timeoutMs: number,
 ): Promise<AutoTitleGenerationResult> {
   if (!context.conversationText) {
     return {
@@ -64,7 +64,7 @@ export async function generateAutoTitle(
   };
 
   const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), AUTO_TITLE_REQUEST_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
 
   try {
     const requestContext = {

@@ -229,6 +229,13 @@ describe("session handoff extension", () => {
       resumeCommand: "RESUME child-session-999 openai/gpt-5.4",
     });
     expect(result.content[0]?.text).toContain("RESUME child-session-999 openai/gpt-5.4");
+
+    const launchOptions = mockPrepareHandoffLaunch.mock.calls.at(-1)?.[0] as {
+      buildBootstrap: (sessionId: string) => unknown;
+    };
+    expect(launchOptions.buildBootstrap("child-session-999")).toMatchObject({
+      sourceLeafId: "user-1",
+    });
   });
 
   it("degrades a split launch to detached when Ghostty is unavailable", async () => {
@@ -448,7 +455,9 @@ function createToolExecuteContext(options?: { availableModels?: unknown[] }) {
     sessionManager: {
       getSessionFile: () => "/tmp/parent.jsonl",
       getSessionDir: () => "/tmp/sessions",
-      getLeafId: () => "user-1",
+      getLeafId: () => "assistant-1",
+      getEntry: (id: string) =>
+        id === "assistant-1" ? { id: "assistant-1", parentId: "user-1" } : undefined,
       getEntries: () => [
         {
           type: "message",
@@ -459,6 +468,17 @@ function createToolExecuteContext(options?: { availableModels?: unknown[] }) {
             role: "user",
             content: [{ type: "text", text: "Do the thing." }],
             timestamp: 1,
+          },
+        },
+        {
+          type: "message",
+          id: "assistant-1",
+          parentId: "user-1",
+          timestamp: "2026-03-23T00:00:01.000Z",
+          message: {
+            role: "assistant",
+            content: [],
+            timestamp: 2,
           },
         },
       ],

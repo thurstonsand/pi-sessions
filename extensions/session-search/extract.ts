@@ -429,7 +429,7 @@ export function parseSessionContent(raw: string): ParsedSessionFile | undefined 
   }
 
   const header = fileEntries[0];
-  if (!header || header.type !== "session") {
+  if (header?.type !== "session") {
     return undefined;
   }
 

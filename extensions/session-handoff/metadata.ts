@@ -30,6 +30,7 @@ export const CHILD_GENERATED_HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
   goal: Type.String(),
   title: Type.String(),
   parentSessionFile: Type.String(),
+  sourceLeafId: Type.String(),
   requestResponse: Type.Optional(Type.Boolean()),
 });
 
@@ -81,6 +82,7 @@ export function createChildGeneratedHandoffBootstrap(options: {
   goal: string;
   title: string;
   parentSessionFile: string;
+  sourceLeafId: string;
   requestResponse?: boolean | undefined;
 }): ChildGeneratedHandoffBootstrap {
   return {
@@ -89,6 +91,7 @@ export function createChildGeneratedHandoffBootstrap(options: {
     goal: options.goal.trim(),
     title: options.title.trim(),
     parentSessionFile: options.parentSessionFile,
+    sourceLeafId: options.sourceLeafId,
     ...(options.requestResponse === undefined ? {} : { requestResponse: options.requestResponse }),
   };
 }

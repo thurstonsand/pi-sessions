@@ -114,6 +114,7 @@ describe("session handoff spawn helpers", () => {
           goal: "Finish phase 1",
           title: "Session handoff",
           parentSessionFile: "/tmp/parent.jsonl",
+          sourceLeafId: "source-entry-123",
         }),
       ),
       "utf8",
@@ -125,6 +126,7 @@ describe("session handoff spawn helpers", () => {
       goal: "Finish phase 1",
       title: "Session handoff",
       parentSessionFile: "/tmp/parent.jsonl",
+      sourceLeafId: "source-entry-123",
     });
   });
 

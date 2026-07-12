@@ -25,36 +25,29 @@ const MAX_RELEVANT_FILES = 12;
 const MAX_OPEN_QUESTIONS = 8;
 const MAX_HANDOFF_TITLE_LENGTH = 64;
 
-const HANDOFF_SYSTEM_PROMPT = `You extract context for a deliberate session handoff.
+const HANDOFF_SYSTEM_PROMPT = `You extract context for a deliberate session handoff. You are preparing a briefing for a new destination session from a historical source snapshot.
 
-You must call create_handoff_context exactly once.
-
-Rules:
-- Extract only context that is relevant to the next task.
-- Keep the summary compact and concrete.
-- Prefer workspace-relative file paths when possible.
-- title must be a short session title for the new handoff thread, 64 characters or less, without prefixes like "Handoff:" or otherwise referencing the current thread.
-- nextTask must be the concrete next action for the new session.
-- openQuestions should contain only unresolved items that materially affect the next task.
-- If there are no meaningful open questions, omit openQuestions entirely.
-- Do not write the final handoff prompt yourself.`;
+The Handoff Goal states why the destination session is being created. Use the source snapshot to make that goal concrete and actionable.`;
 
 const HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
   title: Type.String({
-    description: "Short display title for the new handoff session.",
+    description:
+      "Short display title for the destination session, 64 characters or less. Do not prefix it with “Handoff:” or describe the source thread.",
   }),
   summary: Type.String({
-    description: "Only the context relevant to the next task.",
+    description: "Compact, concrete source context relevant to the destination task.",
   }),
   relevantFiles: Type.Array(Type.String(), {
     description: "Relevant workspace-relative file paths when possible.",
   }),
   nextTask: Type.String({
-    description: "The concrete next task for the new session.",
+    description:
+      "Concrete, actionable destination task synthesized from the Handoff Goal and Source Snapshot.",
   }),
   openQuestions: Type.Optional(
     Type.Array(Type.String(), {
-      description: "Open questions that matter to the next task. Omit when there are none.",
+      description:
+        "Unresolved questions that materially affect the destination task. Omit when there are none.",
     }),
   ),
 });
@@ -94,9 +87,15 @@ export async function generateHandoffDraft(
     throw new Error("No model is available for handoff.");
   }
 
+  const sourceLeafId = ctx.sessionManager.getLeafId();
+  if (!sourceLeafId) {
+    throw new Error("No conversation is available to hand off.");
+  }
+
   return generateHandoffDraftFromSessionManager(
     ctx,
     ctx.sessionManager,
+    sourceLeafId,
     goal,
     thinkingLevel,
     signal,
@@ -107,6 +106,7 @@ export async function generateHandoffDraft(
 export async function generateHandoffDraftFromSessionManager(
   ctx: ExtensionContext,
   sourceSessionManager: ExtensionContext["sessionManager"],
+  sourceLeafId: string,
   goal: string,
   thinkingLevel: ThinkingLevel | undefined,
   signal?: AbortSignal,
@@ -117,10 +117,11 @@ export async function generateHandoffDraftFromSessionManager(
   }
 
   const model = ctx.model;
-  const sessionContext = buildSessionContext(
-    sourceSessionManager.getEntries(),
-    sourceSessionManager.getLeafId(),
-  );
+  if (!sourceSessionManager.getEntry(sourceLeafId)) {
+    throw new Error(`Handoff source snapshot entry ${sourceLeafId} was not found.`);
+  }
+
+  const sessionContext = buildSessionContext(sourceSessionManager.getEntries(), sourceLeafId);
   if (sessionContext.messages.length === 0) {
     throw new Error("No conversation is available to hand off.");
   }
@@ -150,15 +151,7 @@ export async function generateHandoffDraftFromSessionManager(
 }
 
 export function buildExtractionPrompt(conversationText: string, goal: string): string {
-  return [
-    "## Conversation",
-    conversationText,
-    "",
-    "## Goal",
-    goal,
-    "",
-    "Call create_handoff_context exactly once.",
-  ].join("\n");
+  return ["## Source Snapshot", conversationText, "", "## Handoff Goal", goal].join("\n");
 }
 
 async function runHandoffExtractionAgent(
@@ -170,10 +163,12 @@ async function runHandoffExtractionAgent(
   signal?: AbortSignal,
 ): Promise<HandoffContext | undefined> {
   let capturedArguments: HandoffExtractionArgs | undefined;
+  // Pi does not inject promptSnippet or promptGuidelines when a custom system prompt is active.
   const createHandoffContextTool = defineTool({
     name: "create_handoff_context",
     label: "Create handoff context",
-    description: "Extract the structured handoff context for the next session.",
+    description:
+      "Submit the completed structured briefing for the destination session. You must call this tool to complete extraction. Calling it ends the extraction run, so finish any workspace exploration first.",
     parameters: HANDOFF_EXTRACTION_PARAMETERS,
     execute: async (_toolCallId, params) => {
       capturedArguments = params;
@@ -191,7 +186,7 @@ async function runHandoffExtractionAgent(
     noExtensions: true,
     noPromptTemplates: true,
     noSkills: true,
-    appendSystemPromptOverride: (base) => [...base, HANDOFF_SYSTEM_PROMPT],
+    systemPromptOverride: () => HANDOFF_SYSTEM_PROMPT,
   });
   await resourceLoader.reload();
 

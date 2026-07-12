@@ -4,6 +4,7 @@ import {
   buildExtractionPrompt,
   extractHandoffContext,
   generateHandoffDraft,
+  generateHandoffDraftFromSessionManager,
 } from "../extensions/session-handoff/extract.ts";
 
 const { createAgentSessionMock } = vi.hoisted(() => ({
@@ -144,6 +145,10 @@ describe("session handoff extraction", () => {
       tools: ["read", "grep", "find", "ls", "create_handoff_context"],
     });
     expect(options.customTools).toHaveLength(1);
+    expect(options.customTools[0]).not.toHaveProperty("promptSnippet");
+    expect(options.customTools[0]).not.toHaveProperty("promptGuidelines");
+    expect(options.resourceLoader.getSystemPrompt()).toBeTypeOf("string");
+    expect(options.resourceLoader.getAppendSystemPrompt()).toEqual([]);
   });
 
   it("passes the serialized conversation and goal to the deep extraction agent", async () => {
@@ -158,9 +163,9 @@ describe("session handoff extraction", () => {
       generateHandoffDraft(createGenerationContext(), "Finish phase 1.", "medium"),
     ).rejects.toThrow("Handoff extraction did not return structured context.");
 
-    expect(prompt).toContain("## Conversation\n[User]: Please implement phase 1.");
-    expect(prompt).toContain("## Goal\nFinish phase 1.");
-    expect(prompt).toContain("Call create_handoff_context exactly once.");
+    expect(prompt).toContain("## Source Snapshot\n[User]: Please implement phase 1.");
+    expect(prompt).toContain("## Handoff Goal\nFinish phase 1.");
+    expect(prompt).not.toContain("Call create_handoff_context exactly once.");
   });
 
   it("rejects generated titles longer than 64 characters", async () => {
@@ -187,12 +192,77 @@ describe("session handoff extraction", () => {
     ).rejects.toThrow("Handoff extraction did not return structured context.");
   });
 
-  it("includes the goal and conversation in the extraction prompt", () => {
+  it("includes the goal and source snapshot in the extraction prompt", () => {
     const prompt = buildExtractionPrompt("user: hello", "Finish phase 1.");
 
-    expect(prompt).toContain("## Conversation\nuser: hello");
-    expect(prompt).toContain("## Goal\nFinish phase 1.");
-    expect(prompt).toContain("Call create_handoff_context exactly once.");
+    expect(prompt).toContain("## Source Snapshot\nuser: hello");
+    expect(prompt).toContain("## Handoff Goal\nFinish phase 1.");
+  });
+
+  it("builds extraction context only from the anchored source branch", async () => {
+    let prompt = "";
+    createAgentSessionMock.mockResolvedValue(
+      createMockAgentSession(undefined, (value) => {
+        prompt = value;
+      }),
+    );
+
+    const entries = [
+      messageEntry("root", null, "user", "ROOT SOURCE"),
+      messageEntry("anchor", "root", "user", "ANCHOR SOURCE"),
+      {
+        ...messageEntry("invocation", "anchor", "assistant", ""),
+        message: {
+          ...messageEntry("invocation", "anchor", "assistant", "").message,
+          content: [
+            {
+              type: "toolCall",
+              id: "handoff-call",
+              name: "session_handoff",
+              arguments: { goal: "TARGET GOAL", launch: "detached" },
+            },
+          ],
+        },
+      },
+      messageEntry("result", "invocation", "toolResult", "SELF CHILD child-session-999"),
+      messageEntry("later", "result", "assistant", "LATER PARENT COORDINATION"),
+      messageEntry("sibling", "anchor", "user", "SIBLING BRANCH"),
+    ];
+    const sourceSessionManager = createSourceSessionManager(entries, "later");
+
+    await expect(
+      generateHandoffDraftFromSessionManager(
+        createGenerationContext(),
+        sourceSessionManager as never,
+        "anchor",
+        "TARGET GOAL",
+        "medium",
+      ),
+    ).rejects.toThrow("Handoff extraction did not return structured context.");
+
+    expect(prompt).toContain("ROOT SOURCE");
+    expect(prompt).toContain("ANCHOR SOURCE");
+    expect(prompt).toContain("TARGET GOAL");
+    expect(prompt).not.toContain("session_handoff");
+    expect(prompt).not.toContain("SELF CHILD");
+    expect(prompt).not.toContain("LATER PARENT COORDINATION");
+    expect(prompt).not.toContain("SIBLING BRANCH");
+  });
+
+  it("rejects a missing source snapshot instead of falling back to the latest leaf", async () => {
+    const entries = [messageEntry("latest", null, "user", "LATEST CONTENT")];
+
+    await expect(
+      generateHandoffDraftFromSessionManager(
+        createGenerationContext(),
+        createSourceSessionManager(entries, "latest") as never,
+        "missing-anchor",
+        "TARGET GOAL",
+        "medium",
+      ),
+    ).rejects.toThrow("Handoff source snapshot entry missing-anchor was not found.");
+
+    expect(createAgentSessionMock).not.toHaveBeenCalled();
   });
 });
 
@@ -223,25 +293,18 @@ function createGenerationContext() {
     },
   };
 
+  const entries = [messageEntry("user-1", null, "user", "Please implement phase 1.")];
+
   return {
     cwd: "/tmp/project",
     model: { provider: "openai", id: "gpt-5.4", reasoning: true },
     modelRegistry,
     sessionManager: {
       getEntries() {
-        return [
-          {
-            type: "message",
-            id: "user-1",
-            parentId: null,
-            timestamp: "2026-03-23T00:00:00.000Z",
-            message: {
-              role: "user",
-              content: [{ type: "text", text: "Please implement phase 1." }],
-              timestamp: 1,
-            },
-          },
-        ];
+        return entries;
+      },
+      getEntry(id: string) {
+        return entries.find((entry) => entry.id === id);
       },
       getLeafId() {
         return "user-1";
@@ -254,4 +317,28 @@ function createGenerationContext() {
       },
     },
   } as never;
+}
+
+function createSourceSessionManager(entries: unknown[], leafId: string) {
+  return {
+    getEntries: () => entries,
+    getEntry: (id: string) => entries.find((entry) => (entry as { id?: string }).id === id),
+    getLeafId: () => leafId,
+    getSessionId: () => "source-session",
+    getSessionFile: () => "/tmp/source-session.jsonl",
+  };
+}
+
+function messageEntry(id: string, parentId: string | null, role: string, text: string) {
+  return {
+    type: "message",
+    id,
+    parentId,
+    timestamp: "2026-03-23T00:00:00.000Z",
+    message: {
+      role,
+      content: [{ type: "text", text }],
+      timestamp: 1,
+    },
+  };
 }

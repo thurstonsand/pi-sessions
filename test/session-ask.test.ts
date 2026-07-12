@@ -226,11 +226,14 @@ describe("session_ask tool", () => {
     );
 
     expect(updates).toHaveLength(2);
-    expect((updates[1]?.content[0] as { text: string }).text).toContain(`session: ${sessionId}`);
-    expect((updates[1]?.content[0] as { text: string }).text).toContain("title: Ask title");
-    expect((updates[1]?.content[0] as { text: string }).text).toContain(
-      "question: Summarize the decisions.",
-    );
+    const finalUpdate = updates[1];
+    if (!finalUpdate) {
+      throw new Error("Expected final session_ask update.");
+    }
+    const updateText = finalUpdate.content[0]?.text;
+    expect(updateText).toContain(`session: ${sessionId}`);
+    expect(updateText).toContain("title: Ask title");
+    expect(updateText).toContain("question: Summarize the decisions.");
 
     const text = (result.content[0] as { text: string }).text;
     expect(text).toContain(`session: ${sessionId}`);

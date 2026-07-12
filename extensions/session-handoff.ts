@@ -504,10 +504,15 @@ async function executeSessionHandoffTool(
     throw new Error("Handoff requires a persisted current session.");
   }
 
-  const sessionContext = buildSessionContext(
-    ctx.sessionManager.getEntries(),
-    ctx.sessionManager.getLeafId(),
-  );
+  const invocationLeafId = ctx.sessionManager.getLeafId();
+  const sourceLeafId = invocationLeafId
+    ? ctx.sessionManager.getEntry(invocationLeafId)?.parentId
+    : undefined;
+  if (!sourceLeafId) {
+    throw new Error("No conversation to hand off.");
+  }
+
+  const sessionContext = buildSessionContext(ctx.sessionManager.getEntries(), sourceLeafId);
   if (sessionContext.messages.length === 0) {
     throw new Error("No conversation to hand off.");
   }
@@ -529,6 +534,7 @@ async function executeSessionHandoffTool(
         goal,
         title: TOOL_HANDOFF_PROVISIONAL_TITLE,
         parentSessionFile,
+        sourceLeafId,
         requestResponse,
       }),
   });
@@ -599,6 +605,7 @@ async function startChildGeneratedHandoff(
         generateHandoffDraftFromSessionManager(
           ctx,
           sourceSessionManager,
+          bootstrap.sourceLeafId,
           bootstrap.goal,
           thinkingLevel,
           signal,

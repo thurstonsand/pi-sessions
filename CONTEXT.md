@@ -15,5 +15,7 @@
 - **Session reference picker**: The interactive picker opened from the prompt editor to find a prior session and insert its session reference.
 - **Handoff**: A transfer of work from one session into a new child session using a generated prompt based on the current session's context.
 - **Handoff draft**: The generated prompt proposed for a handoff before the user accepts or edits it.
-- **Background handoff**: A handoff launched into a new Ghostty split while the current session remains focused.
+- **Launch backend**: A pluggable mechanism that gets a created handoff session running: a Ghostty split, detached delivery, or future backends such as tmux. All backends consume the resume command.
+- **Background handoff**: A handoff launched through a launch backend while the current session keeps running.
+- **Detached handoff**: A handoff that creates the child session without launching it; the resume command is returned (and copied to the clipboard) for the user to run anywhere.
 - **Auto-title**: A generated session name based on the session conversation, refreshed over time unless the user manually renames the session.

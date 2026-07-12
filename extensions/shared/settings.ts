@@ -13,6 +13,11 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
   handoff: Type.Optional(
     Type.Object({
       pickerShortcut: Type.Optional(Type.String()),
+      detached: Type.Optional(
+        Type.Object({
+          copyToClipboard: Type.Optional(Type.Boolean()),
+        }),
+      ),
     }),
   ),
   index: Type.Optional(
@@ -70,6 +75,9 @@ export interface AskSettings extends AgentModelSettings {
 export interface SessionSettings {
   handoff: {
     pickerShortcut: KeyId;
+    detached: {
+      copyToClipboard: boolean;
+    };
   };
   index: {
     path: string;
@@ -189,6 +197,9 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
   return {
     handoff: {
       pickerShortcut: normalizePickerShortcut(fileSettings.handoff?.pickerShortcut),
+      detached: {
+        copyToClipboard: fileSettings.handoff?.detached?.copyToClipboard ?? true,
+      },
     },
     index: {
       path: path.join(indexDir, "index.sqlite"),

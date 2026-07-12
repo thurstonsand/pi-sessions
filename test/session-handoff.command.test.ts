@@ -1,16 +1,16 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  HANDOFF_BOOTSTRAP_ENV,
-  parseHandoffBootstrap,
-} from "../extensions/session-handoff/metadata.ts";
+import { HANDOFF_BOOTSTRAP_ENV } from "../extensions/session-handoff/metadata.ts";
 
 const mockLoadSettings = vi.fn();
 const mockGenerateHandoffDraft = vi.fn();
 const mockReviewHandoffDraft = vi.fn();
 const mockValidateSplitHandoffPrerequisites = vi.fn();
-const mockCreateHandoffSession = vi.fn();
-const mockLaunchSplitHandoffSession = vi.fn();
+const mockPrepareHandoffLaunch = vi.fn();
+const mockCreateGhosttyLaunchBackend = vi.fn();
+const mockLaunch = vi.fn();
+const mockCreateDetachedLaunchBackend = vi.fn();
+const mockDetachedLaunch = vi.fn();
 const mockGetFocusedGhosttyTerminalId = vi.fn();
 
 vi.mock("../extensions/shared/settings.ts", () => ({
@@ -30,15 +30,18 @@ vi.mock("../extensions/session-handoff/review.ts", async () => {
 });
 
 vi.mock("../extensions/session-handoff/spawn.ts", () => ({
-  buildPiResumeCommand: vi.fn(
-    (sessionDir: string, sessionId: string, bootstrapValue: string, title: string) =>
-      `PI_SESSIONS_HANDOFF_BOOTSTRAP='${bootstrapValue}' pi --session-dir ${sessionDir} --session-id ${sessionId} --name '${title}'`,
-  ),
+  prepareHandoffLaunch: mockPrepareHandoffLaunch,
+}));
+
+vi.mock("../extensions/session-handoff/launch/ghostty.ts", () => ({
   validateSplitHandoffPrerequisites: mockValidateSplitHandoffPrerequisites,
   isGhosttyHandoffAvailable: vi.fn(() => false),
   getFocusedGhosttyTerminalId: mockGetFocusedGhosttyTerminalId,
-  createHandoffSession: mockCreateHandoffSession,
-  launchSplitHandoffSession: mockLaunchSplitHandoffSession,
+  createGhosttyLaunchBackend: mockCreateGhosttyLaunchBackend,
+}));
+
+vi.mock("../extensions/session-handoff/launch/detached.ts", () => ({
+  createDetachedLaunchBackend: mockCreateDetachedLaunchBackend,
 }));
 
 beforeEach(() => {
@@ -47,7 +50,7 @@ beforeEach(() => {
   delete process.env[HANDOFF_BOOTSTRAP_ENV];
 
   mockLoadSettings.mockReturnValue({
-    handoff: { pickerShortcut: "alt+o" },
+    handoff: { pickerShortcut: "alt+o", detached: { copyToClipboard: true } },
     index: { path: "/tmp/pi-sessions/index.sqlite" },
     autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
   });
@@ -65,11 +68,14 @@ beforeEach(() => {
   });
   mockReviewHandoffDraft.mockResolvedValue("Approved handoff draft");
   mockValidateSplitHandoffPrerequisites.mockResolvedValue(undefined);
-  mockCreateHandoffSession.mockReturnValue({
+  mockPrepareHandoffLaunch.mockImplementation((options: { model?: string }) => ({
     sessionId: "child-session-123",
-    sessionFile: "/tmp/sessions/child-session-123.jsonl",
-  });
-  mockLaunchSplitHandoffSession.mockResolvedValue({ success: true });
+    resumeCommand: `RESUME child-session-123 ${options.model ?? "inherit"}`,
+  }));
+  mockLaunch.mockResolvedValue({ success: true });
+  mockCreateGhosttyLaunchBackend.mockReturnValue({ launch: mockLaunch });
+  mockDetachedLaunch.mockImplementation(async () => ({ success: true }));
+  mockCreateDetachedLaunchBackend.mockReturnValue({ launch: mockDetachedLaunch });
   mockGetFocusedGhosttyTerminalId.mockResolvedValue("terminal-123");
 });
 
@@ -81,7 +87,7 @@ describe("session handoff command", () => {
     await handler("   ", ctx as never);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Usage: /handoff [--left|--right|--up|--down] <goal for new thread>",
+      "Usage: /handoff [--left|--right|--up|--down|--detached] <goal for new thread>",
       "error",
     );
   });
@@ -93,8 +99,59 @@ describe("session handoff command", () => {
     await handler("--left --right Finish phase 1", ctx as never);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Use only one split flag: --left, --right, --up, or --down.",
+      "Use only one launch target: --left, --right, --up, --down, or --detached.",
       "error",
+    );
+  });
+
+  it("rejects mixing --detached with a split flag", async () => {
+    const { handler } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--detached --left Finish phase 1", ctx as never);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Use only one launch target: --left, --right, --up, --down, or --detached.",
+      "error",
+    );
+  });
+
+  it("runs a detached handoff and copies the resume command", async () => {
+    const { handler } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--detached Finish phase 1", ctx as never);
+
+    expect(mockValidateSplitHandoffPrerequisites).not.toHaveBeenCalled();
+    expect(mockCreateDetachedLaunchBackend).toHaveBeenCalledWith({ copyToClipboard: true });
+    expect(mockDetachedLaunch).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+      title: "Finish phase 1",
+      resumeCommand: expect.stringContaining("openai/gpt-5.4"),
+    });
+    expect(mockCreateGhosttyLaunchBackend).not.toHaveBeenCalled();
+    expect(ctx.newSession).not.toHaveBeenCalled();
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Detached handoff created. Resume command copied to clipboard.",
+      "info",
+    );
+  });
+
+  it("includes the resume command when clipboard copy is disabled", async () => {
+    mockLoadSettings.mockReturnValue({
+      handoff: { pickerShortcut: "alt+o", detached: { copyToClipboard: false } },
+      index: { path: "/tmp/pi-sessions/index.sqlite" },
+      autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
+    });
+    const { handler } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--detached Finish phase 1", ctx as never);
+
+    expect(mockCreateDetachedLaunchBackend).toHaveBeenCalledWith({ copyToClipboard: false });
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining("Detached handoff created. Resume with:"),
+      "info",
     );
   });
 
@@ -126,7 +183,7 @@ describe("session handoff command", () => {
 
       await handler("Finish phase 1", ctx as never);
 
-      expect(mockCreateHandoffSession).not.toHaveBeenCalled();
+      expect(mockPrepareHandoffLaunch).not.toHaveBeenCalled();
       expect(ctx.newSession).toHaveBeenCalledWith({
         parentSession: "/tmp/session.jsonl",
         setup: expect.any(Function),
@@ -159,29 +216,35 @@ describe("session handoff command", () => {
 
     await handler("--right Finish phase 1", ctx as never);
 
-    expect(mockValidateSplitHandoffPrerequisites).toHaveBeenCalledWith(pi, ctx);
-    expect(mockCreateHandoffSession).toHaveBeenCalledWith({
-      cwd: "/tmp/project",
-      sessionDir: "/tmp/sessions",
-      parentSessionFile: "/tmp/session.jsonl",
-      title: "Finish phase 1",
-    });
-    expect(mockLaunchSplitHandoffSession).toHaveBeenCalledWith(pi, {
-      cwd: "/tmp/project",
-      sessionDir: "/tmp/sessions",
+    expect(mockValidateSplitHandoffPrerequisites).toHaveBeenCalledWith(ctx);
+    expect(mockPrepareHandoffLaunch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: "/tmp/project",
+        sessionDir: "/tmp/sessions",
+        parentSessionFile: "/tmp/session.jsonl",
+        title: "Finish phase 1",
+        model: "openai/gpt-5.4",
+        buildBootstrap: expect.any(Function),
+      }),
+    );
+    expect(mockCreateGhosttyLaunchBackend).toHaveBeenCalledWith(pi, {
       direction: "right",
-      sessionId: "child-session-123",
-      bootstrapValue: expect.any(String),
+      terminalId: undefined,
+      fallbackToFocusedOnError: true,
+    });
+    expect(mockLaunch).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
       title: "Finish phase 1",
+      resumeCommand: "RESUME child-session-123 openai/gpt-5.4",
     });
     expect(ctx.newSession).not.toHaveBeenCalled();
     expect(ctx.switchSession).not.toHaveBeenCalled();
     expect(ctx.ui.notify).toHaveBeenCalledWith("Handoff started in a new pane (right).", "info");
 
-    const launchOptions = mockLaunchSplitHandoffSession.mock.calls[0]?.[1] as {
-      bootstrapValue: string;
+    const options = mockPrepareHandoffLaunch.mock.calls[0]?.[0] as {
+      buildBootstrap: (sessionId: string) => unknown;
     };
-    expect(parseHandoffBootstrap(launchOptions.bootstrapValue)).toEqual({
+    expect(options.buildBootstrap("child-session-123")).toEqual({
       sessionId: "child-session-123",
       goal: "Finish phase 1",
       nextTask: "Task",
@@ -207,7 +270,7 @@ describe("session handoff command", () => {
   });
 
   it("reports the created session id when split-pane launch fails", async () => {
-    mockLaunchSplitHandoffSession.mockResolvedValue({
+    mockLaunch.mockResolvedValue({
       success: false,
       error:
         "Failed to launch Ghostty split: boom. Split handoff currently supports Ghostty on macOS only.",
@@ -219,10 +282,60 @@ describe("session handoff command", () => {
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       expect.stringContaining(
-        "Failed to launch Ghostty split: boom. Split handoff currently supports Ghostty on macOS only. Created handoff session child-session-123; start it manually with: PI_SESSIONS_HANDOFF_BOOTSTRAP=",
+        "Failed to launch Ghostty split: boom. Split handoff currently supports Ghostty on macOS only. Created handoff session child-session-123; start it manually with: RESUME child-session-123",
       ),
       "error",
     );
+  });
+
+  it("errors on a --model with no value", async () => {
+    const { handler } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--model", ctx as never);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Usage: /handoff [--left|--right|--up|--down|--detached] <goal for new thread>",
+      "error",
+    );
+    expect(mockGenerateHandoffDraft).not.toHaveBeenCalled();
+  });
+
+  it("errors on an unknown --model before generating a draft", async () => {
+    const { handler } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--model ghost/model Finish phase 1", ctx as never);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      expect.stringContaining('Unknown model "ghost/model".'),
+      "error",
+    );
+    expect(mockGenerateHandoffDraft).not.toHaveBeenCalled();
+  });
+
+  it("passes an overridden model to a detached resume command", async () => {
+    const { handler } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--detached --model openai/gpt-5.4-mini Finish phase 1", ctx as never);
+
+    expect(mockDetachedLaunch).toHaveBeenCalledWith({
+      cwd: "/tmp/project",
+      title: "Finish phase 1",
+      resumeCommand: expect.stringContaining("openai/gpt-5.4-mini"),
+    });
+  });
+
+  it("applies a --model override to the in-place session after switch", async () => {
+    const { pi, handler } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--model openai/gpt-5.4-mini:high Finish phase 1", ctx as never);
+
+    expect(ctx.newSession).toHaveBeenCalled();
+    expect(pi.setModel).toHaveBeenCalledWith({ provider: "openai", id: "gpt-5.4-mini" });
+    expect(pi.setThinkingLevel).toHaveBeenCalledWith("high");
   });
 
   it("stops when review is cancelled", async () => {
@@ -288,7 +401,7 @@ function createPiApi(
     getAllTools: vi.fn(),
     setActiveTools: vi.fn(),
     getCommands: vi.fn(),
-    setModel: vi.fn(),
+    setModel: vi.fn().mockResolvedValue(true),
     getThinkingLevel: vi.fn(),
     setThinkingLevel: vi.fn(),
     registerProvider: vi.fn(),
@@ -322,6 +435,12 @@ function createCommandContext(options?: { hasMessages?: boolean; switchCancelled
     mode: "tui",
     hasUI: true,
     model: { provider: "openai", id: "gpt-5.4" },
+    modelRegistry: {
+      getAvailable: () => [
+        { provider: "openai", id: "gpt-5.4" },
+        { provider: "openai", id: "gpt-5.4-mini" },
+      ],
+    },
     ui: {
       notify: vi.fn(),
       custom: vi.fn(async (factory: (...args: unknown[]) => unknown) => {

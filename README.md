@@ -76,25 +76,30 @@ File filters distinguish read-or-write evidence from write-only evidence:
 
 `/handoff <goal>` starts a focused new session. Give pi a goal, and it will generate a prompt for you to review before kicking it off.
 
-You can either start a new session directly in your current one, or if you have Ghostty on macOS, you can spawn a new one in a split-pane and continue in your current:
+You can start a new session directly in your current one, hand it off detached, or — with Ghostty on macOS — spawn it in a split-pane and continue where you are:
 
 - `/handoff --left <goal>`
 - `/handoff --right <goal>`
 - `/handoff --up <goal>`
 - `/handoff --down <goal>`
+- `/handoff --detached <goal>`
 
-The flag indicates the Ghostty split direction.
+The direction flags indicate the Ghostty split. `--detached` creates the child session without launching it and copies its resume command to the clipboard, so it works anywhere.
+
+By default the child inherits the current model and thinking level. Override per handoff with `--model provider/id[:thinking]`:
+
+- `/handoff --model anthropic/claude-sonnet-4-5:high <goal>`
 
 Flow:
 
-- run `/handoff [--<direction>] <goal>`
+- run `/handoff [--<direction>] [--model <provider/id>] <goal>`
 - review the generated prompt preview
 - optionally edit the prompt
 - start the new session
 
 If you do nothing, the preview autostarts after a short countdown.
 
-When running in Ghostty on macOS, pi-sessions also exposes a `session_handoff` tool. This lets the agent start a background handoff after you choose a split direction. The current session keeps running, while the child session opens in the requested split, gathers context, and shows the same review countdown before starting.
+pi-sessions also exposes a `session_handoff` tool so the agent can fork a background session on its own. The current session keeps running while the child gathers context and shows the same review countdown before starting.
 
 If background handoffs ever target the wrong pane, run `/handoff --identify` from the intended source pane to refresh the in-memory Ghostty terminal binding.
 
@@ -124,11 +129,16 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
 {
   "sessions": {
     "handoff": {
-      "pickerShortcut": "alt+p"
+      "pickerShortcut": "alt+p",
+      "detached": {
+        "copyToClipboard": true
+      }
     }
   }
 }
 ```
+
+`detached.copyToClipboard` (default `true`) controls whether detached handoffs copy the resume command to the clipboard. When off, the resume command is only shown in the notification.
 
 ## Session Index
 

@@ -9,6 +9,11 @@ import {
 
 const mockLoadSettings = vi.fn();
 const mockOpenSessionReferencePicker = vi.fn();
+const mockIsGhosttyHandoffAvailable = vi.fn(() => true);
+const mockCreateGhosttyLaunchBackend = vi.fn();
+const mockCreateDetachedLaunchBackend = vi.fn();
+const mockDetachedLaunch = vi.fn();
+const mockPrepareHandoffLaunch = vi.fn();
 
 vi.mock("../extensions/shared/settings.ts", () => ({
   loadSettings: mockLoadSettings,
@@ -18,17 +23,42 @@ vi.mock("../extensions/session-handoff/picker.ts", () => ({
   openSessionReferencePicker: mockOpenSessionReferencePicker,
 }));
 
+vi.mock("../extensions/session-handoff/launch/ghostty.ts", () => ({
+  isGhosttyHandoffAvailable: mockIsGhosttyHandoffAvailable,
+  getFocusedGhosttyTerminalId: vi.fn(),
+  createGhosttyLaunchBackend: mockCreateGhosttyLaunchBackend,
+  validateSplitHandoffPrerequisites: vi.fn(),
+}));
+
+vi.mock("../extensions/session-handoff/launch/detached.ts", () => ({
+  createDetachedLaunchBackend: mockCreateDetachedLaunchBackend,
+}));
+
+vi.mock("../extensions/session-handoff/spawn.ts", () => ({
+  prepareHandoffLaunch: mockPrepareHandoffLaunch,
+}));
+
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   delete process.env[HANDOFF_BOOTSTRAP_ENV];
 
   mockLoadSettings.mockReturnValue({
-    handoff: { pickerShortcut: "alt+o" },
+    handoff: { pickerShortcut: "alt+o", detached: { copyToClipboard: true } },
     index: { path: "/tmp/pi-sessions/index.sqlite" },
     autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
   });
   mockOpenSessionReferencePicker.mockResolvedValue({ kind: "cancel" });
+  mockIsGhosttyHandoffAvailable.mockReturnValue(true);
+  mockDetachedLaunch.mockImplementation(async (input: { resumeCommand: string }) => ({
+    success: true,
+    message: input.resumeCommand,
+  }));
+  mockCreateDetachedLaunchBackend.mockReturnValue({ launch: mockDetachedLaunch });
+  mockPrepareHandoffLaunch.mockImplementation((options: { model?: string }) => ({
+    sessionId: "child-session-999",
+    resumeCommand: `RESUME child-session-999 ${options.model ?? "inherit"}`,
+  }));
 });
 
 describe("session handoff extension", () => {
@@ -119,6 +149,116 @@ describe("session handoff extension", () => {
     });
 
     expect(pasteToEditor).not.toHaveBeenCalled();
+  });
+
+  it("re-registers the tool with available models in the model description on session start", async () => {
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+
+    sessionHandoffExtension(pi as never);
+
+    const ctx = createSessionStartContext({
+      sessionId: "child-session-123",
+      availableModels: [
+        { provider: "openai", id: "gpt-5.4" },
+        { provider: "anthropic", id: "claude-sonnet-4-5" },
+      ],
+    });
+    await handlers.get("session_start")?.({}, ctx as never);
+
+    const registerTool = pi.registerTool as ReturnType<typeof vi.fn>;
+    const lastDefinition = registerTool.mock.calls.at(-1)?.[0] as {
+      parameters: { properties: { model: { description: string } } };
+    };
+    const modelDescription = lastDefinition.parameters.properties.model.description;
+    expect(modelDescription).toContain("openai/gpt-5.4");
+    expect(modelDescription).toContain("anthropic/claude-sonnet-4-5");
+  });
+
+  it("registers only at session start, adding split directions when Ghostty is present", async () => {
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+
+    sessionHandoffExtension(pi as never);
+    const registerTool = pi.registerTool as ReturnType<typeof vi.fn>;
+    expect(registerTool).not.toHaveBeenCalled();
+
+    await handlers.get("session_start")?.(
+      {},
+      createSessionStartContext({ sessionId: "x" }) as never,
+    );
+    expect(launchValues(registerTool.mock.calls.at(-1)?.[0])).toEqual([
+      "left",
+      "right",
+      "up",
+      "down",
+      "detached",
+    ]);
+  });
+
+  it("offers only detached at session start when Ghostty is unavailable", async () => {
+    mockIsGhosttyHandoffAvailable.mockReturnValue(false);
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+
+    sessionHandoffExtension(pi as never);
+    await handlers.get("session_start")?.(
+      {},
+      createSessionStartContext({ sessionId: "x" }) as never,
+    );
+
+    const registerTool = pi.registerTool as ReturnType<typeof vi.fn>;
+    expect(launchValues(registerTool.mock.calls.at(-1)?.[0])).toEqual(["detached"]);
+  });
+
+  it("runs a detached handoff, copies the resume command, and reports it", async () => {
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    sessionHandoffExtension(pi as never);
+
+    const result = await runTool(pi, handlers, { goal: "Do it", launch: "detached" });
+
+    expect(mockCreateDetachedLaunchBackend).toHaveBeenCalledWith({ copyToClipboard: true });
+    expect(mockCreateGhosttyLaunchBackend).not.toHaveBeenCalled();
+    expect(result.details).toMatchObject({
+      launch: "detached",
+      resumeCommand: "RESUME child-session-999 openai/gpt-5.4",
+    });
+    expect(result.content[0]?.text).toContain("RESUME child-session-999 openai/gpt-5.4");
+  });
+
+  it("degrades a split launch to detached when Ghostty is unavailable", async () => {
+    mockIsGhosttyHandoffAvailable.mockReturnValue(false);
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    sessionHandoffExtension(pi as never);
+
+    const result = await runTool(pi, handlers, { goal: "Do it", launch: "right" });
+
+    expect(mockCreateDetachedLaunchBackend).toHaveBeenCalled();
+    expect(mockCreateGhosttyLaunchBackend).not.toHaveBeenCalled();
+    expect(result.details).toMatchObject({ launch: "detached", degradedFrom: "right" });
+  });
+
+  it("rejects an unknown model override with the available list", async () => {
+    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    sessionHandoffExtension(pi as never);
+
+    await expect(
+      runTool(
+        pi,
+        handlers,
+        { goal: "Do it", launch: "detached", model: "ghost/model" },
+        { availableModels: [{ provider: "openai", id: "gpt-5.4" }] },
+      ),
+    ).rejects.toThrow('Unknown model "ghost/model". Available models: openai/gpt-5.4.');
   });
 
   it("materializes handoff metadata and sends the initial prompt on matching child session start", async () => {
@@ -255,6 +395,7 @@ function createPiApi(
     appendEntry: vi.fn(),
     sendUserMessage: vi.fn(),
     setSessionName: vi.fn(),
+    getThinkingLevel: vi.fn(),
     registerCommand,
     registerTool: vi.fn(),
     registerShortcut: vi.fn(
@@ -269,11 +410,74 @@ function createPiApi(
   };
 }
 
-function createSessionStartContext(options: { sessionId: string; entries?: unknown[] }) {
+function launchValues(definition: unknown): string[] {
+  const parameters = (
+    definition as { parameters: { properties: { launch: { anyOf: unknown[] } } } }
+  ).parameters;
+  return parameters.properties.launch.anyOf.map((schema) => (schema as { const: string }).const);
+}
+
+async function runTool(
+  pi: ReturnType<typeof createPiApi>,
+  handlers: Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>,
+  params: Record<string, unknown>,
+  options?: { availableModels?: unknown[] },
+): Promise<{
+  content: Array<{ text?: string }>;
+  details: Record<string, unknown>;
+}> {
+  await handlers.get("session_start")?.(
+    {},
+    createSessionStartContext({ sessionId: "tool-session" }) as never,
+  );
+  const registerTool = pi.registerTool as ReturnType<typeof vi.fn>;
+  const definition = registerTool.mock.calls.at(-1)?.[0] as {
+    execute: (...args: unknown[]) => Promise<unknown>;
+  };
+  const ctx = createToolExecuteContext(options);
+  return definition.execute("call-1", params, undefined, () => {}, ctx) as never;
+}
+
+function createToolExecuteContext(options?: { availableModels?: unknown[] }) {
+  return {
+    cwd: process.cwd(),
+    model: { provider: "openai", id: "gpt-5.4" },
+    modelRegistry: {
+      getAvailable: () => options?.availableModels ?? [],
+    },
+    sessionManager: {
+      getSessionFile: () => "/tmp/parent.jsonl",
+      getSessionDir: () => "/tmp/sessions",
+      getLeafId: () => "user-1",
+      getEntries: () => [
+        {
+          type: "message",
+          id: "user-1",
+          parentId: null,
+          timestamp: "2026-03-23T00:00:00.000Z",
+          message: {
+            role: "user",
+            content: [{ type: "text", text: "Do the thing." }],
+            timestamp: 1,
+          },
+        },
+      ],
+    },
+  };
+}
+
+function createSessionStartContext(options: {
+  sessionId: string;
+  entries?: unknown[];
+  availableModels?: unknown[];
+}) {
   return {
     hasUI: true,
     ui: {
       notify: vi.fn(),
+    },
+    modelRegistry: {
+      getAvailable: () => options.availableModels ?? [],
     },
     sessionManager: {
       getSessionId() {

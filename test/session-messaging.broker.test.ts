@@ -120,16 +120,12 @@ test("service enriches incoming receipts from the session index", async () => {
   db.close();
 
   const receivedMessages: unknown[] = [];
-  const service = new SessionMessagingService(
-    indexPath,
-    {
-      deliver(received: unknown) {
-        receivedMessages.push(received);
-        return { delivered: true as const };
-      },
-    } as never,
-    () => {},
-  );
+  const service = new SessionMessagingService(indexPath, {
+    deliver(received: unknown) {
+      receivedMessages.push(received);
+      return { delivered: true as const };
+    },
+  } as never);
   const source = new SessionMessagingClient();
 
   try {

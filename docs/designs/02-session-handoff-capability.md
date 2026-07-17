@@ -1,5 +1,7 @@
 # Session Handoff Capability Plan
 
+> **Later refinement:** [Design 16](16-pi-0806-session-transcript-modernization.md) replaces this plan's native first-user-message kickoff with a model-visible handoff custom message and separates child kickoff input from parent launch receipts. The generated-draft and review model remains in force.
+
 ## Context
 
 `session_search` and `session_ask` solve discovery and recall across prior Pi work. They do not solve the other half of long-running work: deliberately moving a live conversation into a fresh session without losing the thread.

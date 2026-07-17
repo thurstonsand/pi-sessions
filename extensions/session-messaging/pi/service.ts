@@ -23,8 +23,6 @@ import { spawnSessionMessagingBrokerIfNeeded } from "../broker/spawn.ts";
 import type { IncomingSessionMessageRuntime } from "./incoming-runtime.ts";
 import type { ReceivedMessageEndpoint, ReceivedMessageEntry } from "./message-contracts.ts";
 
-export const MESSAGE_SENT_CUSTOM_TYPE = "pi-sessions.message_sent";
-
 const RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 5_000, 10_000, 30_000] as const;
 
 export interface SendMessageRequest {
@@ -33,6 +31,19 @@ export interface SendMessageRequest {
   requestResponse?: boolean | undefined;
   sourceToolCallId?: string | undefined;
 }
+
+export type SendMessageResult =
+  | {
+      messageId: string;
+      delivered: false;
+      error?: string | undefined;
+    }
+  | {
+      messageId: string;
+      delivered: true;
+      target: ReceivedMessageEndpoint;
+      relation?: SessionLineageRelation | undefined;
+    };
 
 interface IncomingMessageIndexContext {
   source: ReceivedMessageEndpoint;
@@ -43,20 +54,14 @@ interface IncomingMessageIndexContext {
 export class SessionMessagingService {
   private readonly indexPath: string;
   private readonly incomingRuntime: IncomingSessionMessageRuntime;
-  private readonly appendEntry: (customType: string, data: unknown) => void;
   private relationBySessionId = new Map<string, SessionLineageRelation | undefined>();
   private readonly connection = new BrokerConnection((requestId, message) =>
     this.handleIncoming(requestId, message),
   );
 
-  constructor(
-    indexPath: string,
-    incomingRuntime: IncomingSessionMessageRuntime,
-    appendEntry: (customType: string, data: unknown) => void,
-  ) {
+  constructor(indexPath: string, incomingRuntime: IncomingSessionMessageRuntime) {
     this.indexPath = indexPath;
     this.incomingRuntime = incomingRuntime;
-    this.appendEntry = appendEntry;
   }
 
   async start(ctx: ExtensionContext): Promise<void> {
@@ -72,7 +77,7 @@ export class SessionMessagingService {
     this.connection.stop();
   }
 
-  async sendMessage(request: SendMessageRequest): Promise<SessionMessageSendResult> {
+  async sendMessage(request: SendMessageRequest): Promise<SendMessageResult> {
     const relation = this.getCachedRelationTo(request.target, true);
     const sentAt = new Date().toISOString();
     const messageId = randomUUID();
@@ -85,19 +90,19 @@ export class SessionMessagingService {
       sourceToolCallId: request.sourceToolCallId,
     });
 
-    if (result.delivered) {
-      this.appendEntry(MESSAGE_SENT_CUSTOM_TYPE, {
+    if (!result.delivered) {
+      return {
         messageId: result.messageId,
-        target: request.target,
-        body: request.body,
-        requestResponse: request.requestResponse,
-        sourceToolCallId: request.sourceToolCallId,
-        sentAt,
-        ...(relation === undefined ? {} : { relation }),
-      });
+        delivered: false,
+        ...(result.error === undefined ? {} : { error: result.error }),
+      };
     }
 
-    return result;
+    return {
+      ...result,
+      target: this.getTargetEndpoint(request.target),
+      ...(relation === undefined ? {} : { relation }),
+    };
   }
 
   private handleIncoming(requestId: string, message: SessionMessagePayload): void {
@@ -152,6 +157,14 @@ export class SessionMessagingService {
         : { sourceToolCallId: message.sourceToolCallId }),
       ...(context.relation === undefined ? {} : { relation: context.relation }),
     };
+  }
+
+  private getTargetEndpoint(targetSessionId: string): ReceivedMessageEndpoint {
+    return (
+      withSessionIndex(this.indexPath, { mode: "read", required: false }, ({ db }) =>
+        buildReceivedMessageEndpoint(targetSessionId, getSessionById(db, targetSessionId)),
+      ) ?? buildReceivedMessageEndpoint(targetSessionId)
+    );
   }
 
   private getIncomingMessageIndexContext(

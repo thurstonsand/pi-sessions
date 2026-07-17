@@ -6,6 +6,8 @@ Accepted
 
 ## Decision Summary
 
+> **Later refinement:** [Design 16](16-pi-0806-session-transcript-modernization.md) replaces the native first-user-message kickoff with a model-visible handoff custom message and adds an authoritative tool-supplied child title plus parent launch receipts. The background-only tool boundary and child review flow remain in force.
+
 Expose an LLM-callable `session_handoff` tool for agent-initiated background handoffs only. The tool launches a Ghostty split from the correct source terminal, returns once the child session is started, and pushes draft generation plus review into the child session so the parent agent can continue quickly.
 
 ## Problem Statement

@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- Added support for the Pi 0.80.6 `max` thinking level across handoff, session_ask, and auto-title settings.
+- Added a required `title` parameter and live streaming call rendering to `session_handoff`.
+- Added durable handoff launch receipts for deferred and Ghostty split launches.
+- Added a compact renderer for durable sent session-message receipts.
+- Added auto-title `thinkingLevel` passthrough; an explicit setting overrides a thinking suffix on the configured model.
+
+### Changed
+
+- Renamed the `detached` launch value and flag to `deferred` (`/handoff --deferred`, `sessions.handoff.deferred.copyToClipboard`).
+- Handoff kickoffs are now model-visible custom messages with a semantic card instead of impersonated user messages.
+- Handoff bootstrap state moved from `PI_SESSIONS_HANDOFF_BOOTSTRAP` into a pending entry in the child session file, consumed append-only.
+- Cross-cwd handoff children are stored in the target project's default session directory; resume commands are self-locating and include `--session-dir` only for nondefault directories.
+- Model selection for handoff, session_ask, and auto-title now uses Pi's `resolveCliModel`, narrowed to authenticated available models.
+- `session_ask` cancellation now coordinates and awaits nested abort before disposal.
+
 ## [0.8.0] - 2026-07-08
 
 ### Added

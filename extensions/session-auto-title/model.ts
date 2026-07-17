@@ -1,12 +1,14 @@
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { findModelByReference } from "../shared/model.ts";
-import { ModelReference } from "../shared/settings.ts";
+import { type ExactModelReference, findModelByReference } from "../shared/model.ts";
+import { resolveAuthenticatedModel } from "../shared/model-resolution.ts";
 
-const DEFAULT_AUTO_TITLE_FALLBACK_MODELS: readonly ModelReference[] = [
-  new ModelReference("google", "gemini-flash-lite-latest"),
-  new ModelReference("anthropic", "claude-haiku-4-5"),
-  new ModelReference("openai", "gpt-5.4-mini"),
+const DEFAULT_AUTO_TITLE_FALLBACK_MODELS: readonly ExactModelReference[] = [
+  { provider: "openai-codex", modelId: "gpt-5.6-luna" },
+  { provider: "openai", modelId: "gpt-5.6-luna" },
+  { provider: "anthropic", modelId: "claude-haiku-4-5" },
+  { provider: "google", modelId: "gemini-flash-lite-latest" },
 ] as const;
 
 export type AutoTitleModelSource = "configured" | "fallback" | "current";
@@ -14,24 +16,28 @@ export type AutoTitleModelSource = "configured" | "fallback" | "current";
 export interface AutoTitleModelResolution {
   model: Model<Api>;
   source: AutoTitleModelSource;
+  thinkingLevel?: ThinkingLevel | undefined;
 }
 
 export function resolveAutoTitleModel(
   ctx: ExtensionContext,
-  configuredModel: ModelReference | undefined,
+  configuredModel: string | undefined,
 ): AutoTitleModelResolution | undefined {
-  const availableModels = ctx.modelRegistry.getAvailable();
-
   if (configuredModel) {
-    const configuredMatch = findModelByReference(availableModels, configuredModel);
-    if (configuredMatch) {
+    const configured = resolveAuthenticatedModel({
+      modelRegistry: ctx.modelRegistry,
+      modelPattern: configuredModel,
+    });
+    if (configured.ok) {
       return {
-        model: configuredMatch,
+        model: configured.model,
         source: "configured",
+        thinkingLevel: configured.thinkingLevel,
       };
     }
   }
 
+  const availableModels = ctx.modelRegistry.getAvailable();
   for (const fallbackReference of DEFAULT_AUTO_TITLE_FALLBACK_MODELS) {
     const fallbackMatch = findModelByReference(availableModels, fallbackReference);
     if (fallbackMatch) {

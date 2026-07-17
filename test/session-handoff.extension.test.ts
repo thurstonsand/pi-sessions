@@ -2,17 +2,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createHandoffBootstrap,
   createHandoffSessionMetadata,
-  encodeHandoffBootstrap,
-  HANDOFF_BOOTSTRAP_ENV,
+  HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
   HANDOFF_STALE_SESSION_MESSAGE,
 } from "../extensions/session-handoff/metadata.ts";
+import { createFakeModelRegistry } from "./test-helpers.ts";
 
 const mockLoadSettings = vi.fn();
 const mockOpenSessionReferencePicker = vi.fn();
 const mockIsGhosttyHandoffAvailable = vi.fn(() => true);
 const mockCreateGhosttyLaunchBackend = vi.fn();
-const mockCreateDetachedLaunchBackend = vi.fn();
-const mockDetachedLaunch = vi.fn();
+const mockCreateDeferredLaunchBackend = vi.fn();
+const mockDeferredLaunch = vi.fn();
 const mockPrepareHandoffLaunch = vi.fn();
 
 vi.mock("../extensions/shared/settings.ts", () => ({
@@ -30,8 +30,8 @@ vi.mock("../extensions/session-handoff/launch/ghostty.ts", () => ({
   validateSplitHandoffPrerequisites: vi.fn(),
 }));
 
-vi.mock("../extensions/session-handoff/launch/detached.ts", () => ({
-  createDetachedLaunchBackend: mockCreateDetachedLaunchBackend,
+vi.mock("../extensions/session-handoff/launch/deferred.ts", () => ({
+  createDeferredLaunchBackend: mockCreateDeferredLaunchBackend,
 }));
 
 vi.mock("../extensions/session-handoff/spawn.ts", () => ({
@@ -41,20 +41,19 @@ vi.mock("../extensions/session-handoff/spawn.ts", () => ({
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  delete process.env[HANDOFF_BOOTSTRAP_ENV];
 
   mockLoadSettings.mockReturnValue({
-    handoff: { pickerShortcut: "alt+o", detached: { copyToClipboard: true } },
+    handoff: { pickerShortcut: "alt+o", deferred: { copyToClipboard: true } },
     index: { path: "/tmp/pi-sessions/index.sqlite" },
     autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
   });
   mockOpenSessionReferencePicker.mockResolvedValue({ kind: "cancel" });
   mockIsGhosttyHandoffAvailable.mockReturnValue(true);
-  mockDetachedLaunch.mockImplementation(async (input: { resumeCommand: string }) => ({
+  mockDeferredLaunch.mockImplementation(async () => ({
     success: true,
-    message: input.resumeCommand,
+    clipboardStatus: "copied",
   }));
-  mockCreateDetachedLaunchBackend.mockReturnValue({ launch: mockDetachedLaunch });
+  mockCreateDeferredLaunchBackend.mockReturnValue({ launch: mockDeferredLaunch });
   mockPrepareHandoffLaunch.mockImplementation((options: { model?: string }) => ({
     sessionId: "child-session-999",
     resumeCommand: `RESUME child-session-999 ${options.model ?? "inherit"}`,
@@ -194,11 +193,11 @@ describe("session handoff extension", () => {
       "right",
       "up",
       "down",
-      "detached",
+      "deferred",
     ]);
   });
 
-  it("offers only detached at session start when Ghostty is unavailable", async () => {
+  it("offers only deferred at session start when Ghostty is unavailable", async () => {
     mockIsGhosttyHandoffAvailable.mockReturnValue(false);
     const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
@@ -211,21 +210,25 @@ describe("session handoff extension", () => {
     );
 
     const registerTool = pi.registerTool as ReturnType<typeof vi.fn>;
-    expect(launchValues(registerTool.mock.calls.at(-1)?.[0])).toEqual(["detached"]);
+    expect(launchValues(registerTool.mock.calls.at(-1)?.[0])).toEqual(["deferred"]);
   });
 
-  it("runs a detached handoff, copies the resume command, and reports it", async () => {
+  it("runs a deferred handoff, copies the resume command, and reports it", async () => {
     const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
     sessionHandoffExtension(pi as never);
 
-    const result = await runTool(pi, handlers, { goal: "Do it", launch: "detached" });
+    const result = await runTool(pi, handlers, {
+      goal: "Do it",
+      title: "Do it now",
+      launch: "deferred",
+    });
 
-    expect(mockCreateDetachedLaunchBackend).toHaveBeenCalledWith({ copyToClipboard: true });
+    expect(mockCreateDeferredLaunchBackend).toHaveBeenCalledWith({ copyToClipboard: true });
     expect(mockCreateGhosttyLaunchBackend).not.toHaveBeenCalled();
     expect(result.details).toMatchObject({
-      launch: "detached",
+      launch: "deferred",
       resumeCommand: "RESUME child-session-999 openai/gpt-5.4",
     });
     expect(result.content[0]?.text).toContain("RESUME child-session-999 openai/gpt-5.4");
@@ -238,18 +241,22 @@ describe("session handoff extension", () => {
     });
   });
 
-  it("degrades a split launch to detached when Ghostty is unavailable", async () => {
+  it("degrades a split launch to deferred when Ghostty is unavailable", async () => {
     mockIsGhosttyHandoffAvailable.mockReturnValue(false);
     const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
     sessionHandoffExtension(pi as never);
 
-    const result = await runTool(pi, handlers, { goal: "Do it", launch: "right" });
+    const result = await runTool(pi, handlers, {
+      goal: "Do it",
+      title: "Do it now",
+      launch: "right",
+    });
 
-    expect(mockCreateDetachedLaunchBackend).toHaveBeenCalled();
+    expect(mockCreateDeferredLaunchBackend).toHaveBeenCalled();
     expect(mockCreateGhosttyLaunchBackend).not.toHaveBeenCalled();
-    expect(result.details).toMatchObject({ launch: "detached", degradedFrom: "right" });
+    expect(result.details).toMatchObject({ launch: "deferred", degradedFrom: "right" });
   });
 
   it("rejects an unknown model override with the available list", async () => {
@@ -262,10 +269,10 @@ describe("session handoff extension", () => {
       runTool(
         pi,
         handlers,
-        { goal: "Do it", launch: "detached", model: "ghost/model" },
+        { goal: "Do it", title: "Do it now", launch: "deferred", model: "ghost/model" },
         { availableModels: [{ provider: "openai", id: "gpt-5.4" }] },
       ),
-    ).rejects.toThrow('Unknown model "ghost/model". Available models: openai/gpt-5.4.');
+    ).rejects.toThrow('Model "ghost/model" not found. Available models: openai/gpt-5.4.');
   });
 
   it("materializes handoff metadata and sends the initial prompt on matching child session start", async () => {
@@ -275,19 +282,10 @@ describe("session handoff extension", () => {
 
     sessionHandoffExtension(pi as never);
 
-    process.env[HANDOFF_BOOTSTRAP_ENV] = encodeHandoffBootstrap(
-      createHandoffBootstrap(
-        "child-session-123",
-        createHandoffSessionMetadata(
-          "Finish phase 1",
-          "Implement autocomplete",
-          "Approved handoff draft",
-          "Implement autocomplete",
-        ),
-      ),
-    );
-
-    const ctx = createSessionStartContext({ sessionId: "child-session-123" });
+    const ctx = createSessionStartContext({
+      sessionId: "child-session-123",
+      entries: [pendingBootstrapEntry()],
+    });
     await handlers.get("session_start")?.({}, ctx as never);
 
     expect(pi.appendEntry).toHaveBeenCalledWith(
@@ -301,8 +299,18 @@ describe("session handoff extension", () => {
       }),
     );
     expect(pi.setSessionName).toHaveBeenCalledWith("Implement autocomplete");
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("Approved handoff draft");
-    expect(process.env[HANDOFF_BOOTSTRAP_ENV]).toBeUndefined();
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        customType: "pi-sessions.handoff-kickoff",
+        content: "Approved handoff draft",
+        details: expect.objectContaining({
+          title: "Implement autocomplete",
+          source: { sessionId: "parent-session-1", sessionName: "Parent Session" },
+          bootstrapEntryId: "bootstrap-1",
+        }),
+      }),
+      { triggerTurn: true },
+    );
   });
 
   it("refuses bootstrap when the target session already has user input", async () => {
@@ -312,25 +320,14 @@ describe("session handoff extension", () => {
 
     sessionHandoffExtension(pi as never);
 
-    process.env[HANDOFF_BOOTSTRAP_ENV] = encodeHandoffBootstrap(
-      createHandoffBootstrap(
-        "child-session-123",
-        createHandoffSessionMetadata(
-          "Finish phase 1",
-          "Implement autocomplete",
-          "Approved handoff draft",
-          "Implement autocomplete",
-        ),
-      ),
-    );
-
     const ctx = createSessionStartContext({
       sessionId: "child-session-123",
       entries: [
+        pendingBootstrapEntry(),
         {
           type: "message",
           id: "user-1",
-          parentId: null,
+          parentId: "bootstrap-1",
           timestamp: "2026-03-23T00:00:00.000Z",
           message: {
             role: "user",
@@ -343,9 +340,11 @@ describe("session handoff extension", () => {
     await handlers.get("session_start")?.({}, ctx as never);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(HANDOFF_STALE_SESSION_MESSAGE, "error");
-    expect(pi.appendEntry).not.toHaveBeenCalled();
-    expect(pi.sendUserMessage).not.toHaveBeenCalled();
-    expect(process.env[HANDOFF_BOOTSTRAP_ENV]).toBeUndefined();
+    expect(pi.appendEntry).toHaveBeenCalledWith("pi-sessions.handoff-bootstrap-consumed", {
+      bootstrapEntryId: "bootstrap-1",
+      reason: "stale",
+    });
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("still sends the prompt when metadata already exists but there is no user input", async () => {
@@ -355,25 +354,14 @@ describe("session handoff extension", () => {
 
     sessionHandoffExtension(pi as never);
 
-    process.env[HANDOFF_BOOTSTRAP_ENV] = encodeHandoffBootstrap(
-      createHandoffBootstrap(
-        "child-session-123",
-        createHandoffSessionMetadata(
-          "Finish phase 1",
-          "Implement autocomplete",
-          "Approved handoff draft",
-          "Implement autocomplete",
-        ),
-      ),
-    );
-
     const ctx = createSessionStartContext({
       sessionId: "child-session-123",
       entries: [
+        pendingBootstrapEntry(),
         {
           type: "custom",
           id: "custom-1",
-          parentId: null,
+          parentId: "bootstrap-1",
           timestamp: "2026-03-23T00:00:00.000Z",
           customType: "pi-sessions.handoff",
           data: createHandoffSessionMetadata(
@@ -388,8 +376,10 @@ describe("session handoff extension", () => {
     await handlers.get("session_start")?.({}, ctx as never);
 
     expect(pi.appendEntry).not.toHaveBeenCalled();
-    expect(pi.sendUserMessage).toHaveBeenCalledWith("Approved handoff draft");
-    expect(process.env[HANDOFF_BOOTSTRAP_ENV]).toBeUndefined();
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ content: "Approved handoff draft" }),
+      { triggerTurn: true },
+    );
   });
 });
 
@@ -401,6 +391,9 @@ function createPiApi(
   return {
     appendEntry: vi.fn(),
     sendUserMessage: vi.fn(),
+    sendMessage: vi.fn(),
+    registerMessageRenderer: vi.fn(),
+    registerEntryRenderer: vi.fn(),
     setSessionName: vi.fn(),
     getThinkingLevel: vi.fn(),
     registerCommand,
@@ -449,15 +442,22 @@ function createToolExecuteContext(options?: { availableModels?: unknown[] }) {
   return {
     cwd: process.cwd(),
     model: { provider: "openai", id: "gpt-5.4" },
-    modelRegistry: {
-      getAvailable: () => options?.availableModels ?? [],
-    },
+    modelRegistry: createFakeModelRegistry({
+      available: (options?.availableModels ?? []) as never,
+    }),
     sessionManager: {
       getSessionFile: () => "/tmp/parent.jsonl",
       getSessionDir: () => "/tmp/sessions",
       getLeafId: () => "assistant-1",
-      getEntry: (id: string) =>
-        id === "assistant-1" ? { id: "assistant-1", parentId: "user-1" } : undefined,
+      getEntry: (id: string) => {
+        if (id === "assistant-1") {
+          return { id: "assistant-1", parentId: "user-1" };
+        }
+        if (id === "user-1") {
+          return { id: "user-1", parentId: null };
+        }
+        return undefined;
+      },
       getEntries: () => [
         {
           type: "message",
@@ -486,6 +486,26 @@ function createToolExecuteContext(options?: { availableModels?: unknown[] }) {
   };
 }
 
+function pendingBootstrapEntry() {
+  return {
+    type: "custom",
+    id: "bootstrap-1",
+    parentId: null,
+    timestamp: "2026-03-23T00:00:00.000Z",
+    customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+    data: createHandoffBootstrap(
+      "child-session-123",
+      createHandoffSessionMetadata(
+        "Finish phase 1",
+        "Implement autocomplete",
+        "Approved handoff draft",
+        "Implement autocomplete",
+      ),
+      { sessionId: "parent-session-1", sessionName: "Parent Session" },
+    ),
+  };
+}
+
 function createSessionStartContext(options: {
   sessionId: string;
   entries?: unknown[];
@@ -496,14 +516,17 @@ function createSessionStartContext(options: {
     ui: {
       notify: vi.fn(),
     },
-    modelRegistry: {
-      getAvailable: () => options.availableModels ?? [],
-    },
+    modelRegistry: createFakeModelRegistry({
+      available: (options.availableModels ?? []) as never,
+    }),
     sessionManager: {
       getSessionId() {
         return options.sessionId;
       },
       getEntries() {
+        return options.entries ?? [];
+      },
+      getBranch() {
         return options.entries ?? [];
       },
       getSessionName() {

@@ -6,6 +6,8 @@ Draft
 
 ## Decision Summary
 
+> **Later refinement:** [Design 16](16-pi-0806-session-transcript-modernization.md) gives successful sender-side `pi-sessions.message_sent` evidence a strict enriched-target schema and compact/expanded entry renderer. Incoming receipt and model-visible delivery semantics remain unchanged.
+
 Expose live, agent-facing session-to-session messaging through `session_list_live` and `session_send_message`. The design uses a pi-sessions-native local broker, inspired by `pi-intercom`, but keeps Pi session UUIDs and pi-sessions lineage as the public identity model. Delivery is live-only and best-effort durable: the recipient appends a receipt entry before acknowledging delivery, and replay on session start covers the normal in-memory steering gap.
 
 ## Problem Statement

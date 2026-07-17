@@ -1,5 +1,8 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { HANDOFF_BOOTSTRAP_ENV, parseHandoffBootstrap } from "./session-handoff/metadata.ts";
+import {
+  findPendingHandoffBootstrap,
+  getHandoffMetadataFromEntries,
+} from "./session-handoff/metadata.ts";
 import { createSessionHookController } from "./session-search/hooks.ts";
 import { loadSettings } from "./shared/settings.ts";
 
@@ -61,15 +64,13 @@ export default function sessionHooksExtension(pi: ExtensionAPI): void {
 }
 
 function getSessionStartOrigin(ctx: ExtensionContext): "handoff" | undefined {
-  const encodedBootstrap = process.env[HANDOFF_BOOTSTRAP_ENV];
-  if (!encodedBootstrap) {
-    return undefined;
+  const entries = ctx.sessionManager.getEntries();
+  if (getHandoffMetadataFromEntries(entries)) {
+    return "handoff";
   }
 
-  const bootstrap = parseHandoffBootstrap(encodedBootstrap);
-  if (!bootstrap) {
-    return undefined;
-  }
-
-  return bootstrap.sessionId === ctx.sessionManager.getSessionId() ? "handoff" : undefined;
+  const scan = findPendingHandoffBootstrap(ctx.sessionManager.getBranch());
+  return scan?.kind === "pending" && scan.bootstrap.sessionId === ctx.sessionManager.getSessionId()
+    ? "handoff"
+    : undefined;
 }

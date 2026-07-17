@@ -4,6 +4,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
+import { isThinkingLevel } from "./thinking-levels.ts";
 import { parseTypeBoxValue } from "./typebox.ts";
 
 export const DEFAULT_AUTO_TITLE_REFRESH_TURNS = 4;
@@ -13,7 +14,7 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
   handoff: Type.Optional(
     Type.Object({
       pickerShortcut: Type.Optional(Type.String()),
-      detached: Type.Optional(
+      deferred: Type.Optional(
         Type.Object({
           copyToClipboard: Type.Optional(Type.Boolean()),
         }),
@@ -46,19 +47,8 @@ const ROOT_SETTINGS_SCHEMA = Type.Object({
   sessions: Type.Optional(SESSION_FILE_SETTINGS_SCHEMA),
 });
 
-export class ModelReference {
-  constructor(
-    readonly provider: string,
-    readonly modelId: string,
-  ) {}
-
-  toString(): string {
-    return `${this.provider}/${this.modelId}`;
-  }
-}
-
 export interface AgentModelSettings {
-  model?: ModelReference | undefined;
+  model?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
 }
 
@@ -75,7 +65,7 @@ export interface AskSettings extends AgentModelSettings {
 export interface SessionSettings {
   handoff: {
     pickerShortcut: KeyId;
-    detached: {
+    deferred: {
       copyToClipboard: boolean;
     };
   };
@@ -135,33 +125,9 @@ function normalizePickerShortcut(value: string | undefined): KeyId {
   return (trimmed ? trimmed : "alt+o") as KeyId;
 }
 
-export function parseModelReference(value: string | undefined): ModelReference | undefined {
-  const trimmed = value?.trim();
-  if (!trimmed) {
-    return undefined;
-  }
-
-  const slashIndex = trimmed.indexOf("/");
-  if (slashIndex <= 0 || slashIndex === trimmed.length - 1) {
-    return undefined;
-  }
-
-  return new ModelReference(trimmed.slice(0, slashIndex), trimmed.slice(slashIndex + 1));
-}
-
 function parseThinkingLevel(value: string | undefined): ThinkingLevel | undefined {
   const trimmed = value?.trim();
-  switch (trimmed) {
-    case "off":
-    case "minimal":
-    case "low":
-    case "medium":
-    case "high":
-    case "xhigh":
-      return trimmed;
-    default:
-      return undefined;
-  }
+  return isThinkingLevel(trimmed) ? trimmed : undefined;
 }
 
 function resolveAgentModelSettings(
@@ -172,7 +138,7 @@ function resolveAgentModelSettings(
       }
     | undefined,
 ): AgentModelSettings {
-  const model = parseModelReference(value?.model);
+  const model = value?.model?.trim() || undefined;
   const thinkingLevel = parseThinkingLevel(value?.thinkingLevel);
   return {
     ...(model ? { model } : {}),
@@ -197,8 +163,8 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
   return {
     handoff: {
       pickerShortcut: normalizePickerShortcut(fileSettings.handoff?.pickerShortcut),
-      detached: {
-        copyToClipboard: fileSettings.handoff?.detached?.copyToClipboard ?? true,
+      deferred: {
+        copyToClipboard: fileSettings.handoff?.deferred?.copyToClipboard ?? true,
       },
     },
     index: {

@@ -1,10 +1,17 @@
-import { Buffer } from "node:buffer";
 import type { CustomEntry, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
+import {
+  buildHandoffKickoffSource,
+  HANDOFF_KICKOFF_CUSTOM_TYPE,
+  HANDOFF_KICKOFF_DETAILS_SCHEMA,
+  HANDOFF_KICKOFF_SOURCE_SCHEMA,
+  type HandoffKickoffSource,
+} from "./kickoff.ts";
 
 export const HANDOFF_METADATA_CUSTOM_TYPE = "pi-sessions.handoff";
-export const HANDOFF_BOOTSTRAP_ENV = "PI_SESSIONS_HANDOFF_BOOTSTRAP";
+export const HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE = "pi-sessions.handoff-bootstrap";
+export const HANDOFF_BOOTSTRAP_CONSUMED_CUSTOM_TYPE = "pi-sessions.handoff-bootstrap-consumed";
 export const HANDOFF_STALE_SESSION_MESSAGE =
   "Session handoff failed: target session already has user input.";
 
@@ -22,6 +29,7 @@ export const IMMEDIATE_HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
   nextTask: Type.String(),
   title: Type.String(),
   initialPrompt: Type.String(),
+  source: HANDOFF_KICKOFF_SOURCE_SCHEMA,
 });
 
 export const CHILD_GENERATED_HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
@@ -39,12 +47,24 @@ export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Union([
   CHILD_GENERATED_HANDOFF_BOOTSTRAP_SCHEMA,
 ]);
 
+export const HANDOFF_BOOTSTRAP_CONSUMED_SCHEMA = Type.Object({
+  bootstrapEntryId: Type.String(),
+  reason: Type.Union([
+    Type.Literal("cancelled"),
+    Type.Literal("prefilled"),
+    Type.Literal("stale"),
+    Type.Literal("invalid"),
+  ]),
+});
+
 export type HandoffSessionMetadata = Static<typeof HANDOFF_SESSION_METADATA_SCHEMA>;
 export type ImmediateHandoffBootstrap = Static<typeof IMMEDIATE_HANDOFF_BOOTSTRAP_SCHEMA>;
 export type ChildGeneratedHandoffBootstrap = Static<
   typeof CHILD_GENERATED_HANDOFF_BOOTSTRAP_SCHEMA
 >;
 export type HandoffBootstrap = Static<typeof HANDOFF_BOOTSTRAP_SCHEMA>;
+export type HandoffBootstrapConsumed = Static<typeof HANDOFF_BOOTSTRAP_CONSUMED_SCHEMA>;
+export type HandoffBootstrapConsumedReason = HandoffBootstrapConsumed["reason"];
 
 export function createHandoffSessionMetadata(
   goal: string,
@@ -67,6 +87,7 @@ export function createHandoffSessionMetadata(
 export function createHandoffBootstrap(
   sessionId: string,
   metadata: HandoffSessionMetadata,
+  source: HandoffKickoffSource,
 ): ImmediateHandoffBootstrap {
   return {
     sessionId,
@@ -74,6 +95,7 @@ export function createHandoffBootstrap(
     nextTask: metadata.nextTask,
     title: metadata.title,
     initialPrompt: metadata.initial_prompt,
+    source: buildHandoffKickoffSource(source),
   };
 }
 
@@ -102,17 +124,51 @@ export function isChildGeneratedHandoffBootstrap(
   return "mode" in bootstrap && bootstrap.mode === "generate";
 }
 
-export function encodeHandoffBootstrap(bootstrap: HandoffBootstrap): string {
-  return Buffer.from(JSON.stringify(bootstrap), "utf8").toString("base64");
-}
+export type PendingHandoffBootstrapScan =
+  | { kind: "pending"; entryId: string; bootstrap: HandoffBootstrap }
+  | { kind: "invalid"; entryId: string };
 
-export function parseHandoffBootstrap(value: string): HandoffBootstrap | undefined {
-  try {
-    const decoded = Buffer.from(value, "base64").toString("utf8");
-    return safeParseTypeBoxValue(HANDOFF_BOOTSTRAP_SCHEMA, JSON.parse(decoded));
-  } catch {
-    return undefined;
+/**
+ * Finds the newest unconsumed pending bootstrap on a branch. Consumption is
+ * append-only: a delivered kickoff or consumed marker must reference the
+ * bootstrap entry it consumed.
+ */
+export function findPendingHandoffBootstrap(
+  branch: readonly SessionEntry[],
+): PendingHandoffBootstrapScan | undefined {
+  const consumedEntryIds = new Set<string>();
+  for (const entry of branch) {
+    if (entry.type === "custom_message" && entry.customType === HANDOFF_KICKOFF_CUSTOM_TYPE) {
+      const details = safeParseTypeBoxValue(HANDOFF_KICKOFF_DETAILS_SCHEMA, entry.details);
+      if (details?.bootstrapEntryId) {
+        consumedEntryIds.add(details.bootstrapEntryId);
+      }
+    }
+    if (entry.type === "custom" && entry.customType === HANDOFF_BOOTSTRAP_CONSUMED_CUSTOM_TYPE) {
+      const consumed = safeParseTypeBoxValue(HANDOFF_BOOTSTRAP_CONSUMED_SCHEMA, entry.data);
+      if (consumed) {
+        consumedEntryIds.add(consumed.bootstrapEntryId);
+      }
+    }
   }
+
+  for (let i = branch.length - 1; i >= 0; i -= 1) {
+    const entry = branch[i];
+    if (
+      entry?.type !== "custom" ||
+      entry.customType !== HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE ||
+      consumedEntryIds.has(entry.id)
+    ) {
+      continue;
+    }
+
+    const bootstrap = safeParseTypeBoxValue(HANDOFF_BOOTSTRAP_SCHEMA, entry.data);
+    return bootstrap
+      ? { kind: "pending", entryId: entry.id, bootstrap }
+      : { kind: "invalid", entryId: entry.id };
+  }
+
+  return undefined;
 }
 
 export function parseHandoffSessionMetadata(value: unknown): HandoffSessionMetadata | undefined {
@@ -136,8 +192,14 @@ export function getHandoffMetadataFromEntries(
   return undefined;
 }
 
-export function hasUserMessages(entries: readonly SessionEntry[]): boolean {
-  return entries.some((entry) => entry.type === "message" && entry.message.role === "user");
+// Bootstrap freshness: an existing kickoff counts as a started conversation
+// even though no native user message exists.
+export function hasStartedConversation(entries: readonly SessionEntry[]): boolean {
+  return entries.some(
+    (entry) =>
+      (entry.type === "message" && entry.message.role === "user") ||
+      (entry.type === "custom_message" && entry.customType === HANDOFF_KICKOFF_CUSTOM_TYPE),
+  );
 }
 
 function parseCustomHandoffMetadata(entry: CustomEntry): HandoffSessionMetadata | undefined {

@@ -2,6 +2,29 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
+interface FakeRegistryModel {
+  provider: string;
+  id: string;
+}
+
+export function createFakeModelRegistry(options: {
+  available: FakeRegistryModel[];
+  all?: FakeRegistryModel[];
+}) {
+  const all = options.all ?? options.available;
+  const isAvailable = (model: FakeRegistryModel) =>
+    options.available.some((m) => m.provider === model.provider && m.id === model.id);
+
+  return {
+    getAll: () => all,
+    getAvailable: () => options.available,
+    hasConfiguredAuth: (model: FakeRegistryModel) => isAvailable(model),
+    async getApiKeyAndHeaders() {
+      return { ok: true, apiKey: "test-key", headers: undefined };
+    },
+  };
+}
+
 export interface TestFilesystem {
   createTempDir(): string;
   cleanup(): void;

@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { HANDOFF_BOOTSTRAP_ENV } from "../extensions/session-handoff/metadata.ts";
+import { createFakeModelRegistry } from "./test-helpers.ts";
 
 const mockLoadSettings = vi.fn();
 const mockGenerateHandoffDraft = vi.fn();
@@ -9,8 +9,8 @@ const mockValidateSplitHandoffPrerequisites = vi.fn();
 const mockPrepareHandoffLaunch = vi.fn();
 const mockCreateGhosttyLaunchBackend = vi.fn();
 const mockLaunch = vi.fn();
-const mockCreateDetachedLaunchBackend = vi.fn();
-const mockDetachedLaunch = vi.fn();
+const mockCreateDeferredLaunchBackend = vi.fn();
+const mockDeferredLaunch = vi.fn();
 const mockGetFocusedGhosttyTerminalId = vi.fn();
 
 vi.mock("../extensions/shared/settings.ts", () => ({
@@ -18,7 +18,8 @@ vi.mock("../extensions/shared/settings.ts", () => ({
 }));
 
 vi.mock("../extensions/session-handoff/extract.ts", () => ({
-  generateHandoffDraft: mockGenerateHandoffDraft,
+  generateHandoffDraftFromSessionManager: mockGenerateHandoffDraft,
+  resolveHandoffSource: vi.fn(() => ({ messages: [{}] })),
 }));
 
 vi.mock("../extensions/session-handoff/review.ts", async () => {
@@ -40,17 +41,16 @@ vi.mock("../extensions/session-handoff/launch/ghostty.ts", () => ({
   createGhosttyLaunchBackend: mockCreateGhosttyLaunchBackend,
 }));
 
-vi.mock("../extensions/session-handoff/launch/detached.ts", () => ({
-  createDetachedLaunchBackend: mockCreateDetachedLaunchBackend,
+vi.mock("../extensions/session-handoff/launch/deferred.ts", () => ({
+  createDeferredLaunchBackend: mockCreateDeferredLaunchBackend,
 }));
 
 beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
-  delete process.env[HANDOFF_BOOTSTRAP_ENV];
 
   mockLoadSettings.mockReturnValue({
-    handoff: { pickerShortcut: "alt+o", detached: { copyToClipboard: true } },
+    handoff: { pickerShortcut: "alt+o", deferred: { copyToClipboard: true } },
     index: { path: "/tmp/pi-sessions/index.sqlite" },
     autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
   });
@@ -74,8 +74,11 @@ beforeEach(() => {
   }));
   mockLaunch.mockResolvedValue({ success: true });
   mockCreateGhosttyLaunchBackend.mockReturnValue({ launch: mockLaunch });
-  mockDetachedLaunch.mockImplementation(async () => ({ success: true }));
-  mockCreateDetachedLaunchBackend.mockReturnValue({ launch: mockDetachedLaunch });
+  mockDeferredLaunch.mockImplementation(async () => ({
+    success: true,
+    clipboardStatus: "copied",
+  }));
+  mockCreateDeferredLaunchBackend.mockReturnValue({ launch: mockDeferredLaunch });
   mockGetFocusedGhosttyTerminalId.mockResolvedValue("terminal-123");
 });
 
@@ -87,7 +90,7 @@ describe("session handoff command", () => {
     await handler("   ", ctx as never);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Usage: /handoff [--left|--right|--up|--down|--detached] <goal for new thread>",
+      "Usage: /handoff [--left|--right|--up|--down|--deferred] <goal for new thread>",
       "error",
     );
   });
@@ -99,60 +102,64 @@ describe("session handoff command", () => {
     await handler("--left --right Finish phase 1", ctx as never);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Use only one launch target: --left, --right, --up, --down, or --detached.",
+      "Use only one launch target: --left, --right, --up, --down, or --deferred.",
       "error",
     );
   });
 
-  it("rejects mixing --detached with a split flag", async () => {
+  it("rejects mixing --deferred with a split flag", async () => {
     const { handler } = await getHandoffCommand();
     const ctx = createCommandContext();
 
-    await handler("--detached --left Finish phase 1", ctx as never);
+    await handler("--deferred --left Finish phase 1", ctx as never);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Use only one launch target: --left, --right, --up, --down, or --detached.",
+      "Use only one launch target: --left, --right, --up, --down, or --deferred.",
       "error",
     );
   });
 
-  it("runs a detached handoff and copies the resume command", async () => {
-    const { handler } = await getHandoffCommand();
+  it("runs a deferred handoff and copies the resume command", async () => {
+    const { handler, pi } = await getHandoffCommand();
     const ctx = createCommandContext();
 
-    await handler("--detached Finish phase 1", ctx as never);
+    await handler("--deferred Finish phase 1", ctx as never);
 
     expect(mockValidateSplitHandoffPrerequisites).not.toHaveBeenCalled();
-    expect(mockCreateDetachedLaunchBackend).toHaveBeenCalledWith({ copyToClipboard: true });
-    expect(mockDetachedLaunch).toHaveBeenCalledWith({
+    expect(mockCreateDeferredLaunchBackend).toHaveBeenCalledWith({ copyToClipboard: true });
+    expect(mockDeferredLaunch).toHaveBeenCalledWith({
       cwd: "/tmp/project",
       title: "Finish phase 1",
       resumeCommand: expect.stringContaining("openai/gpt-5.4"),
     });
     expect(mockCreateGhosttyLaunchBackend).not.toHaveBeenCalled();
     expect(ctx.newSession).not.toHaveBeenCalled();
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Detached handoff created. Resume command copied to clipboard.",
-      "info",
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "pi-sessions.handoff-launch-receipt",
+      expect.objectContaining({
+        sessionId: "child-session-123",
+        title: "Finish phase 1",
+        launch: "deferred",
+        resumeCommand: expect.stringContaining("child-session-123"),
+      }),
     );
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
   it("includes the resume command when clipboard copy is disabled", async () => {
     mockLoadSettings.mockReturnValue({
-      handoff: { pickerShortcut: "alt+o", detached: { copyToClipboard: false } },
+      handoff: { pickerShortcut: "alt+o", deferred: { copyToClipboard: false } },
       index: { path: "/tmp/pi-sessions/index.sqlite" },
       autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
     });
+    mockDeferredLaunch.mockResolvedValue({ success: true });
     const { handler } = await getHandoffCommand();
     const ctx = createCommandContext();
 
-    await handler("--detached Finish phase 1", ctx as never);
+    await handler("--deferred Finish phase 1", ctx as never);
 
-    expect(mockCreateDetachedLaunchBackend).toHaveBeenCalledWith({ copyToClipboard: false });
-    expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining("Detached handoff created. Resume with:"),
-      "info",
-    );
+    expect(mockCreateDeferredLaunchBackend).toHaveBeenCalledWith({ copyToClipboard: false });
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
   });
 
   it("identifies the focused Ghostty terminal and ignores other arguments", async () => {
@@ -195,16 +202,22 @@ describe("session handoff command", () => {
         expect.objectContaining({ title: "Finish phase 1" }),
       );
       expect(ctx.ui.notify).not.toHaveBeenCalledWith("Handoff started in a new session.", "info");
-      expect(ctx.replacementContext.sendUserMessage).not.toHaveBeenCalled();
+      expect(ctx.replacementContext.sendMessage).not.toHaveBeenCalled();
 
       await vi.runAllTimersAsync();
 
-      expect(ctx.replacementContext.sendUserMessage).toHaveBeenCalledWith("Approved handoff draft");
-      expect(ctx.replacementContext.ui.notify).toHaveBeenCalledWith(
-        "Handoff started in a new session.",
-        "info",
+      expect(ctx.replacementContext.sendMessage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          customType: "pi-sessions.handoff-kickoff",
+          content: "Approved handoff draft",
+          details: expect.objectContaining({
+            title: "Finish phase 1",
+            source: { sessionId: "parent-session-1", sessionName: "Parent Session" },
+          }),
+        }),
+        { triggerTurn: true },
       );
-      expect(process.env[HANDOFF_BOOTSTRAP_ENV]).toBeUndefined();
+      expect(ctx.replacementContext.ui.notify).not.toHaveBeenCalled();
     } finally {
       vi.useRealTimers();
     }
@@ -219,8 +232,9 @@ describe("session handoff command", () => {
     expect(mockValidateSplitHandoffPrerequisites).toHaveBeenCalledWith(ctx);
     expect(mockPrepareHandoffLaunch).toHaveBeenCalledWith(
       expect.objectContaining({
-        cwd: "/tmp/project",
-        sessionDir: "/tmp/sessions",
+        targetCwd: "/tmp/project",
+        parentCwd: "/tmp/project",
+        parentSessionDir: "/tmp/sessions",
         parentSessionFile: "/tmp/session.jsonl",
         title: "Finish phase 1",
         model: "openai/gpt-5.4",
@@ -239,7 +253,11 @@ describe("session handoff command", () => {
     });
     expect(ctx.newSession).not.toHaveBeenCalled();
     expect(ctx.switchSession).not.toHaveBeenCalled();
-    expect(ctx.ui.notify).toHaveBeenCalledWith("Handoff started in a new pane (right).", "info");
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "pi-sessions.handoff-launch-receipt",
+      expect.objectContaining({ launch: "right", backend: "Ghostty" }),
+    );
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
 
     const options = mockPrepareHandoffLaunch.mock.calls[0]?.[0] as {
       buildBootstrap: (sessionId: string) => unknown;
@@ -250,6 +268,7 @@ describe("session handoff command", () => {
       nextTask: "Task",
       title: "Finish phase 1",
       initialPrompt: "Approved handoff draft",
+      source: { sessionId: "parent-session-1", sessionName: "Parent Session" },
     });
   });
 
@@ -295,7 +314,7 @@ describe("session handoff command", () => {
     await handler("--model", ctx as never);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      "Usage: /handoff [--left|--right|--up|--down|--detached] <goal for new thread>",
+      "Usage: /handoff [--left|--right|--up|--down|--deferred] <goal for new thread>",
       "error",
     );
     expect(mockGenerateHandoffDraft).not.toHaveBeenCalled();
@@ -308,19 +327,19 @@ describe("session handoff command", () => {
     await handler("--model ghost/model Finish phase 1", ctx as never);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith(
-      expect.stringContaining('Unknown model "ghost/model".'),
+      expect.stringContaining('Model "ghost/model" not found.'),
       "error",
     );
     expect(mockGenerateHandoffDraft).not.toHaveBeenCalled();
   });
 
-  it("passes an overridden model to a detached resume command", async () => {
+  it("passes an overridden model to a deferred resume command", async () => {
     const { handler } = await getHandoffCommand();
     const ctx = createCommandContext();
 
-    await handler("--detached --model openai/gpt-5.4-mini Finish phase 1", ctx as never);
+    await handler("--deferred --model openai/gpt-5.4-mini Finish phase 1", ctx as never);
 
-    expect(mockDetachedLaunch).toHaveBeenCalledWith({
+    expect(mockDeferredLaunch).toHaveBeenCalledWith({
       cwd: "/tmp/project",
       title: "Finish phase 1",
       resumeCommand: expect.stringContaining("openai/gpt-5.4-mini"),
@@ -356,7 +375,6 @@ describe("session handoff command", () => {
     await handler("Finish phase 1", ctx as never);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith("Session switch cancelled", "info");
-    expect(process.env[HANDOFF_BOOTSTRAP_ENV]).toBeUndefined();
   });
 });
 
@@ -426,6 +444,7 @@ function createCommandContext(options?: { hasMessages?: boolean; switchCancelled
     mode: "tui",
     hasUI: true,
     sendUserMessage: vi.fn(async () => {}),
+    sendMessage: vi.fn(async () => {}),
     ui: {
       notify: vi.fn(),
     },
@@ -436,12 +455,12 @@ function createCommandContext(options?: { hasMessages?: boolean; switchCancelled
     mode: "tui",
     hasUI: true,
     model: { provider: "openai", id: "gpt-5.4" },
-    modelRegistry: {
-      getAvailable: () => [
+    modelRegistry: createFakeModelRegistry({
+      available: [
         { provider: "openai", id: "gpt-5.4" },
         { provider: "openai", id: "gpt-5.4-mini" },
       ],
-    },
+    }),
     ui: {
       notify: vi.fn(),
       custom: vi.fn(async (factory: (...args: unknown[]) => unknown) => {
@@ -494,6 +513,12 @@ function createCommandContext(options?: { hasMessages?: boolean; switchCancelled
       },
       getSessionFile() {
         return "/tmp/session.jsonl";
+      },
+      getSessionId() {
+        return "parent-session-1";
+      },
+      getSessionName() {
+        return "Parent Session";
       },
     },
     replacementContext,

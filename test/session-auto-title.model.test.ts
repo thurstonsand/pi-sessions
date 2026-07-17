@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveAutoTitleModel } from "../extensions/session-auto-title/model.ts";
-import { ModelReference } from "../extensions/shared/settings.ts";
+import { createFakeModelRegistry } from "./test-helpers.ts";
 
 interface TestModel {
   provider: string;
@@ -12,18 +12,9 @@ function createModel(provider: string, id: string): TestModel {
 }
 
 function createContext(options?: { currentModel?: TestModel; availableModels?: TestModel[] }) {
-  const state = {
-    currentModel: options?.currentModel,
-    availableModels: options?.availableModels ?? [],
-  };
-
   return {
-    model: state.currentModel,
-    modelRegistry: {
-      getAvailable() {
-        return state.availableModels;
-      },
-    },
+    model: options?.currentModel,
+    modelRegistry: createFakeModelRegistry({ available: options?.availableModels ?? [] }),
   } as never;
 }
 
@@ -35,22 +26,54 @@ describe("session auto-title model resolution", () => {
       availableModels: [fallbackModel, configuredModel],
     });
 
-    expect(resolveAutoTitleModel(ctx, new ModelReference("openai", "gpt-5.4-mini"))).toEqual({
+    expect(resolveAutoTitleModel(ctx, "openai/gpt-5.4-mini")).toMatchObject({
       model: configuredModel,
       source: "configured",
     });
   });
 
-  it("walks the internal fallback list in order when the configured model is unavailable", () => {
+  it("carries a thinking suffix from the configured model pattern", () => {
+    const configuredModel = createModel("openai", "gpt-5.4-mini");
+    const ctx = createContext({ availableModels: [configuredModel] });
+
+    expect(resolveAutoTitleModel(ctx, "openai/gpt-5.4-mini:low")).toMatchObject({
+      model: configuredModel,
+      source: "configured",
+      thinkingLevel: "low",
+    });
+  });
+
+  it("prefers the first available internal fallback", () => {
+    const lunaModel = createModel("openai-codex", "gpt-5.6-luna");
     const anthropicModel = createModel("anthropic", "claude-haiku-4-5");
-    const openAiModel = createModel("openai", "gpt-5.4-mini");
     const ctx = createContext({
-      availableModels: [openAiModel, anthropicModel],
+      availableModels: [anthropicModel, lunaModel],
     });
 
-    expect(
-      resolveAutoTitleModel(ctx, new ModelReference("google", "gemini-flash-lite-latest")),
-    ).toEqual({
+    expect(resolveAutoTitleModel(ctx, undefined)).toMatchObject({
+      model: lunaModel,
+      source: "fallback",
+    });
+  });
+
+  it("accepts Luna from the openai provider when the Codex variant is unavailable", () => {
+    const lunaModel = createModel("openai", "gpt-5.6-luna");
+    const anthropicModel = createModel("anthropic", "claude-haiku-4-5");
+    const ctx = createContext({
+      availableModels: [anthropicModel, lunaModel],
+    });
+
+    expect(resolveAutoTitleModel(ctx, undefined)).toMatchObject({
+      model: lunaModel,
+      source: "fallback",
+    });
+  });
+
+  it("walks the internal fallback list when both Luna providers are unavailable", () => {
+    const anthropicModel = createModel("anthropic", "claude-haiku-4-5");
+    const ctx = createContext({ availableModels: [anthropicModel] });
+
+    expect(resolveAutoTitleModel(ctx, "google/gemini-flash-lite-latest")).toMatchObject({
       model: anthropicModel,
       source: "fallback",
     });
@@ -60,7 +83,7 @@ describe("session auto-title model resolution", () => {
     const currentModel = createModel("openai", "gpt-4.1");
     const ctx = createContext({ currentModel });
 
-    expect(resolveAutoTitleModel(ctx, undefined)).toEqual({
+    expect(resolveAutoTitleModel(ctx, undefined)).toMatchObject({
       model: currentModel,
       source: "current",
     });

@@ -1,0 +1,54 @@
+import { describe, expect, it } from "vitest";
+import { HANDOFF_TOOL_DETAILS_SCHEMA } from "../extensions/session-handoff/tool-contract.ts";
+import { buildHandoffToolView } from "../extensions/session-handoff/tool-view-model.ts";
+import { safeParseTypeBoxValue } from "../extensions/shared/typebox.ts";
+
+describe("handoff-tool view model", () => {
+  it("requires complete durable result details", () => {
+    expect(
+      safeParseTypeBoxValue(HANDOFF_TOOL_DETAILS_SCHEMA, {
+        sessionId: "child-1",
+        title: "Review rendering",
+        launch: "deferred",
+        resumeCommand: "pi --session-id child-1",
+        model: "openai/gpt-5.4:high",
+      }),
+    ).toBeDefined();
+    expect(
+      safeParseTypeBoxValue(HANDOFF_TOOL_DETAILS_SCHEMA, {
+        sessionId: "child-1",
+        launch: "deferred",
+      }),
+    ).toBeUndefined();
+  });
+
+  it("normalizes progressive arguments without presentation concerns", () => {
+    expect(
+      buildHandoffToolView({
+        launch: " deferred ",
+        title: " Review rendering ",
+        goal: " Inspect the renderer. ",
+      }),
+    ).toEqual({
+      launch: "deferred",
+      title: "Review rendering",
+      goal: "Inspect the renderer.",
+    });
+  });
+
+  it("uses durable result identity when streamed labels are missing", () => {
+    const result = {
+      sessionId: "child-1",
+      title: "Review rendering",
+      launch: "deferred" as const,
+      resumeCommand: "pi --session-id child-1",
+      model: "openai/gpt-5.4:high",
+    };
+
+    expect(buildHandoffToolView({}, result)).toEqual({
+      launch: "deferred",
+      title: "Review rendering",
+      result,
+    });
+  });
+});

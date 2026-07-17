@@ -6,8 +6,8 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   copyToClipboard: mockCopyToClipboard,
 }));
 
-const { createDetachedLaunchBackend } = await import(
-  "../extensions/session-handoff/launch/detached.ts"
+const { createDeferredLaunchBackend } = await import(
+  "../extensions/session-handoff/launch/deferred.ts"
 );
 
 beforeEach(() => {
@@ -15,9 +15,9 @@ beforeEach(() => {
   mockCopyToClipboard.mockResolvedValue(undefined);
 });
 
-describe("detached launch backend", () => {
-  it("copies the resume command and returns it as the outcome message", async () => {
-    const backend = createDetachedLaunchBackend({ copyToClipboard: true });
+describe("deferred launch backend", () => {
+  it("reports a successful clipboard copy", async () => {
+    const backend = createDeferredLaunchBackend({ copyToClipboard: true });
 
     const outcome = await backend.launch({
       cwd: "/tmp/project",
@@ -26,11 +26,11 @@ describe("detached launch backend", () => {
     });
 
     expect(mockCopyToClipboard).toHaveBeenCalledWith("RESUME child-1");
-    expect(outcome).toEqual({ success: true });
+    expect(outcome).toEqual({ success: true, clipboardStatus: "copied" });
   });
 
   it("skips the clipboard when copying is disabled", async () => {
-    const backend = createDetachedLaunchBackend({ copyToClipboard: false });
+    const backend = createDeferredLaunchBackend({ copyToClipboard: false });
 
     const outcome = await backend.launch({
       cwd: "/tmp/project",
@@ -42,9 +42,9 @@ describe("detached launch backend", () => {
     expect(outcome).toEqual({ success: true });
   });
 
-  it("succeeds even when the clipboard copy fails", async () => {
+  it("reports clipboard failure without failing the launch", async () => {
     mockCopyToClipboard.mockRejectedValue(new Error("no clipboard"));
-    const backend = createDetachedLaunchBackend({ copyToClipboard: true });
+    const backend = createDeferredLaunchBackend({ copyToClipboard: true });
 
     const outcome = await backend.launch({
       cwd: "/tmp/project",
@@ -52,6 +52,6 @@ describe("detached launch backend", () => {
       resumeCommand: "RESUME child-1",
     });
 
-    expect(outcome).toEqual({ success: true });
+    expect(outcome).toEqual({ success: true, clipboardStatus: "failed" });
   });
 });

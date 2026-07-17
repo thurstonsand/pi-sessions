@@ -4,7 +4,11 @@ export interface LaunchInput {
   resumeCommand: string;
 }
 
-export type LaunchOutcome = { success: true } | { success: false; error: string };
+export type ClipboardStatus = "copied" | "failed";
+
+export type LaunchOutcome =
+  | { success: true; clipboardStatus?: ClipboardStatus | undefined }
+  | { success: false; error: string };
 
 export interface LaunchBackend {
   launch(input: LaunchInput): Promise<LaunchOutcome>;

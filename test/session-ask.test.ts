@@ -33,6 +33,34 @@ afterEach(() => {
 });
 
 describe("session_ask tool", () => {
+  it("limits collapsed answer previews by rendered terminal rows", () => {
+    const tool = registerSessionAskTool();
+    const component = tool.renderResult?.(
+      {
+        content: [{ type: "text", text: "answer" }],
+        details: {
+          answer: "A long answer ".repeat(80),
+          question: "Q",
+          relevantFiles: [],
+          sessionId: "12345678-1234-1234-1234-123456789abc",
+          sessionName: "Ask title",
+          sessionPath: "/tmp/session.jsonl",
+        },
+      },
+      { expanded: false, isPartial: false },
+      {
+        bold: (text: string) => text,
+        fg: (_token: string, text: string) => text,
+      } as never,
+      { isError: false, state: {} } as never,
+    );
+
+    const rows = component?.render(40) ?? [];
+    expect(rows.length).toBeGreaterThan(9);
+    expect(rows.join("\n")).toContain("more lines");
+    expect(rows.join("\n")).not.toContain("...");
+  });
+
   it("requires a non-empty question", async () => {
     const tool = registerSessionAskTool();
 

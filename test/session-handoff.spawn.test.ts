@@ -2,40 +2,42 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { buildHandoffKickoffMessage } from "../extensions/session-handoff/kickoff.ts";
 import {
-  createChildGeneratedHandoffBootstrap,
   createHandoffBootstrap,
   createHandoffSessionMetadata,
-  HANDOFF_BOOTSTRAP_ENV,
-  parseHandoffBootstrap,
+  findPendingHandoffBootstrap,
+  HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
 } from "../extensions/session-handoff/metadata.ts";
-import {
-  buildPiResumeCommand,
-  createHandoffSession,
-  prepareHandoffLaunch,
-} from "../extensions/session-handoff/spawn.ts";
+import { buildPiResumeCommand, prepareHandoffLaunch } from "../extensions/session-handoff/spawn.ts";
 
 describe("session handoff spawn helpers", () => {
-  it("creates a child session file with parent lineage and optional title", () => {
+  it("creates a prepared child session with lineage, title, and pending bootstrap", () => {
     const sessionDir = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-spawn-"));
+    const cwd = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-cwd-"));
 
-    const created = createHandoffSession({
-      cwd: "/tmp/project",
-      sessionDir,
+    const prepared = prepareHandoffLaunch({
+      targetCwd: cwd,
+      parentCwd: cwd,
+      parentSessionDir: sessionDir,
       parentSessionFile: "/tmp/project/parent.jsonl",
       title: "Implement autocomplete",
+      model: undefined,
+      buildBootstrap: (sessionId) =>
+        createHandoffBootstrap(sessionId, createMetadata(), createSource()),
     });
 
-    const lines = readFileSync(created.sessionFile, "utf8").trim().split("\n");
-    expect(lines).toHaveLength(2);
+    const lines = readFileSync(prepared.sessionFile, "utf8").trim().split("\n");
+    expect(lines).toHaveLength(3);
 
     const header = JSON.parse(lines[0] ?? "{}");
     const sessionInfo = JSON.parse(lines[1] ?? "{}");
+    const bootstrapEntry = JSON.parse(lines[2] ?? "{}");
 
-    expect(created.sessionId).toBe(header.id);
+    expect(prepared.sessionId).toBe(header.id);
     expect(header).toMatchObject({
       type: "session",
-      cwd: "/tmp/project",
+      cwd,
       parentSession: "/tmp/project/parent.jsonl",
     });
     expect(sessionInfo).toMatchObject({
@@ -43,105 +45,167 @@ describe("session handoff spawn helpers", () => {
       parentId: null,
       name: "Implement autocomplete",
     });
-  });
-
-  it("builds a resume command with the bootstrap env and full session id", () => {
-    const bootstrap = createHandoffBootstrap("child-session-123", createMetadata());
-    const resumeCommand = buildPiResumeCommand(
-      "/tmp/sessions",
-      "child-session-123",
-      Buffer.from(JSON.stringify(bootstrap), "utf8").toString("base64"),
-      "Implement autocomplete",
-    );
-
-    expect(resumeCommand).toContain(HANDOFF_BOOTSTRAP_ENV);
-    expect(resumeCommand).toContain("child-session-123");
-    expect(resumeCommand).toContain("--session-dir");
-    expect(resumeCommand).toContain("--session-id");
-    expect(resumeCommand).toContain("--name");
-    expect(resumeCommand).toContain("Implement autocomplete");
-  });
-
-  it("adds an inherited model to resume commands", () => {
-    const bootstrap = createHandoffBootstrap("child-session-123", createMetadata());
-    const resumeCommand = buildPiResumeCommand(
-      "/tmp/sessions",
-      "child-session-123",
-      Buffer.from(JSON.stringify(bootstrap), "utf8").toString("base64"),
-      "Implement autocomplete",
-      "openai/gpt-5.4:medium",
-    );
-
-    expect(resumeCommand).toContain("--model");
-    expect(resumeCommand).toContain("openai/gpt-5.4:medium");
-  });
-
-  it("prepares a session and resume command from a bootstrap builder", () => {
-    const sessionDir = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-prepare-"));
-    let seenSessionId: string | undefined;
-
-    const prepared = prepareHandoffLaunch({
-      cwd: "/tmp/project",
-      sessionDir,
-      parentSessionFile: "/tmp/project/parent.jsonl",
-      title: "Implement autocomplete",
-      model: "openai/gpt-5.4:medium",
-      buildBootstrap: (sessionId) => {
-        seenSessionId = sessionId;
-        return createHandoffBootstrap(sessionId, createMetadata());
+    expect(bootstrapEntry).toMatchObject({
+      type: "custom",
+      customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+      parentId: sessionInfo.id,
+      data: {
+        sessionId: prepared.sessionId,
+        title: "Implement autocomplete",
+        source: createSource(),
       },
     });
+  });
 
-    expect(seenSessionId).toBe(prepared.sessionId);
-    expect(prepared.resumeCommand).toContain(prepared.sessionId);
+  it("keeps same-cwd children in the parent session directory", () => {
+    const sessionDir = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-dir-"));
+    const cwd = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-cwd-"));
+
+    const prepared = prepareHandoffLaunch({
+      targetCwd: cwd,
+      parentCwd: cwd,
+      parentSessionDir: sessionDir,
+      parentSessionFile: "/tmp/parent.jsonl",
+      title: "Title",
+      model: undefined,
+      buildBootstrap: (sessionId) =>
+        createHandoffBootstrap(sessionId, createMetadata(), createSource()),
+    });
+
+    expect(prepared.sessionFile.startsWith(sessionDir)).toBe(true);
+    expect(prepared.resumeCommand).toContain("--session-dir");
+    expect(prepared.resumeCommand).not.toContain("cd ");
+  });
+
+  it("gives cross-cwd children the target project default storage and a cd prefix", () => {
+    const parentCwd = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-parent-"));
+    const targetCwd = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-target-"));
+    const parentSessionDir = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-dir-"));
+    const agentDir = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-agent-"));
+    const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    try {
+      runCrossCwdAssertions(parentCwd, targetCwd, parentSessionDir, agentDir);
+    } finally {
+      if (originalAgentDir === undefined) {
+        delete process.env.PI_CODING_AGENT_DIR;
+      } else {
+        process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+      }
+    }
+  });
+
+  function runCrossCwdAssertions(
+    parentCwd: string,
+    targetCwd: string,
+    parentSessionDir: string,
+    agentDir: string,
+  ) {
+    const prepared = prepareHandoffLaunch({
+      targetCwd,
+      parentCwd,
+      parentSessionDir,
+      parentSessionFile: "/tmp/parent.jsonl",
+      title: "Title",
+      model: "openai/gpt-5.4:medium",
+      buildBootstrap: (sessionId) =>
+        createHandoffBootstrap(sessionId, createMetadata(), createSource()),
+    });
+
+    expect(prepared.sessionFile.startsWith(parentSessionDir)).toBe(false);
+    expect(prepared.sessionFile.startsWith(join(agentDir, "sessions"))).toBe(true);
+    expect(prepared.resumeCommand.startsWith(`cd '${targetCwd}' && pi `)).toBe(true);
+    expect(prepared.resumeCommand).not.toContain("--session-dir");
     expect(prepared.resumeCommand).toContain("--model");
     expect(prepared.resumeCommand).toContain("openai/gpt-5.4:medium");
 
-    const bootstrapValue = prepared.resumeCommand.match(
-      /PI_SESSIONS_HANDOFF_BOOTSTRAP='([^']+)'/,
-    )?.[1];
-    expect(bootstrapValue && parseHandoffBootstrap(bootstrapValue)).toMatchObject({
-      sessionId: prepared.sessionId,
-      title: "Implement autocomplete",
+    const header = JSON.parse(readFileSync(prepared.sessionFile, "utf8").split("\n")[0] ?? "{}");
+    expect(header.cwd).toBe(targetCwd);
+  }
+
+  it("builds a plain resume command for default storage and matching cwds", () => {
+    const resumeCommand = buildPiResumeCommand({
+      targetCwd: "/repo/app",
+      parentCwd: "/repo/app",
+      sessionId: "child-session-123",
     });
+
+    expect(resumeCommand).toBe("pi --session-id 'child-session-123'");
   });
 
-  it("keeps child-generated bootstrap payloads decodable", () => {
-    const bootstrapValue = Buffer.from(
-      JSON.stringify(
-        createChildGeneratedHandoffBootstrap({
-          sessionId: "child-session-123",
-          goal: "Finish phase 1",
-          title: "Session handoff",
-          parentSessionFile: "/tmp/parent.jsonl",
-          sourceLeafId: "source-entry-123",
-        }),
-      ),
-      "utf8",
-    ).toString("base64");
-
-    expect(parseHandoffBootstrap(bootstrapValue)).toEqual({
-      mode: "generate",
+  it("includes --session-dir only for nondefault directories", () => {
+    const resumeCommand = buildPiResumeCommand({
+      targetCwd: "/repo/app",
+      parentCwd: "/repo/app",
       sessionId: "child-session-123",
-      goal: "Finish phase 1",
-      title: "Session handoff",
+      sessionDir: "/custom/sessions",
+      model: "openai/gpt-5.4:medium",
+    });
+
+    expect(resumeCommand).toBe(
+      "pi --session-dir '/custom/sessions' --session-id 'child-session-123' --model 'openai/gpt-5.4:medium'",
+    );
+  });
+
+  it("only treats a kickoff for the same bootstrap as consumption", () => {
+    const pending = {
+      type: "custom",
+      id: "bootstrap-1",
+      customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+      data: createHandoffBootstrap("child-1", createMetadata(), createSource()),
+    };
+    const unrelatedKickoff = {
+      type: "custom_message",
+      id: "kickoff-1",
+      ...buildHandoffKickoffMessage({
+        prompt: "Other prompt",
+        title: "Other handoff",
+        source: createSource(),
+        bootstrapEntryId: "bootstrap-2",
+      }),
+    };
+    const matchingKickoff = {
+      ...unrelatedKickoff,
+      details: { ...unrelatedKickoff.details, bootstrapEntryId: "bootstrap-1" },
+    };
+
+    expect(findPendingHandoffBootstrap([pending, unrelatedKickoff] as never)).toMatchObject({
+      kind: "pending",
+      entryId: "bootstrap-1",
+    });
+    expect(findPendingHandoffBootstrap([pending, matchingKickoff] as never)).toBeUndefined();
+  });
+
+  it("round-trips the pending bootstrap through branch scanning", () => {
+    const sessionDir = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-roundtrip-"));
+    const cwd = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-cwd-"));
+
+    const prepared = prepareHandoffLaunch({
+      targetCwd: cwd,
+      parentCwd: cwd,
+      parentSessionDir: sessionDir,
       parentSessionFile: "/tmp/parent.jsonl",
-      sourceLeafId: "source-entry-123",
-    });
-  });
-
-  it("keeps bootstrap payloads decodable after encoding", () => {
-    const bootstrapValue = Buffer.from(
-      JSON.stringify(createHandoffBootstrap("child-session-123", createMetadata())),
-      "utf8",
-    ).toString("base64");
-
-    expect(parseHandoffBootstrap(bootstrapValue)).toEqual({
-      sessionId: "child-session-123",
-      goal: "Finish phase 1",
-      nextTask: "Implement autocomplete",
       title: "Implement autocomplete",
-      initialPrompt: "Approved handoff draft",
+      model: undefined,
+      buildBootstrap: (sessionId) =>
+        createHandoffBootstrap(sessionId, createMetadata(), createSource()),
+    });
+
+    const entries = readFileSync(prepared.sessionFile, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+      .filter((entry) => entry.type !== "session");
+
+    const scan = findPendingHandoffBootstrap(entries as never);
+    expect(scan).toMatchObject({
+      kind: "pending",
+      bootstrap: {
+        sessionId: prepared.sessionId,
+        goal: "Finish phase 1",
+        initialPrompt: "Approved handoff draft",
+      },
     });
   });
 });
@@ -153,4 +217,8 @@ function createMetadata() {
     "Approved handoff draft",
     "Implement autocomplete",
   );
+}
+
+function createSource() {
+  return { sessionId: "parent-session-1", sessionName: "Parent Session" };
 }

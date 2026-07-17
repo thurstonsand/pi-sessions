@@ -10,6 +10,7 @@ import type { RetitleMode, RetitleScope } from "./command.ts";
 import { buildAutoTitleContext } from "./context.ts";
 import type { AutoTitleTriggerPlan, SessionAutoTitleController } from "./controller.ts";
 import {
+  type AutoTitleGeneration,
   type AutoTitleGenerationResult,
   createAutoTitleFailure,
   generateAutoTitle,
@@ -57,8 +58,7 @@ export async function runBulkRetitle(
   scan: RetitleScopeScan,
   mode: RetitleMode,
   getSessionEpoch: () => number,
-  systemPrompt: string,
-  timeoutMs: number,
+  generation: AutoTitleGeneration,
 ): Promise<BulkRetitleResult> {
   const result: BulkRetitleResult = {
     attempted: 0,
@@ -85,8 +85,7 @@ export async function runBulkRetitle(
         ctx,
         model,
         isManual: true,
-        systemPrompt,
-        timeoutMs,
+        generation,
         getSessionEpoch,
         notifyOnSuccess: false,
       });
@@ -94,7 +93,7 @@ export async function runBulkRetitle(
       continue;
     }
 
-    const outcome = await retitleStoredSession(ctx, model, session.path, systemPrompt, timeoutMs);
+    const outcome = await retitleStoredSession(ctx, model, session.path, generation);
     result[outcome] += 1;
   }
 
@@ -166,8 +165,7 @@ export interface RetitlePlanOptions {
   ctx: ExtensionContext;
   model: Model<Api> | undefined;
   isManual: boolean;
-  systemPrompt: string;
-  timeoutMs: number;
+  generation: AutoTitleGeneration;
   existingPlan?: AutoTitleTriggerPlan;
   getSessionEpoch?: () => number;
   notifyOnSuccess?: boolean;
@@ -176,17 +174,8 @@ export interface RetitlePlanOptions {
 export async function runRetitlePlan(
   options: RetitlePlanOptions,
 ): Promise<AutoTitleGenerationResult> {
-  const {
-    pi,
-    controller,
-    ctx,
-    model,
-    isManual,
-    systemPrompt,
-    timeoutMs,
-    existingPlan,
-    getSessionEpoch,
-  } = options;
+  const { pi, controller, ctx, model, isManual, generation, existingPlan, getSessionEpoch } =
+    options;
   const notifyOnSuccess = options.notifyOnSuccess ?? isManual;
 
   const plan = existingPlan ?? controller.handleManualRetitle(ctx);
@@ -217,14 +206,7 @@ export async function runRetitlePlan(
       currentTitle: plan.currentTitle,
     },
   );
-  const generatedTitle = await generateAutoTitle(
-    ctx,
-    model,
-    titleContext,
-    plan.reason,
-    systemPrompt,
-    timeoutMs,
-  );
+  const generatedTitle = await generateAutoTitle(ctx, model, titleContext, plan.reason, generation);
   if (!generatedTitle.ok) {
     return generatedTitle;
   }
@@ -269,8 +251,7 @@ async function retitleStoredSession(
   ctx: ExtensionContext,
   model: Model<Api>,
   sessionPath: string,
-  systemPrompt: string,
-  timeoutMs: number,
+  generation: AutoTitleGeneration,
 ): Promise<"retitled" | "unchanged" | "failed"> {
   const sessionManager = SessionManager.open(sessionPath);
   const currentTitle = sessionManager.getSessionName();
@@ -287,14 +268,7 @@ async function retitleStoredSession(
     userTurnCount: titleContext.userTurnCount,
     currentTitle,
   };
-  const generatedTitle = await generateAutoTitle(
-    ctx,
-    model,
-    titleContext,
-    plan.reason,
-    systemPrompt,
-    timeoutMs,
-  );
+  const generatedTitle = await generateAutoTitle(ctx, model, titleContext, plan.reason, generation);
   if (!generatedTitle.ok) {
     return "failed";
   }

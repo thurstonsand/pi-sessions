@@ -16,7 +16,11 @@ import {
   createSessionAutoTitleController,
   type SessionAutoTitleController,
 } from "./session-auto-title/controller.ts";
-import { resolveAutoTitleModel } from "./session-auto-title/model.ts";
+import type { AutoTitleGeneration } from "./session-auto-title/generate.ts";
+import {
+  type AutoTitleModelResolution,
+  resolveAutoTitleModel,
+} from "./session-auto-title/model.ts";
 import {
   buildRetitleScopeScan,
   notifyBulkRetitleResult,
@@ -47,7 +51,14 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
   const controller = createSessionAutoTitleController(settings.autoTitle);
   let sessionEpoch = 0;
   let titleWorkInFlight: Promise<void> | undefined;
-  let resolvedModel: Model<Api> | undefined;
+  let resolution: AutoTitleModelResolution | undefined;
+
+  // An explicit thinkingLevel setting overrides a thinking suffix on the configured model.
+  const buildGeneration = (): AutoTitleGeneration => ({
+    systemPrompt: settings.autoTitle.prompt,
+    timeoutMs: settings.autoTitle.timeoutMs,
+    thinkingLevel: settings.autoTitle.thinkingLevel ?? resolution?.thinkingLevel,
+  });
 
   pi.registerCommand("title", {
     description: "Generate titles for this session, this folder, or all of Pi",
@@ -58,7 +69,7 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
           await titleWorkInFlight;
         }
 
-        const model = resolvedModel ?? resolveAutoTitleModel(ctx, settings.autoTitle.model)?.model;
+        resolution ??= resolveAutoTitleModel(ctx, settings.autoTitle.model);
         return handleTitleInvocation(
           pi,
           {
@@ -72,10 +83,9 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
             },
           },
           ctx,
-          model,
+          resolution?.model,
           invocation,
-          settings.autoTitle.prompt,
-          settings.autoTitle.timeoutMs,
+          buildGeneration(),
         );
       },
     ),
@@ -83,7 +93,7 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
 
   pi.on("session_start", async (_event: SessionStartEvent, ctx: ExtensionContext) => {
     sessionEpoch += 1;
-    resolvedModel = resolveAutoTitleModel(ctx, settings.autoTitle.model)?.model;
+    resolution = resolveAutoTitleModel(ctx, settings.autoTitle.model);
     persistAutoTitleState(pi, controller.handleSessionStart(ctx));
   });
 
@@ -99,13 +109,12 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
       pi,
       controller,
       ctx,
-      model: resolvedModel,
+      model: resolution?.model,
       isManual: false,
       existingPlan: result.plan,
       getSessionEpoch: () => sessionEpoch,
       notifyOnSuccess: false,
-      systemPrompt: settings.autoTitle.prompt,
-      timeoutMs: settings.autoTitle.timeoutMs,
+      generation: buildGeneration(),
     })
       .then((outcome) => {
         if (outcome.ok) {
@@ -130,7 +139,7 @@ export default function sessionAutoTitleExtension(pi: ExtensionAPI): void {
     sessionEpoch += 1;
     controller.handleSessionShutdown();
     titleWorkInFlight = undefined;
-    resolvedModel = undefined;
+    resolution = undefined;
   });
 }
 
@@ -140,8 +149,7 @@ async function handleTitleInvocation(
   ctx: ExtensionCommandContext,
   model: Model<Api> | undefined,
   invocation: RetitleCommandInvocation,
-  systemPrompt: string,
-  timeoutMs: number,
+  generation: AutoTitleGeneration,
 ): Promise<RetitleCommandOutcome> {
   const retitleOpts = {
     pi,
@@ -149,8 +157,7 @@ async function handleTitleInvocation(
     ctx,
     model,
     isManual: true,
-    systemPrompt,
-    timeoutMs,
+    generation,
     getSessionEpoch: state.getSessionEpoch,
   };
 
@@ -169,15 +176,7 @@ async function handleTitleInvocation(
       return retitleCurrentSession();
     }
 
-    return showRetitleWizard(
-      pi,
-      state.controller,
-      ctx,
-      model,
-      state.getSessionEpoch,
-      systemPrompt,
-      timeoutMs,
-    );
+    return showRetitleWizard(pi, state.controller, ctx, model, state.getSessionEpoch, generation);
   }
 
   if (invocation.scope === "this") {
@@ -185,21 +184,12 @@ async function handleTitleInvocation(
   }
 
   if (isTuiMode(ctx) && !invocation.force) {
-    return showRetitleWizard(
-      pi,
-      state.controller,
-      ctx,
-      model,
-      state.getSessionEpoch,
-      systemPrompt,
-      timeoutMs,
-      {
-        initialInvocation: {
-          scope: invocation.scope,
-          mode: invocation.mode ?? "backfill",
-        },
+    return showRetitleWizard(pi, state.controller, ctx, model, state.getSessionEpoch, generation, {
+      initialInvocation: {
+        scope: invocation.scope,
+        mode: invocation.mode ?? "backfill",
       },
-    );
+    });
   }
 
   const scan = await buildRetitleScopeScan(ctx, invocation.scope);
@@ -213,8 +203,7 @@ async function handleTitleInvocation(
       scan,
       mode,
       state.getSessionEpoch,
-      systemPrompt,
-      timeoutMs,
+      generation,
     );
     notifyBulkRetitleResult(ctx, scan, mode, result);
     return "success";

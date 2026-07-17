@@ -76,15 +76,15 @@ File filters distinguish read-or-write evidence from write-only evidence:
 
 `/handoff <goal>` starts a focused new session. Give pi a goal, and it will generate a prompt for you to review before kicking it off.
 
-You can start a new session directly in your current one, hand it off detached, or — with Ghostty on macOS — spawn it in a split-pane and continue where you are:
+You can start a new session directly in your current one, defer it, or — with Ghostty on macOS — spawn it in a split-pane and continue where you are:
 
 - `/handoff --left <goal>`
 - `/handoff --right <goal>`
 - `/handoff --up <goal>`
 - `/handoff --down <goal>`
-- `/handoff --detached <goal>`
+- `/handoff --deferred <goal>`
 
-The direction flags indicate the Ghostty split. `--detached` creates the child session without launching it and copies its resume command to the clipboard, so it works anywhere.
+The direction flags indicate the Ghostty split. `--deferred` creates the child session without launching it and copies its resume command to the clipboard, so it works anywhere.
 
 By default the child inherits the current model and thinking level. Override per handoff with `--model provider/id[:thinking]`:
 
@@ -130,7 +130,7 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
   "sessions": {
     "handoff": {
       "pickerShortcut": "alt+p",
-      "detached": {
+      "deferred": {
         "copyToClipboard": true
       }
     }
@@ -138,7 +138,7 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
 }
 ```
 
-`detached.copyToClipboard` (default `true`) controls whether detached handoffs copy the resume command to the clipboard. When off, the resume command is only shown in the notification.
+`deferred.copyToClipboard` (default `true`) controls whether deferred handoffs copy the resume command to the clipboard. When off, the resume command is only shown in the tool call.
 
 ## Session Index
 
@@ -202,6 +202,7 @@ To change auto-titling settings, edit `~/.pi/agent/settings.json`:
       "refreshTurns": 4,
       "timeoutSecs": 15,
       "model": "anthropic/claude-haiku-4-5",
+      "thinkingLevel": "off",
       "prompt": "Custom prompt that overrides the default."
     }
   }

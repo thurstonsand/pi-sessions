@@ -3,9 +3,22 @@ import {
   assembleHandoffDraft,
   buildExtractionPrompt,
   extractHandoffContext,
-  generateHandoffDraft,
   generateHandoffDraftFromSessionManager,
 } from "../extensions/session-handoff/extract.ts";
+
+function generateHandoffDraft(
+  ctx: { sessionManager: { getLeafId(): string } },
+  goal: string,
+  thinkingLevel: "medium",
+) {
+  return generateHandoffDraftFromSessionManager(
+    ctx as never,
+    ctx.sessionManager as never,
+    ctx.sessionManager.getLeafId(),
+    goal,
+    thinkingLevel,
+  );
+}
 
 const { createAgentSessionMock } = vi.hoisted(() => ({
   createAgentSessionMock: vi.fn(),
@@ -145,8 +158,6 @@ describe("session handoff extraction", () => {
       tools: ["read", "grep", "find", "ls", "create_handoff_context"],
     });
     expect(options.customTools).toHaveLength(1);
-    expect(options.customTools[0]).not.toHaveProperty("promptSnippet");
-    expect(options.customTools[0]).not.toHaveProperty("promptGuidelines");
     expect(options.resourceLoader.getSystemPrompt()).toBeTypeOf("string");
     expect(options.resourceLoader.getAppendSystemPrompt()).toEqual([]);
   });
@@ -219,7 +230,7 @@ describe("session handoff extraction", () => {
               type: "toolCall",
               id: "handoff-call",
               name: "session_handoff",
-              arguments: { goal: "TARGET GOAL", launch: "detached" },
+              arguments: { goal: "TARGET GOAL", launch: "deferred" },
             },
           ],
         },

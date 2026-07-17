@@ -8,7 +8,7 @@ import {
   SessionManager,
 } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
-import { resolveConfiguredModel } from "../shared/model.ts";
+import { resolveAuthenticatedModel } from "../shared/model-resolution.ts";
 import {
   type SessionLineageRow,
   searchSessionChunks,
@@ -129,13 +129,19 @@ export async function runSessionAskAgent(params: {
   thinkingLevel: ThinkingLevel | undefined;
   signal?: AbortSignal | undefined;
 }): Promise<SessionAskAgentResult | undefined> {
+  params.signal?.throwIfAborted();
   const navigationData = loadSessionNavigationData(params.target.sessionPath);
-  const model =
-    resolveConfiguredModel(params.ctx.modelRegistry.getAvailable(), params.askSettings?.model) ??
-    params.ctx.model;
+  const configured = params.askSettings?.model
+    ? resolveAuthenticatedModel({
+        modelRegistry: params.ctx.modelRegistry,
+        modelPattern: params.askSettings.model,
+      })
+    : undefined;
+  const model = (configured?.ok ? configured.model : undefined) ?? params.ctx.model;
   if (!model) {
     throw new Error("No active model is available for session_ask.");
   }
+  const configuredThinkingLevel = configured?.ok ? configured.thinkingLevel : undefined;
 
   let capturedArguments: ProvideResultsArgs | undefined;
   const searchSessionTool = defineTool({
@@ -261,9 +267,12 @@ export async function runSessionAskAgent(params: {
     noSkills: true,
     appendSystemPromptOverride: (base) => [...base, SESSION_ASK_NAVIGATION_SYSTEM_PROMPT],
   });
+  params.signal?.throwIfAborted();
   await resourceLoader.reload();
+  params.signal?.throwIfAborted();
 
-  const thinkingLevel = params.askSettings?.thinkingLevel ?? params.thinkingLevel;
+  const thinkingLevel =
+    params.askSettings?.thinkingLevel ?? configuredThinkingLevel ?? params.thinkingLevel;
   const sessionManager = params.askSettings?.persistRuns
     ? SessionManager.create(cwd, getDefaultSessionAskRunsDir())
     : SessionManager.inMemory(cwd);
@@ -281,29 +290,35 @@ export async function runSessionAskAgent(params: {
     sessionManager,
   });
 
-  const abortHandler = (): void => {
-    void session.abort();
+  // Exactly one session.abort() runs no matter how many abort paths fire.
+  let nestedAbort: Promise<void> | undefined;
+  const startNestedAbort = (): void => {
+    nestedAbort ??= Promise.resolve(session.abort()).catch(() => {});
   };
 
   try {
-    params.signal?.addEventListener("abort", abortHandler, { once: true });
+    params.signal?.addEventListener("abort", startNestedAbort, { once: true });
     if (params.signal?.aborted) {
-      await session.abort();
-      return undefined;
+      startNestedAbort();
     }
 
     for (let attempt = 1; attempt <= MAX_SESSION_ASK_ATTEMPTS; attempt += 1) {
+      params.signal?.throwIfAborted();
       const prompt =
         attempt === 1
           ? buildNavigationPrompt(navigationData, params.question)
           : `You did not call ${PROVIDE_RESULTS_TOOL_NAME}. Continue from your prior work and call ${PROVIDE_RESULTS_TOOL_NAME} exactly once with the final markdown answer.`;
       await session.prompt(prompt);
+      params.signal?.throwIfAborted();
       if (capturedArguments) {
         break;
       }
     }
   } finally {
-    params.signal?.removeEventListener("abort", abortHandler);
+    params.signal?.removeEventListener("abort", startNestedAbort);
+    if (nestedAbort) {
+      await nestedAbort;
+    }
     session.dispose();
   }
 

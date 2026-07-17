@@ -1,114 +1,97 @@
-import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
-import {
-  CURRENT_SESSION_VERSION,
-  type SessionHeader,
-  type SessionInfoEntry,
-} from "@earendil-works/pi-coding-agent";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { shellQuote } from "./launch/shell.ts";
-import {
-  encodeHandoffBootstrap,
-  HANDOFF_BOOTSTRAP_ENV,
-  type HandoffBootstrap,
-} from "./metadata.ts";
-
-export interface CreatedHandoffSession {
-  sessionId: string;
-  sessionFile: string;
-}
+import { HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE, type HandoffBootstrap } from "./metadata.ts";
 
 export interface PreparedHandoff {
   sessionId: string;
+  sessionFile: string;
   resumeCommand: string;
 }
 
 /**
- * Owns the backend-independent half of a handoff: create the session file, encode
- * the bootstrap, and build the resume command every failure path must surface.
+ * Owns the backend-independent half of a handoff: create the prepared child
+ * session (bootstrap included) and build the self-locating resume command
+ * every failure path must surface.
  */
 export function prepareHandoffLaunch(options: {
-  cwd: string;
-  sessionDir: string;
+  targetCwd: string;
+  parentCwd: string;
+  parentSessionDir: string;
   parentSessionFile: string;
   title: string;
   model: string | undefined;
   buildBootstrap: (sessionId: string) => HandoffBootstrap;
 }): PreparedHandoff {
-  const created = createHandoffSession({
-    cwd: options.cwd,
-    sessionDir: options.sessionDir,
-    parentSessionFile: options.parentSessionFile,
-    title: options.title,
-  });
-  const bootstrapValue = encodeHandoffBootstrap(options.buildBootstrap(created.sessionId));
-  const resumeCommand = buildPiResumeCommand(
-    options.sessionDir,
-    created.sessionId,
-    bootstrapValue,
-    options.title,
-    options.model,
+  // Same-cwd children stay in the parent's session directory, preserving a
+  // deliberate nondefault dir. Cross-cwd children live with their target
+  // project, so Pi computes that project's default storage location.
+  const sameCwd = options.targetCwd === options.parentCwd;
+  const manager = SessionManager.create(
+    options.targetCwd,
+    sameCwd ? options.parentSessionDir : undefined,
+    { parentSession: options.parentSessionFile },
   );
-  return { sessionId: created.sessionId, resumeCommand };
-}
-
-export function createHandoffSession(options: {
-  cwd: string;
-  sessionDir: string;
-  parentSessionFile: string;
-  title: string;
-}): CreatedHandoffSession {
-  const sessionId = randomUUID();
-  const timestamp = new Date().toISOString();
-  const fileTimestamp = timestamp.replace(/[:.]/g, "-");
-  const sessionFile = join(options.sessionDir, `${fileTimestamp}_${sessionId}.jsonl`);
-
-  const header: SessionHeader = {
-    type: "session",
-    version: CURRENT_SESSION_VERSION,
-    id: sessionId,
-    timestamp,
-    cwd: options.cwd,
-    parentSession: options.parentSessionFile,
-  };
-
-  const titleEntry: SessionInfoEntry = {
-    type: "session_info",
-    id: randomUUID(),
-    parentId: null,
-    timestamp,
-    name: options.title,
-  };
-
-  writeFileSync(
-    sessionFile,
-    `${[JSON.stringify(header), JSON.stringify(titleEntry)].join("\n")}\n`,
+  manager.appendSessionInfo(options.title);
+  manager.appendCustomEntry(
+    HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+    options.buildBootstrap(manager.getSessionId()),
   );
+  flushPreparedSession(manager);
 
-  return { sessionId, sessionFile };
-}
-
-export function buildPiResumeCommand(
-  sessionDir: string,
-  sessionId: string,
-  bootstrapValue: string,
-  title: string,
-  model?: string | undefined,
-): string {
-  const args = [
-    `${HANDOFF_BOOTSTRAP_ENV}=${shellQuote(bootstrapValue)}`,
-    "pi",
-    "--session-dir",
-    shellQuote(sessionDir),
-    "--session-id",
-    shellQuote(sessionId),
-    "--name",
-    shellQuote(title),
-  ];
-
-  if (model) {
-    args.push("--model", shellQuote(model));
+  const sessionFile = manager.getSessionFile();
+  if (!sessionFile) {
+    throw new Error("Prepared handoff session has no session file.");
   }
 
-  return args.join(" ");
+  const resumeCommand = buildPiResumeCommand({
+    targetCwd: options.targetCwd,
+    parentCwd: options.parentCwd,
+    sessionId: manager.getSessionId(),
+    sessionDir: manager.usesDefaultSessionDir() ? undefined : manager.getSessionDir(),
+    model: options.model,
+  });
+
+  return { sessionId: manager.getSessionId(), sessionFile, resumeCommand };
+}
+
+// Pi intentionally defers writing a new session until an assistant response
+// exists, so a prepared child needs one explicit initial flush of the
+// manager-assembled state to be discoverable by `pi --session-id`.
+function flushPreparedSession(manager: SessionManager): void {
+  const sessionFile = manager.getSessionFile();
+  const header = manager.getHeader();
+  if (!sessionFile || !header) {
+    throw new Error("Prepared handoff session is missing its file or header.");
+  }
+
+  const lines = [header, ...manager.getEntries()].map((entry) => JSON.stringify(entry));
+  writeFileSync(sessionFile, `${lines.join("\n")}\n`, { flag: "wx" });
+}
+
+/**
+ * The canonical recovery artifact consumed by launch backends, failure
+ * messages, clipboard delivery, and renderers. Self-locating: when the target
+ * cwd differs from the parent's, the command starts with `cd <target> &&`.
+ */
+export function buildPiResumeCommand(options: {
+  targetCwd: string;
+  parentCwd: string;
+  sessionId: string;
+  sessionDir?: string | undefined;
+  model?: string | undefined;
+}): string {
+  const args = ["pi"];
+  if (options.sessionDir) {
+    args.push("--session-dir", shellQuote(options.sessionDir));
+  }
+  args.push("--session-id", shellQuote(options.sessionId));
+  if (options.model) {
+    args.push("--model", shellQuote(options.model));
+  }
+
+  const command = args.join(" ");
+  return options.targetCwd === options.parentCwd
+    ? command
+    : `cd ${shellQuote(options.targetCwd)} && ${command}`;
 }

@@ -11,7 +11,7 @@ const MODELS = [
 describe("handoff model completions", () => {
   it("returns null when the text is not in a --model value position", () => {
     expect(getHandoffModelCompletions("Finish phase 1", MODELS)).toBeNull();
-    expect(getHandoffModelCompletions("--detached Finish", MODELS)).toBeNull();
+    expect(getHandoffModelCompletions("--deferred Finish", MODELS)).toBeNull();
     expect(getHandoffModelCompletions("--model", MODELS)).toBeNull();
   });
 

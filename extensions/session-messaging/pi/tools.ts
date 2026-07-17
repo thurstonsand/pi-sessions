@@ -1,8 +1,20 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
-import { SEND_MESSAGE_PARAMS, type SendMessageParams } from "./message-contracts.ts";
-import { formatSendMessageCall } from "./message-view.ts";
+import { ExpandableContentLayout } from "../../shared/rendering/expandable-content-layout.ts";
+import { safeParseTypeBoxValue } from "../../shared/typebox.ts";
+import {
+  SEND_MESSAGE_PARAMS,
+  SEND_MESSAGE_TOOL_DETAILS_SCHEMA,
+  type SendMessageParams,
+  type SendMessageToolDetails,
+} from "./message-contracts.ts";
+import { buildSendMessagePresentation } from "./send-message-presenter.ts";
+import { buildDeliveredMessageView, buildSendingMessageView } from "./send-message-view-model.ts";
 import type { SessionMessagingService } from "./service.ts";
+
+interface SendMessageRendererState {
+  callComponent?: ExpandableContentLayout | undefined;
+}
 
 export function registerSessionMessagingTools(
   pi: ExtensionAPI,
@@ -18,25 +30,35 @@ export function registerSessionMessagingTools(
     ],
     parameters: SEND_MESSAGE_PARAMS,
     renderCall(args, theme, context) {
-      const component = (context.lastComponent as Text | undefined) ?? new Text("", 0, 0);
-      component.setText(
-        formatSendMessageCall(
-          args,
-          context.expanded,
-          "sending",
+      const state = context.state as SendMessageRendererState;
+      const component = state.callComponent ?? new ExpandableContentLayout(theme);
+      state.callComponent = component;
+      component.update(
+        buildSendMessagePresentation(
+          buildSendingMessageView(args, service.getCachedRelationTo(args?.session)),
           theme,
-          service.getCachedRelationTo(args?.session),
         ),
+        context.expanded,
       );
       return component;
     },
-    renderResult(result, _options, theme, context) {
-      if (!context.isError) {
-        return new Text("", 0, 0);
+    renderResult(result, options, theme, context) {
+      if (context.isError) {
+        const output = getFirstText(result);
+        return new Text(output ? `\n${theme.fg("error", output)}` : "", 0, 0);
       }
 
-      const output = getFirstText(result);
-      return new Text(output ? `\n${theme.fg("error", output)}` : "", 0, 0);
+      const details = safeParseTypeBoxValue(SEND_MESSAGE_TOOL_DETAILS_SCHEMA, result.details);
+      const state = context.state as SendMessageRendererState;
+      if (!details || !state.callComponent) {
+        return new Text(getFirstText(result), 0, 0);
+      }
+
+      state.callComponent.update(
+        buildSendMessagePresentation(buildDeliveredMessageView(context.args, details), theme),
+        options.expanded,
+      );
+      return new Text("", 0, 0);
     },
     async execute(toolCallId, params: SendMessageParams, _signal, _onUpdate, _ctx) {
       const target = params.session.trim();
@@ -73,8 +95,9 @@ export function registerSessionMessagingTools(
           details: {
             delivered: true,
             messageId: result.messageId,
-            targetSessionId: target,
-          },
+            target: result.target,
+            ...(result.relation === undefined ? {} : { relation: result.relation }),
+          } satisfies SendMessageToolDetails,
         };
       } catch (error) {
         throw new Error(formatError(error));

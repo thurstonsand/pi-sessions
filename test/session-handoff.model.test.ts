@@ -1,12 +1,16 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import {
-  formatModelArgument,
-  formatModelList,
-  resolveModelOverride,
-} from "../extensions/session-handoff/model.ts";
+import { formatModelArgument, resolveModelOverride } from "../extensions/session-handoff/model.ts";
+import { createFakeModelRegistry } from "./test-helpers.ts";
 
 const AVAILABLE = [model("openai", "gpt-5.4"), model("anthropic", "claude-sonnet-4-5")];
+
+function registry(options?: { all?: Model<Api>[] }) {
+  return createFakeModelRegistry({
+    available: AVAILABLE,
+    ...(options?.all ? { all: options.all } : {}),
+  }) as never;
+}
 
 describe("handoff model resolution", () => {
   it("formats a model with a thinking level", () => {
@@ -21,24 +25,41 @@ describe("handoff model resolution", () => {
     expect(formatModelArgument(undefined, "high")).toBeUndefined();
   });
 
-  it("lists available models as provider/id", () => {
-    expect(formatModelList(AVAILABLE)).toBe("openai/gpt-5.4, anthropic/claude-sonnet-4-5");
+  it("resolves an exact provider/id override", () => {
+    expect(resolveModelOverride(registry(), "anthropic/claude-sonnet-4-5").model).toBe(
+      AVAILABLE[1],
+    );
   });
 
-  it("resolves an exact provider/id override", () => {
-    expect(resolveModelOverride(AVAILABLE, "anthropic/claude-sonnet-4-5")).toBe(AVAILABLE[1]);
+  it("resolves a thinking suffix on the override", () => {
+    const override = resolveModelOverride(registry(), "openai/gpt-5.4:medium");
+    expect(override.model).toBe(AVAILABLE[0]);
+    expect(override.thinkingLevel).toBe("medium");
+  });
+
+  it("prefers an explicit thinking level over the suffix", () => {
+    const override = resolveModelOverride(registry(), "openai/gpt-5.4:medium", "high");
+    expect(override.thinkingLevel).toBe("high");
+  });
+
+  it("resolves a fuzzy id fragment", () => {
+    expect(resolveModelOverride(registry(), "sonnet").model).toBe(AVAILABLE[1]);
   });
 
   it("throws with the available list on an unknown model", () => {
-    expect(() => resolveModelOverride(AVAILABLE, "openai/ghost")).toThrow(
-      'Unknown model "openai/ghost". Available models: openai/gpt-5.4, anthropic/claude-sonnet-4-5.',
+    expect(() => resolveModelOverride(registry(), "ghost/model")).toThrow(
+      "Available models: openai/gpt-5.4, anthropic/claude-sonnet-4-5.",
     );
   });
 
-  it("notes that thinking belongs in thinkingLevel when a colon form is passed", () => {
-    expect(() => resolveModelOverride(AVAILABLE, "openai/gpt-5.4:medium")).toThrow(
-      "Thinking level belongs in the thinkingLevel parameter, not the model id.",
-    );
+  it("rejects a model that resolves but is not authenticated", () => {
+    const unauthenticated = model("google", "gemini-3.1-pro");
+    expect(() =>
+      resolveModelOverride(
+        registry({ all: [...AVAILABLE, unauthenticated] }),
+        "google/gemini-3.1-pro",
+      ),
+    ).toThrow('Model "google/gemini-3.1-pro" is not an available authenticated model.');
   });
 });
 

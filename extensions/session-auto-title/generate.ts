@@ -1,6 +1,7 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import { completeSimple } from "@earendil-works/pi-ai/compat";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -15,6 +16,12 @@ export interface AutoTitleFailure {
   trigger: AutoTitleTrigger;
   model: string;
   message: string;
+}
+
+export interface AutoTitleGeneration {
+  systemPrompt: string;
+  timeoutMs: number;
+  thinkingLevel: ThinkingLevel | undefined;
 }
 
 export type AutoTitleGenerationResult =
@@ -32,8 +39,7 @@ export async function generateAutoTitle(
   model: Model<Api>,
   context: AutoTitleContext,
   trigger: AutoTitleTrigger,
-  systemPrompt: string,
-  timeoutMs: number,
+  generation: AutoTitleGeneration,
 ): Promise<AutoTitleGenerationResult> {
   if (!context.conversationText) {
     return {
@@ -55,7 +61,10 @@ export async function generateAutoTitle(
   }
 
   const shouldPreserveTitle = trigger === "periodic" && Boolean(context.currentTitle?.trim());
-  const resolvedSystemPrompt = buildAutoTitleSystemPrompt(systemPrompt, shouldPreserveTitle);
+  const resolvedSystemPrompt = buildAutoTitleSystemPrompt(
+    generation.systemPrompt,
+    shouldPreserveTitle,
+  );
   const userPrompt = buildAutoTitlePrompt(context, resolvedSystemPrompt, shouldPreserveTitle);
   const message: UserMessage = {
     role: "user",
@@ -64,7 +73,8 @@ export async function generateAutoTitle(
   };
 
   const abortController = new AbortController();
-  const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
+  const timeoutId = setTimeout(() => abortController.abort(), generation.timeoutMs);
+  const thinkingLevel = generation.thinkingLevel;
 
   try {
     const requestContext = {
@@ -76,6 +86,7 @@ export async function generateAutoTitle(
       ...(auth.apiKey && { apiKey: auth.apiKey }),
       ...(auth.headers && { headers: auth.headers }),
       maxTokens: AUTO_TITLE_MAX_TOKENS,
+      ...(thinkingLevel && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
       signal: abortController.signal,
     });
     writeAutoTitleDebugResponse(model, trigger, response);

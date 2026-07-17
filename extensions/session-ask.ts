@@ -1,35 +1,23 @@
-import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
-import { getKeybindings, type Keybinding, Text } from "@earendil-works/pi-tui";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { runSessionAskAgent } from "./session-ask/agent.ts";
+import { renderSessionAskResult } from "./session-ask/renderer.ts";
+import type {
+  SessionAskProgressDetails,
+  SessionAskRelevantFile,
+  SessionAskResultDetails,
+} from "./session-ask/tool-contract.ts";
 import {
   getSessionById,
   type SessionLineageRow,
   withSessionIndex,
 } from "./shared/session-index/index.ts";
-import { formatSessionTitleOrShortId, isExactSessionId } from "./shared/session-ui.ts";
+import { isExactSessionId } from "./shared/session-ui.ts";
 import { loadSettings } from "./shared/settings.ts";
-
-const COLLAPSED_ANSWER_PREVIEW_ROWS = 6;
 
 interface SessionAskToolParams {
   session: string;
   question: string;
-}
-
-interface SessionAskRelevantFile {
-  path: string;
-  reason: string;
-}
-
-interface SessionAskToolDetails {
-  answer?: string | undefined;
-  debugSessionPath?: string | undefined;
-  question?: string | undefined;
-  relevantFiles?: SessionAskRelevantFile[] | undefined;
-  sessionId?: string | undefined;
-  sessionName?: string | undefined;
-  sessionPath?: string | undefined;
 }
 
 export default function sessionAskExtension(pi: ExtensionAPI): void {
@@ -65,7 +53,7 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         throw new Error(resolvedTarget.error ?? "Unable to resolve session id.");
       }
 
-      const progressDetails: SessionAskToolDetails = {
+      const progressDetails: SessionAskProgressDetails = {
         question,
         sessionId: resolvedTarget.resolved.sessionId,
         sessionName: resolvedTarget.resolved.sessionName,
@@ -100,16 +88,14 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         signal,
       });
 
-      if (signal?.aborted) {
-        throw new Error("Session ask was cancelled.");
-      }
-
       const answer = agentResult?.answer || "Could not determine an answer from the session.";
       const relevantFiles = agentResult?.relevantFiles ?? [];
 
-      const details: SessionAskToolDetails = {
+      const details: SessionAskResultDetails = {
         answer,
-        debugSessionPath: agentResult?.debugSessionPath,
+        ...(agentResult?.debugSessionPath
+          ? { debugSessionPath: agentResult.debugSessionPath }
+          : {}),
         relevantFiles,
         sessionId: resolvedTarget.resolved.sessionId,
         sessionName: resolvedTarget.resolved.sessionName,
@@ -133,39 +119,7 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         details,
       };
     },
-    renderResult(result, { expanded, isPartial }, theme, context) {
-      const details = result.details as SessionAskToolDetails | undefined;
-      const content = result.content[0];
-      if (content?.type !== "text") {
-        return new Text(theme.fg("error", "No session output"), 0, 0);
-      }
-
-      if (context.isError) {
-        return new Text(theme.fg("error", content.text), 0, 0);
-      }
-
-      if (isPartial) {
-        const lines = [theme.bold(theme.fg("warning", "Reading session..."))];
-        if (details?.sessionId || details?.sessionName) {
-          const identity = formatSessionTitleOrShortId(details.sessionName, details.sessionId);
-          lines.push(`title: ${theme.fg("accent", identity)}`);
-        }
-        if (details?.question) {
-          lines.push(theme.fg("muted", `prompt: ${details.question}`));
-        }
-        return new Text(lines.join("\n"), 0, 0);
-      }
-
-      const answer = (details?.answer ?? "").trim() || "No answer generated.";
-      const identity = formatSessionTitleOrShortId(details?.sessionName, details?.sessionId);
-      const lines = [`title: ${theme.bold(identity)}`];
-      if (details?.question) {
-        lines.push(theme.fg("muted", `prompt: ${details.question}`));
-        lines.push("");
-      }
-      lines.push(...formatSessionAskAnswerPreview(answer, expanded, theme));
-      return new Text(lines.join("\n"), 0, 0);
-    },
+    renderResult: renderSessionAskResult,
   });
 }
 
@@ -219,27 +173,4 @@ function formatSessionAskAnswer(
     lines.push("", `debug_session: ${debugSessionPath}`);
   }
   return lines.join("\n");
-}
-
-function formatSessionAskAnswerPreview(answer: string, expanded: boolean, theme: Theme): string[] {
-  const lines = answer.split(/\r?\n/);
-  if (expanded || lines.length <= COLLAPSED_ANSWER_PREVIEW_ROWS) {
-    return lines;
-  }
-
-  return [
-    ...lines.slice(0, COLLAPSED_ANSWER_PREVIEW_ROWS),
-    formatOverflowHint(lines.length - COLLAPSED_ANSWER_PREVIEW_ROWS, lines.length, theme),
-  ];
-}
-
-function formatOverflowHint(remaining: number, total: number, theme: Theme): string {
-  return `${theme.fg("muted", `... (${remaining} more lines, ${total} total,`)} ${theme.fg(
-    "dim",
-    formatKeyHint("app.tools.expand"),
-  )}${theme.fg("muted", " to expand)")}`;
-}
-
-function formatKeyHint(keybinding: Keybinding): string {
-  return getKeybindings().getKeys(keybinding).join("/");
 }

@@ -5,7 +5,6 @@ import {
   DEFAULT_AUTO_TITLE_PROMPT,
   DEFAULT_AUTO_TITLE_REFRESH_TURNS,
   loadSettings,
-  ModelReference,
 } from "../extensions/shared/settings.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
@@ -57,12 +56,7 @@ describe("pi-sessions auto-title settings", () => {
 
     const settings = loadSettings();
     expect(settings.autoTitle.refreshTurns).toBe(6);
-    expect(settings.autoTitle.model).toBeInstanceOf(ModelReference);
-    expect(settings.autoTitle.model).toMatchObject({
-      provider: "openai",
-      modelId: "gpt-5.4-mini",
-    });
-    expect(settings.autoTitle.model?.toString()).toBe("openai/gpt-5.4-mini");
+    expect(settings.autoTitle.model).toBe("openai/gpt-5.4-mini");
     expect(settings.autoTitle.prompt).toBe("Use terse subsystem titles.");
   });
 
@@ -89,10 +83,7 @@ describe("pi-sessions auto-title settings", () => {
     );
 
     const settings = loadSettings();
-    expect(settings.ask.model).toMatchObject({
-      provider: "anthropic",
-      modelId: "claude-sonnet-4-5",
-    });
+    expect(settings.ask.model).toBe("anthropic/claude-sonnet-4-5");
     expect(settings.ask.thinkingLevel).toBe("xhigh");
     expect(settings.ask.persistRuns).toBe(true);
   });
@@ -130,12 +121,7 @@ describe("pi-sessions auto-title settings", () => {
 
     const settings = loadSettings();
     expect(settings.autoTitle.refreshTurns).toBe(5);
-    expect(settings.autoTitle.model).toBeInstanceOf(ModelReference);
-    expect(settings.autoTitle.model).toMatchObject({
-      provider: "google",
-      modelId: "gemini-flash-lite-latest",
-    });
-    expect(settings.autoTitle.model?.toString()).toBe("google/gemini-flash-lite-latest");
+    expect(settings.autoTitle.model).toBe("google/gemini-flash-lite-latest");
   });
 
   it("uses the default auto-title prompt for blank prompt settings", () => {
@@ -159,7 +145,7 @@ describe("pi-sessions auto-title settings", () => {
     expect(loadSettings().autoTitle.prompt).toBe(DEFAULT_AUTO_TITLE_PROMPT);
   });
 
-  it("drops invalid auto-title model references", () => {
+  it("keeps bare model patterns for CLI-style resolution", () => {
     const agentDir = testFs.createTempDir();
     process.env.PI_CODING_AGENT_DIR = agentDir;
 
@@ -177,6 +163,6 @@ describe("pi-sessions auto-title settings", () => {
 `,
     );
 
-    expect(loadSettings().autoTitle.model).toBeUndefined();
+    expect(loadSettings().autoTitle.model).toBe("gpt-5.4-mini");
   });
 });

@@ -18,6 +18,11 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+export function normalizeOptionalText(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized || undefined;
+}
+
 export function truncateInline(value: string, maxChars: number): string {
   const cleaned = value.replace(/\s+/g, " ").trim();
   if (cleaned.length <= maxChars) {

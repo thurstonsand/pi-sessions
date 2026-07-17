@@ -5,7 +5,7 @@ import {
   getFocusedGhosttyTerminalId,
   validateSplitHandoffPrerequisites,
 } from "../extensions/session-handoff/launch/ghostty.ts";
-import { HANDOFF_BOOTSTRAP_ENV } from "../extensions/session-handoff/metadata.ts";
+
 import { buildPiResumeCommand } from "../extensions/session-handoff/spawn.ts";
 
 afterEach(() => {
@@ -98,7 +98,7 @@ describe("ghostty launch backend", () => {
     expect(appleScript).toContain('set initial working directory of cfg to "/tmp/project"');
     expect(appleScript).toContain("split targetTerminal direction right with configuration cfg");
     expect(appleScript).not.toContain("focus targetTerminal");
-    expect(appleScript).toContain(HANDOFF_BOOTSTRAP_ENV);
+    expect(appleScript).toContain("--session-id");
     expect(appleScript).toContain("child-session-123");
   });
 
@@ -112,13 +112,13 @@ describe("ghostty launch backend", () => {
     await backend.launch({
       cwd: "/tmp/project",
       title: "Implement autocomplete",
-      resumeCommand: buildPiResumeCommand(
-        "/tmp/sessions",
-        "child-session-123",
-        "encoded-bootstrap",
-        "Implement autocomplete",
-        "openai/gpt-5.4:medium",
-      ),
+      resumeCommand: buildPiResumeCommand({
+        targetCwd: "/tmp/project",
+        parentCwd: "/tmp/project",
+        sessionId: "child-session-123",
+        sessionDir: "/tmp/sessions",
+        model: "openai/gpt-5.4:medium",
+      }),
     });
 
     const osascriptArgs = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[0]?.[1] as string[];
@@ -173,12 +173,12 @@ describe("ghostty launch backend", () => {
 });
 
 function resumeCommand(sessionId: string): string {
-  return buildPiResumeCommand(
-    "/tmp/sessions",
+  return buildPiResumeCommand({
+    targetCwd: "/tmp/project",
+    parentCwd: "/tmp/project",
     sessionId,
-    "encoded-bootstrap",
-    "Implement autocomplete",
-  );
+    sessionDir: "/tmp/sessions",
+  });
 }
 
 function createPiApi(result?: { code?: number; stdout?: string; stderr?: string }): ExtensionAPI {

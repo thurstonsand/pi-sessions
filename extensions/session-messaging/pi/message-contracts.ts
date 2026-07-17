@@ -19,6 +19,13 @@ export const SEND_MESSAGE_PARAMS = Type.Object({
   ),
 });
 
+export const SEND_MESSAGE_TOOL_DETAILS_SCHEMA = Type.Object({
+  delivered: Type.Literal(true),
+  messageId: Type.String(),
+  target: RECEIVED_MESSAGE_ENDPOINT_SCHEMA,
+  relation: Type.Optional(Type.String()),
+});
+
 export const RECEIVED_MESSAGE_ENTRY_SCHEMA = Type.Object({
   messageId: Type.String(),
   source: RECEIVED_MESSAGE_ENDPOINT_SCHEMA,
@@ -32,5 +39,6 @@ export const RECEIVED_MESSAGE_ENTRY_SCHEMA = Type.Object({
 });
 
 export type SendMessageParams = Static<typeof SEND_MESSAGE_PARAMS>;
+export type SendMessageToolDetails = Static<typeof SEND_MESSAGE_TOOL_DETAILS_SCHEMA>;
 export type ReceivedMessageEndpoint = Static<typeof RECEIVED_MESSAGE_ENDPOINT_SCHEMA>;
 export type ReceivedMessageEntry = Static<typeof RECEIVED_MESSAGE_ENTRY_SCHEMA>;

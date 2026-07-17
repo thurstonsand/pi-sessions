@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createFakeModelRegistry } from "./test-helpers.ts";
 
 const { completeSimpleMock, loadSettingsMock } = vi.hoisted(() => ({
   completeSimpleMock: vi.fn(),
@@ -11,16 +12,6 @@ vi.mock("@earendil-works/pi-ai/compat", () => ({
 
 vi.mock("../extensions/shared/settings.ts", () => ({
   loadSettings: loadSettingsMock,
-  ModelReference: class ModelReference {
-    constructor(
-      readonly provider: string,
-      readonly modelId: string,
-    ) {}
-
-    toString() {
-      return `${this.provider}/${this.modelId}`;
-    }
-  },
 }));
 
 beforeEach(() => {
@@ -30,10 +21,7 @@ beforeEach(() => {
     autoTitle: {
       refreshTurns: 4,
       timeoutMs: 15_000,
-      model: {
-        provider: "google",
-        modelId: "gemini-flash-lite-latest",
-      },
+      model: "google/gemini-flash-lite-latest",
       prompt: "Default auto-title prompt",
     },
   });
@@ -76,10 +64,7 @@ describe("session auto-title extension", () => {
       autoTitle: {
         refreshTurns: 4,
         timeoutMs: 15_000,
-        model: {
-          provider: "google",
-          modelId: "gemini-flash-lite-latest",
-        },
+        model: "google/gemini-flash-lite-latest",
         prompt: "Name sessions like terse incident reports.",
       },
     });
@@ -139,8 +124,7 @@ describe("session auto-title extension", () => {
         assistantTurnCount: 4,
       },
       "manual",
-      "Name this coding session.",
-      15_000,
+      { systemPrompt: "Name this coding session.", timeoutMs: 15_000, thinkingLevel: undefined },
     );
     await generateAutoTitle(
       ctx as never,
@@ -153,8 +137,7 @@ describe("session auto-title extension", () => {
         assistantTurnCount: 4,
       },
       "periodic",
-      "Name this coding session.",
-      15_000,
+      { systemPrompt: "Name this coding session.", timeoutMs: 15_000, thinkingLevel: undefined },
     );
 
     const manualRequestContext = completeSimpleMock.mock.calls[0]?.[1];
@@ -173,6 +156,46 @@ describe("session auto-title extension", () => {
     expect(periodicPrompt).toContain(
       "<title_instructions>\nName this coding session.\n\nPreserve the current title unless the conversation has meaningfully shifted.\n</title_instructions>",
     );
+  });
+
+  it("passes the configured thinking level through as reasoning, omitting it for off", async () => {
+    const { generateAutoTitle } = await import("../extensions/session-auto-title/generate.ts");
+    const ctx = createRetitleContext({
+      availableModels: [],
+      currentModel: { provider: "openai", id: "gpt-5.4-mini" },
+    });
+    completeSimpleMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "Reasoned Title" }],
+    });
+
+    const titleContext = {
+      cwd: "/repo/app",
+      currentTitle: undefined,
+      conversationText: "user: hello",
+      userTurnCount: 1,
+      assistantTurnCount: 1,
+    };
+    const model = { provider: "openai", id: "gpt-5.4-mini" } as never;
+    await generateAutoTitle(ctx as never, model, titleContext, "manual", {
+      systemPrompt: "Name this coding session.",
+      timeoutMs: 15_000,
+      thinkingLevel: "max",
+    });
+    await generateAutoTitle(ctx as never, model, titleContext, "manual", {
+      systemPrompt: "Name this coding session.",
+      timeoutMs: 15_000,
+      thinkingLevel: "off",
+    });
+    await generateAutoTitle(ctx as never, model, titleContext, "manual", {
+      systemPrompt: "Name this coding session.",
+      timeoutMs: 15_000,
+      thinkingLevel: undefined,
+    });
+
+    expect(completeSimpleMock.mock.calls[0]?.[2]).toMatchObject({ reasoning: "max" });
+    expect(completeSimpleMock.mock.calls[1]?.[2]).not.toHaveProperty("reasoning");
+    expect(completeSimpleMock.mock.calls[2]?.[2]).not.toHaveProperty("reasoning");
   });
 
   it("does not retry a second model after startup picks one resolved model", async () => {
@@ -301,14 +324,7 @@ function createRetitleContext(options: {
     cwd: "/repo/app",
     hasUI: options.hasUI ?? false,
     model: options.currentModel,
-    modelRegistry: {
-      getAvailable() {
-        return options.availableModels;
-      },
-      async getApiKeyAndHeaders() {
-        return { ok: true, apiKey: "test-key", headers: undefined };
-      },
-    },
+    modelRegistry: createFakeModelRegistry({ available: options.availableModels }),
     sessionManager: {
       getBranch() {
         return entries;

@@ -1,5 +1,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
+import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import { formatAvailableModelList, resolveAuthenticatedModel } from "../shared/model-resolution.ts";
 
 export function formatModelArgument(
   model: Model<Api> | undefined,
@@ -13,23 +15,28 @@ export function formatModelArgument(
   return thinkingLevel ? `${base}:${thinkingLevel}` : base;
 }
 
-export function formatModelList(models: readonly Model<Api>[]): string {
-  return models.map((model) => `${model.provider}/${model.id}`).join(", ");
+export interface HandoffModelOverride {
+  model: Model<Api>;
+  thinkingLevel: ThinkingLevel | undefined;
 }
 
 export function resolveModelOverride(
-  availableModels: readonly Model<Api>[],
-  reference: string,
-): Model<Api> {
-  const match = availableModels.find((model) => `${model.provider}/${model.id}` === reference);
-  if (match) {
-    return match;
+  modelRegistry: ModelRegistry,
+  modelPattern: string,
+  thinkingLevel?: ThinkingLevel | undefined,
+): HandoffModelOverride {
+  const resolution = resolveAuthenticatedModel({ modelRegistry, modelPattern, thinkingLevel });
+  if (!resolution.ok) {
+    const warning = resolution.warning ? ` ${resolution.warning}` : "";
+    throw new Error(
+      `${resolution.error}${warning} Available models: ${formatAvailableModelList(
+        modelRegistry.getAvailable(),
+      )}.`,
+    );
   }
 
-  const hint = reference.includes(":")
-    ? " Thinking level belongs in the thinkingLevel parameter, not the model id."
-    : "";
-  throw new Error(
-    `Unknown model "${reference}".${hint} Available models: ${formatModelList(availableModels)}.`,
-  );
+  return {
+    model: resolution.model,
+    thinkingLevel: resolution.thinkingLevel,
+  };
 }

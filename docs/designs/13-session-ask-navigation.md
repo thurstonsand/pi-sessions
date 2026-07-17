@@ -6,6 +6,8 @@ Accepted
 
 ## Decision Summary
 
+> **Later refinement:** [Design 16](16-pi-0806-session-transcript-modernization.md) specifies coordinated pre-start and in-flight cancellation, including awaited nested abort, retry suppression, and exactly-once disposal. The navigation model remains unchanged.
+
 `session_ask` answers questions by launching a focused Pi sub-agent that navigates one target session through a compact **Conversation Span** map, scoped session search, and bounded session reads. It does not render the whole session tree or a full entry index into the prompt.
 
 The tradeoff is intentional: more adaptive tool use and slightly more latency in exchange for scaling to large, branched, compacted sessions and for better evidence checking. The sub-agent can search for leads, inspect exact entries, follow branches, verify later revisions, and optionally compare the session history against the current workspace.

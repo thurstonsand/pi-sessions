@@ -7,6 +7,7 @@ import {
   SessionManager,
   type SessionMessageEntry,
 } from "@earendil-works/pi-coding-agent";
+import { HANDOFF_KICKOFF_CUSTOM_TYPE } from "../session-handoff/kickoff.ts";
 import { contentToText, isRecord, truncateBlock, truncateInline } from "../shared/text.ts";
 
 const MAX_TOOL_RESULT_PREVIEW_CHARS = 300;
@@ -726,7 +727,8 @@ function renderEntryContent(entry: SessionEntry, body: SessionReadBodyMode = "fu
     return renderMessageEntry(entry, body);
   }
   if (entry.type === "custom_message") {
-    return `[Custom]: ${String(entry.content ?? "")}`;
+    const label = entry.customType === HANDOFF_KICKOFF_CUSTOM_TYPE ? "Handoff kickoff" : "Custom";
+    return `[${label}]: ${String(entry.content ?? "")}`;
   }
   if (entry.type === "compaction" || entry.type === "branch_summary") {
     return String(entry.summary ?? "");

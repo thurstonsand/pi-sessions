@@ -7,7 +7,7 @@ import type {
   ThinkingContent,
   ToolCall,
 } from "@earendil-works/pi-ai";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, SessionContext } from "@earendil-works/pi-coding-agent";
 import {
   buildSessionContext,
   convertToLlm,
@@ -76,31 +76,21 @@ export interface HandoffDraftResult {
   sessionPath?: string | undefined;
 }
 
-export async function generateHandoffDraft(
-  ctx: ExtensionContext,
-  goal: string,
-  thinkingLevel: ThinkingLevel | undefined,
-  signal?: AbortSignal,
-  requestResponse = false,
-): Promise<HandoffDraftResult | undefined> {
-  if (!ctx.model) {
-    throw new Error("No model is available for handoff.");
+/** Validate an anchored source branch and return its built context. Throws a user-facing Error otherwise. */
+export function resolveHandoffSource(
+  sessionManager: ExtensionContext["sessionManager"],
+  sourceLeafId: string,
+): SessionContext {
+  if (!sessionManager.getEntry(sourceLeafId)) {
+    throw new Error(`Handoff source snapshot entry ${sourceLeafId} was not found.`);
   }
 
-  const sourceLeafId = ctx.sessionManager.getLeafId();
-  if (!sourceLeafId) {
-    throw new Error("No conversation is available to hand off.");
+  const sessionContext = buildSessionContext(sessionManager.getEntries(), sourceLeafId);
+  if (sessionContext.messages.length === 0) {
+    throw new Error("No conversation to hand off.");
   }
 
-  return generateHandoffDraftFromSessionManager(
-    ctx,
-    ctx.sessionManager,
-    sourceLeafId,
-    goal,
-    thinkingLevel,
-    signal,
-    requestResponse,
-  );
+  return sessionContext;
 }
 
 export async function generateHandoffDraftFromSessionManager(
@@ -117,14 +107,7 @@ export async function generateHandoffDraftFromSessionManager(
   }
 
   const model = ctx.model;
-  if (!sourceSessionManager.getEntry(sourceLeafId)) {
-    throw new Error(`Handoff source snapshot entry ${sourceLeafId} was not found.`);
-  }
-
-  const sessionContext = buildSessionContext(sourceSessionManager.getEntries(), sourceLeafId);
-  if (sessionContext.messages.length === 0) {
-    throw new Error("No conversation is available to hand off.");
-  }
+  const sessionContext = resolveHandoffSource(sourceSessionManager, sourceLeafId);
 
   const conversationText = serializeConversation(convertToLlm(sessionContext.messages));
   const handoffContext = await runHandoffExtractionAgent(

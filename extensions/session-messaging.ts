@@ -8,11 +8,7 @@ import { loadSettings } from "./shared/settings.ts";
 export default function sessionMessagingExtension(pi: ExtensionAPI): void {
   const settings = loadSettings();
   const incomingRuntime = new IncomingSessionMessageRuntime(pi);
-  const service = new SessionMessagingService(
-    settings.index.path,
-    incomingRuntime,
-    pi.appendEntry.bind(pi),
-  );
+  const service = new SessionMessagingService(settings.index.path, incomingRuntime);
 
   pi.on("session_start", async (_event, ctx) => {
     incomingRuntime.replayPending(ctx);

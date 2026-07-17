@@ -9,7 +9,7 @@ import type { Focusable, TUI } from "@earendil-works/pi-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { RetitleCommandOutcome, RetitleMode, RetitleScope } from "./command.ts";
 import type { AutoRetitleStatus, SessionAutoTitleController } from "./controller.ts";
-import type { AutoTitleFailure } from "./generate.ts";
+import type { AutoTitleFailure, AutoTitleGeneration } from "./generate.ts";
 import {
   buildBulkRetitleMessage,
   buildRetitleScopeScan,
@@ -56,8 +56,7 @@ export async function showRetitleWizard(
   ctx: ExtensionCommandContext,
   model: Model<Api> | undefined,
   getSessionEpoch: () => number,
-  systemPrompt: string,
-  timeoutMs: number,
+  generation: AutoTitleGeneration,
   options?: RetitleWizardOptions,
 ): Promise<RetitleCommandOutcome> {
   return ctx.ui.custom<RetitleCommandOutcome>(
@@ -70,8 +69,7 @@ export async function showRetitleWizard(
         ctx,
         model,
         getSessionEpoch,
-        systemPrompt,
-        timeoutMs,
+        generation,
         done,
         options,
       ),
@@ -100,8 +98,7 @@ class RetitleWizardPanel implements Focusable {
     private readonly ctx: ExtensionCommandContext,
     private readonly model: Model<Api> | undefined,
     private readonly getSessionEpoch: () => number,
-    private readonly systemPrompt: string,
-    private readonly timeoutMs: number,
+    private readonly generation: AutoTitleGeneration,
     private readonly done: (result: RetitleCommandOutcome) => void,
     options?: RetitleWizardOptions,
   ) {
@@ -252,8 +249,7 @@ class RetitleWizardPanel implements Focusable {
       ctx: this.ctx,
       model: this.model,
       isManual: true,
-      systemPrompt: this.systemPrompt,
-      timeoutMs: this.timeoutMs,
+      generation: this.generation,
       getSessionEpoch: this.getSessionEpoch,
     });
     if (result.ok) {
@@ -313,8 +309,7 @@ class RetitleWizardPanel implements Focusable {
       scan,
       mode,
       this.getSessionEpoch,
-      this.systemPrompt,
-      this.timeoutMs,
+      this.generation,
     );
     notifyBulkRetitleResult(this.ctx, scan, mode, result);
     this.done(

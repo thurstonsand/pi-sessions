@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { EntryRenderer } from "@earendil-works/pi-coding-agent";
 import { Box, type Component, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
 import type { RenderTheme } from "../shared/rendering/theme.ts";
@@ -137,11 +137,10 @@ export function formatDeferredCommandLabel(clipboardStatus?: ClipboardStatus | u
   }
 }
 
-export function registerHandoffLaunchReceiptRenderer(
-  pi: ExtensionAPI,
+export function createHandoffLaunchReceiptRenderer(
   getClipboardStatus: (sessionId: string) => ClipboardStatus | undefined = () => undefined,
-): void {
-  pi.registerEntryRenderer(HANDOFF_LAUNCH_RECEIPT_CUSTOM_TYPE, (entry, options, theme) => {
+): EntryRenderer {
+  return (entry, options, theme) => {
     const receipt = safeParseTypeBoxValue(HANDOFF_LAUNCH_RECEIPT_SCHEMA, entry.data);
     if (!receipt) {
       return undefined;
@@ -157,5 +156,5 @@ export function registerHandoffLaunchReceiptRenderer(
       ),
     );
     return box;
-  });
+  };
 }

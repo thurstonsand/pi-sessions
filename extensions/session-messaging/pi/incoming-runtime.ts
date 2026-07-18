@@ -29,13 +29,14 @@ export class IncomingSessionMessageRuntime {
       appendEntry: pi.appendEntry.bind(pi),
       sendMessage: pi.sendMessage.bind(pi),
     };
+  }
 
-    pi.on("session_start", (_event, ctx) => {
-      this.context = ctx;
-    });
-    pi.on("session_shutdown", () => {
-      this.context = undefined;
-    });
+  bindContext(ctx: ExtensionContext): void {
+    this.context = ctx;
+  }
+
+  clearContext(): void {
+    this.context = undefined;
   }
 
   deliver(received: ReceivedMessageEntry): DeliveryResult {

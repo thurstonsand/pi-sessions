@@ -3,7 +3,7 @@ import {
   createSessionAutoTitleCommandHandler,
   getRetitleArgumentCompletions,
   parseRetitleCommand,
-} from "../extensions/session-auto-title.ts";
+} from "../extensions/session-auto-title/command.ts";
 
 describe("session auto-title command", () => {
   it("rejects unexpected arguments", async () => {

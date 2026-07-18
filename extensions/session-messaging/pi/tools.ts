@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { ExpandableContentLayout } from "../../shared/rendering/expandable-content-layout.ts";
 import { safeParseTypeBoxValue } from "../../shared/typebox.ts";
@@ -16,11 +16,8 @@ interface SendMessageRendererState {
   callComponent?: ExpandableContentLayout | undefined;
 }
 
-export function registerSessionMessagingTools(
-  pi: ExtensionAPI,
-  service: SessionMessagingService,
-): void {
-  pi.registerTool({
+export function createSessionSendMessageTool(service: SessionMessagingService): ToolDefinition {
+  return defineTool({
     name: "session_send_message",
     label: "Send Message to Session",
     description: "Send a message to another live pi session",

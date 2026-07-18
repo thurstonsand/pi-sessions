@@ -10,7 +10,8 @@ import type { TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { listSessionPickerItems } from "../extensions/session-handoff/query.ts";
-import sessionSearchExtension, { type SessionSearchDeps } from "../extensions/session-search.ts";
+import type { MessagingHandle } from "../extensions/session-messaging/install.ts";
+import { installSearch } from "../extensions/session-search/install.ts";
 import {
   SEARCH_SNIPPET_MATCH_END,
   SEARCH_SNIPPET_MATCH_START,
@@ -23,6 +24,7 @@ import {
   rebuildSessionLineageRelations,
   setMetadata,
 } from "../extensions/shared/session-index/index.ts";
+import { loadSettings } from "../extensions/shared/settings.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-search-tool-");
@@ -388,9 +390,7 @@ describe("session_search tool", () => {
     const brokerConnection = {
       listSessionIds: async () => ["current-session", "live-child", "missing-live"],
     };
-    const tool = registerSessionSearchTool({
-      getBrokerConnection: () => brokerConnection,
-    });
+    const tool = registerSessionSearchTool({ messaging: brokerConnection });
     const result = await tool.execute(
       "tool-1",
       { cwd: "/repo", live: true },
@@ -427,7 +427,7 @@ describe("session_search tool", () => {
     setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
     db.close();
 
-    const tool = registerSessionSearchTool({ getBrokerConnection: () => undefined });
+    const tool = registerSessionSearchTool({ messaging: undefined });
     await expect(
       tool.execute(
         "tool-1",
@@ -530,16 +530,17 @@ describe("session_search tool", () => {
   });
 });
 
-function registerSessionSearchTool(deps?: SessionSearchDeps) {
+function registerSessionSearchTool(deps?: { messaging?: MessagingHandle | undefined }) {
   let registeredTool: ToolDefinition | undefined;
 
-  sessionSearchExtension(
+  const settings = loadSettings();
+  installSearch(
     {
       registerTool(tool: ToolDefinition) {
         registeredTool = tool;
       },
     } as unknown as ExtensionAPI,
-    deps,
+    { settings, index: { path: settings.index.path }, messaging: deps?.messaging },
   );
 
   if (!registeredTool) {

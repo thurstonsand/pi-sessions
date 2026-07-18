@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { registerSessionMessagingRenderer } from "../extensions/session-messaging/pi/renderer.ts";
+import { describe, expect, it } from "vitest";
+import { renderIncomingSessionMessage } from "../extensions/session-messaging/pi/renderer.ts";
 
 const theme = {
   bold: (text: string) => text,
@@ -19,11 +19,7 @@ const received = {
 };
 
 function getRenderer() {
-  const registerMessageRenderer = vi.fn();
-  const registerEntryRenderer = vi.fn();
-  registerSessionMessagingRenderer({ registerMessageRenderer, registerEntryRenderer } as never);
-  expect(registerEntryRenderer).not.toHaveBeenCalled();
-  return registerMessageRenderer.mock.calls[0]?.[1] as (
+  return renderIncomingSessionMessage as unknown as (
     message: unknown,
     options: { expanded: boolean },
     rendererTheme: typeof theme,

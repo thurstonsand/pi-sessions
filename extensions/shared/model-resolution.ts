@@ -1,7 +1,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { modelsAreEqual } from "@earendil-works/pi-ai";
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { resolveCliModel } from "@earendil-works/pi-coding-agent";
 
 export type AuthenticatedModelResolution =
@@ -19,20 +19,20 @@ export type AuthenticatedModelResolution =
 
 /**
  * Resolves a model pattern with Pi's CLI grammar (fuzzy aliases, slash ids,
- * `:thinking` suffixes), then narrows the result to a fresh entry from
- * `getAvailable()`. resolveCliModel intentionally searches getAll() for CLI
- * setup flows; nested extension work must only run activated, authenticated
- * models, and the available object is the one that crosses that boundary.
+ * `:thinking` suffixes), then narrows the result to a fresh entry from the
+ * runtime's available snapshot. resolveCliModel intentionally searches every
+ * model for CLI setup flows; nested extension work must only run activated,
+ * authenticated models, and the available object crosses that boundary.
  */
 export function resolveAuthenticatedModel(options: {
-  modelRegistry: ModelRegistry;
+  modelRuntime: ModelRuntime;
   modelPattern: string;
   thinkingLevel?: ThinkingLevel | undefined;
 }): AuthenticatedModelResolution {
   const resolved = resolveCliModel({
     cliModel: options.modelPattern,
     ...(options.thinkingLevel ? { cliThinking: options.thinkingLevel } : {}),
-    modelRegistry: options.modelRegistry,
+    modelRuntime: options.modelRuntime,
   });
 
   if (resolved.error || !resolved.model) {
@@ -43,8 +43,8 @@ export function resolveAuthenticatedModel(options: {
     };
   }
 
-  const available = options.modelRegistry
-    .getAvailable()
+  const available = options.modelRuntime
+    .getAvailableSnapshot()
     .find((model) => modelsAreEqual(model, resolved.model));
   if (!available) {
     return {

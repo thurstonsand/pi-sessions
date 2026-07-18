@@ -80,6 +80,9 @@ function baseParams(signal?: AbortSignal) {
       model: { provider: "openai", id: "gpt-5.4" },
       modelRegistry: { getAvailable: () => [] },
     } as never,
+    modelRuntime: {
+      getModel: () => ({ provider: "openai", id: "gpt-5.4" }),
+    } as never,
     target: {
       sessionId: "session-1",
       sessionPath: "/tmp/session-1.jsonl",
@@ -167,9 +170,11 @@ describe("session_ask abort handling", () => {
     setupFakeSession();
     const { runSessionAskAgent } = await import("../extensions/session-ask/agent.ts");
 
-    const result = await runSessionAskAgent(baseParams(undefined));
+    const params = baseParams(undefined);
+    const result = await runSessionAskAgent(params);
 
     expect(result).toBeUndefined();
+    expect(createAgentSessionMock.mock.calls[0]?.[0].modelRuntime).toBe(params.modelRuntime);
     expect(promptMock).toHaveBeenCalledTimes(3);
     expect(abortMock).not.toHaveBeenCalled();
     expect(disposeMock).toHaveBeenCalledTimes(1);

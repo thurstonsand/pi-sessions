@@ -2,13 +2,14 @@ import { writeFileSync } from "node:fs";
 import path from "node:path";
 import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import sessionAskExtension from "../extensions/session-ask.ts";
+import { installAsk } from "../extensions/session-ask/install.ts";
 import {
   initializeSchema,
   insertSession,
   openIndexDatabase,
   setMetadata,
 } from "../extensions/shared/session-index/index.ts";
+import { loadSettings } from "../extensions/shared/settings.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
 const { runSessionAskAgentMock } = vi.hoisted(() => ({
@@ -274,14 +275,22 @@ describe("session_ask tool", () => {
 function registerSessionAskTool() {
   let registeredTool: ToolDefinition | undefined;
 
-  sessionAskExtension({
-    registerTool(tool: ToolDefinition) {
-      registeredTool = tool;
+  const settings = loadSettings();
+  installAsk(
+    {
+      registerTool(tool: ToolDefinition) {
+        registeredTool = tool;
+      },
+      getThinkingLevel() {
+        return "off";
+      },
+    } as unknown as ExtensionAPI,
+    {
+      settings,
+      index: { path: settings.index.path },
+      getModelRuntime: async () => ({}) as never,
     },
-    getThinkingLevel() {
-      return "off";
-    },
-  } as unknown as ExtensionAPI);
+  );
 
   if (!registeredTool) {
     throw new Error("session_ask tool was not registered");

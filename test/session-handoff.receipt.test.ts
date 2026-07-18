@@ -2,9 +2,9 @@ import { describe, expect, it, vi } from "vitest";
 import type { ClipboardStatus } from "../extensions/session-handoff/launch/backend.ts";
 import {
   buildLaunchReceipt,
+  createHandoffLaunchReceiptRenderer,
   createLaunchReceiptComponent,
   type HandoffLaunchReceipt,
-  registerHandoffLaunchReceiptRenderer,
 } from "../extensions/session-handoff/receipt.ts";
 
 const theme = {
@@ -116,9 +116,7 @@ describe("handoff launch receipt", () => {
   });
 
   it("wraps command receipts in a custom-message box", () => {
-    const registerEntryRenderer = vi.fn();
-    registerHandoffLaunchReceiptRenderer({ registerEntryRenderer } as never, () => "copied");
-    const renderer = registerEntryRenderer.mock.calls[0]?.[1] as (
+    const renderer = createHandoffLaunchReceiptRenderer(() => "copied") as unknown as (
       entry: unknown,
       options: { expanded: boolean },
       rendererTheme: typeof theme,

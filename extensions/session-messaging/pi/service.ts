@@ -1,10 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-  type ActiveSessionBrokerConnection,
-  setActiveSessionBrokerConnection,
-} from "../../shared/session-broker/active.ts";
-import {
   INCOMING_SESSION_MESSAGE_EVENT,
   type SessionMessageSendResult,
   SessionMessagingClient,
@@ -67,14 +63,16 @@ export class SessionMessagingService {
   async start(ctx: ExtensionContext): Promise<void> {
     const sessionId = ctx.sessionManager.getSessionId();
     this.refreshCachedRelations(sessionId);
-    setActiveSessionBrokerConnection(this.connection);
     await this.connection.start(sessionId);
   }
 
   stop(): void {
-    setActiveSessionBrokerConnection(undefined);
     this.relationBySessionId.clear();
     this.connection.stop();
+  }
+
+  async listSessionIds(): Promise<string[]> {
+    return this.connection.listSessionIds();
   }
 
   async sendMessage(request: SendMessageRequest): Promise<SendMessageResult> {
@@ -220,7 +218,7 @@ export class SessionMessagingService {
   }
 }
 
-class BrokerConnection implements ActiveSessionBrokerConnection {
+class BrokerConnection {
   private client: SessionMessagingClient | undefined;
   private sessionId: string | undefined;
   private active = false;

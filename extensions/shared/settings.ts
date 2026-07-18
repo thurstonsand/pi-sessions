@@ -11,6 +11,16 @@ export const DEFAULT_AUTO_TITLE_REFRESH_TURNS = 4;
 export const DEFAULT_AUTO_TITLE_TIMEOUT_SECONDS = 15;
 export const DEFAULT_AUTO_TITLE_PROMPT = `Name this coding session (under 80 chars). Be specific to what is being discussed. Your exact output will be displayed to the user, so make sure that it contains ONLY the title itself and nothing else.`;
 const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
+  features: Type.Optional(
+    Type.Object({
+      messaging: Type.Optional(Type.Boolean()),
+      handoff: Type.Optional(Type.Boolean()),
+      search: Type.Optional(Type.Boolean()),
+      ask: Type.Optional(Type.Boolean()),
+      autoTitle: Type.Optional(Type.Boolean()),
+      hooks: Type.Optional(Type.Boolean()),
+    }),
+  ),
   handoff: Type.Optional(
     Type.Object({
       pickerShortcut: Type.Optional(Type.String()),
@@ -62,7 +72,17 @@ export interface AskSettings extends AgentModelSettings {
   persistRuns: boolean;
 }
 
+export interface FeatureToggles {
+  messaging: boolean;
+  handoff: boolean;
+  search: boolean;
+  ask: boolean;
+  autoTitle: boolean;
+  hooks: boolean;
+}
+
 export interface SessionSettings {
+  features: FeatureToggles;
   handoff: {
     pickerShortcut: KeyId;
     deferred: {
@@ -157,10 +177,33 @@ function loadSessionFileSettings(): SessionFileSettings {
   return parsed.sessions ?? {};
 }
 
+function resolveFeatureToggles(
+  value:
+    | {
+        messaging?: boolean | undefined;
+        handoff?: boolean | undefined;
+        search?: boolean | undefined;
+        ask?: boolean | undefined;
+        autoTitle?: boolean | undefined;
+        hooks?: boolean | undefined;
+      }
+    | undefined,
+): FeatureToggles {
+  return {
+    messaging: value?.messaging ?? true,
+    handoff: value?.handoff ?? true,
+    search: value?.search ?? true,
+    ask: value?.ask ?? true,
+    autoTitle: value?.autoTitle ?? true,
+    hooks: value?.hooks ?? true,
+  };
+}
+
 function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSettings {
   const indexDir = normalizeIndexDir(fileSettings.index?.dir);
 
   return {
+    features: resolveFeatureToggles(fileSettings.features),
     handoff: {
       pickerShortcut: normalizePickerShortcut(fileSettings.handoff?.pickerShortcut),
       deferred: {

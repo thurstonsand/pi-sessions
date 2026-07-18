@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { registerSessionMessagingTools } from "../extensions/session-messaging/pi/tools.ts";
+import { createSessionSendMessageTool } from "../extensions/session-messaging/pi/tools.ts";
 
 const theme = {
   bold: (text: string) => text,
@@ -21,15 +21,10 @@ const details = {
 };
 
 function getTool() {
-  const registerTool = vi.fn();
-  registerSessionMessagingTools(
-    { registerTool } as never,
-    {
-      getCachedRelationTo: vi.fn(() => "child"),
-      sendMessage: vi.fn(),
-    } as never,
-  );
-  return registerTool.mock.calls[0]?.[0] as {
+  return createSessionSendMessageTool({
+    getCachedRelationTo: vi.fn(() => "child"),
+    sendMessage: vi.fn(),
+  } as never) as {
     renderCall: (
       args: unknown,
       theme: unknown,

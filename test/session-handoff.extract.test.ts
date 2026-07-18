@@ -13,6 +13,7 @@ function generateHandoffDraft(
 ) {
   return generateHandoffDraftFromSessionManager(
     ctx as never,
+    createModelRuntime(),
     ctx.sessionManager as never,
     ctx.sessionManager.getLeafId(),
     goal,
@@ -154,6 +155,7 @@ describe("session handoff extraction", () => {
     expect(options).toMatchObject({
       cwd: "/tmp/project",
       model: { provider: "openai", id: "gpt-5.4", reasoning: true },
+      modelRuntime: { getModel: expect.any(Function) },
       thinkingLevel: "medium",
       tools: ["read", "grep", "find", "ls", "create_handoff_context"],
     });
@@ -244,6 +246,7 @@ describe("session handoff extraction", () => {
     await expect(
       generateHandoffDraftFromSessionManager(
         createGenerationContext(),
+        createModelRuntime(),
         sourceSessionManager as never,
         "anchor",
         "TARGET GOAL",
@@ -266,6 +269,7 @@ describe("session handoff extraction", () => {
     await expect(
       generateHandoffDraftFromSessionManager(
         createGenerationContext(),
+        createModelRuntime(),
         createSourceSessionManager(entries, "latest") as never,
         "missing-anchor",
         "TARGET GOAL",
@@ -295,6 +299,12 @@ function createMockAgentSession(toolArguments: unknown, onPrompt?: (prompt: stri
     },
     extensionsResult: { extensions: [], errors: [] },
   };
+}
+
+function createModelRuntime() {
+  return {
+    getModel: () => ({ provider: "openai", id: "gpt-5.4", reasoning: true }),
+  } as never;
 }
 
 function createGenerationContext() {

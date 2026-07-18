@@ -1,6 +1,6 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
-import type { ModelRegistry } from "@earendil-works/pi-coding-agent";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { formatAvailableModelList, resolveAuthenticatedModel } from "../shared/model-resolution.ts";
 
 export function formatModelArgument(
@@ -21,16 +21,16 @@ export interface HandoffModelOverride {
 }
 
 export function resolveModelOverride(
-  modelRegistry: ModelRegistry,
+  modelRuntime: ModelRuntime,
   modelPattern: string,
   thinkingLevel?: ThinkingLevel | undefined,
 ): HandoffModelOverride {
-  const resolution = resolveAuthenticatedModel({ modelRegistry, modelPattern, thinkingLevel });
+  const resolution = resolveAuthenticatedModel({ modelRuntime, modelPattern, thinkingLevel });
   if (!resolution.ok) {
     const warning = resolution.warning ? ` ${resolution.warning}` : "";
     throw new Error(
       `${resolution.error}${warning} Available models: ${formatAvailableModelList(
-        modelRegistry.getAvailable(),
+        modelRuntime.getAvailableSnapshot(),
       )}.`,
     );
   }

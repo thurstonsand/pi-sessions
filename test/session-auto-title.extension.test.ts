@@ -1,13 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { createFakeModelRegistry } from "./test-helpers.ts";
+import type { SessionSettings } from "../extensions/shared/settings.ts";
+import { createFakeModelRegistry, createFakeModelRuntime } from "./test-helpers.ts";
 
 const { completeSimpleMock, loadSettingsMock } = vi.hoisted(() => ({
   completeSimpleMock: vi.fn(),
   loadSettingsMock: vi.fn(),
-}));
-
-vi.mock("@earendil-works/pi-ai/compat", () => ({
-  completeSimple: completeSimpleMock,
 }));
 
 vi.mock("../extensions/shared/settings.ts", () => ({
@@ -28,17 +25,13 @@ beforeEach(() => {
 });
 
 describe("session auto-title extension", () => {
-  it("resolves the current session model at session start when cheap models are unavailable", async () => {
-    const { default: sessionAutoTitleExtension } = await import(
-      "../extensions/session-auto-title.ts"
-    );
-    const { commands, handlers, pi } = createExtensionApi();
+  it("uses the current session model when cheap models are unavailable", async () => {
+    const { installAutoTitle } = await import("../extensions/session-auto-title/install.ts");
+    const { commands, pi } = createExtensionApi();
 
-    sessionAutoTitleExtension(pi as never);
-
-    const sessionStart = handlers.get("session_start");
+    const lifecycle = installAutoTitle(pi as never, buildDeps());
     const title = commands.get("title");
-    expect(sessionStart).toBeDefined();
+    expect(lifecycle.onSessionStart).toBeDefined();
     expect(title).toBeDefined();
 
     const currentModel = { provider: "openai", id: "gpt-5.4-mini" };
@@ -51,7 +44,7 @@ describe("session auto-title extension", () => {
       content: [{ type: "text", text: "Resolved Title" }],
     });
 
-    await sessionStart?.({}, ctx as never);
+    await lifecycle.onSessionStart?.({} as never, ctx as never);
     await title?.("", ctx as never);
 
     expect(completeSimpleMock).toHaveBeenCalledTimes(1);
@@ -68,14 +61,10 @@ describe("session auto-title extension", () => {
         prompt: "Name sessions like terse incident reports.",
       },
     });
-    const { default: sessionAutoTitleExtension } = await import(
-      "../extensions/session-auto-title.ts"
-    );
-    const { commands, handlers, pi } = createExtensionApi();
+    const { installAutoTitle } = await import("../extensions/session-auto-title/install.ts");
+    const { commands, pi } = createExtensionApi();
 
-    sessionAutoTitleExtension(pi as never);
-
-    const sessionStart = handlers.get("session_start");
+    const lifecycle = installAutoTitle(pi as never, buildDeps());
     const title = commands.get("title");
     const configuredModel = { provider: "google", id: "gemini-flash-lite-latest" };
     const ctx = createRetitleContext({
@@ -87,7 +76,7 @@ describe("session auto-title extension", () => {
       content: [{ type: "text", text: "Incident Report Title" }],
     });
 
-    await sessionStart?.({}, ctx as never);
+    await lifecycle.onSessionStart?.({} as never, ctx as never);
     await title?.("", ctx as never);
 
     const requestContext = completeSimpleMock.mock.calls[0]?.[1];
@@ -112,9 +101,10 @@ describe("session auto-title extension", () => {
       stopReason: "stop",
       content: [{ type: "text", text: "Updated Title" }],
     });
+    const modelRuntime = createRuntime(ctx);
 
     await generateAutoTitle(
-      ctx as never,
+      modelRuntime,
       { provider: "openai", id: "gpt-5.4-mini" } as never,
       {
         cwd: "/repo/app",
@@ -127,7 +117,7 @@ describe("session auto-title extension", () => {
       { systemPrompt: "Name this coding session.", timeoutMs: 15_000, thinkingLevel: undefined },
     );
     await generateAutoTitle(
-      ctx as never,
+      modelRuntime,
       { provider: "openai", id: "gpt-5.4-mini" } as never,
       {
         cwd: "/repo/app",
@@ -177,17 +167,18 @@ describe("session auto-title extension", () => {
       assistantTurnCount: 1,
     };
     const model = { provider: "openai", id: "gpt-5.4-mini" } as never;
-    await generateAutoTitle(ctx as never, model, titleContext, "manual", {
+    const modelRuntime = createRuntime(ctx);
+    await generateAutoTitle(modelRuntime, model, titleContext, "manual", {
       systemPrompt: "Name this coding session.",
       timeoutMs: 15_000,
       thinkingLevel: "max",
     });
-    await generateAutoTitle(ctx as never, model, titleContext, "manual", {
+    await generateAutoTitle(modelRuntime, model, titleContext, "manual", {
       systemPrompt: "Name this coding session.",
       timeoutMs: 15_000,
       thinkingLevel: "off",
     });
-    await generateAutoTitle(ctx as never, model, titleContext, "manual", {
+    await generateAutoTitle(modelRuntime, model, titleContext, "manual", {
       systemPrompt: "Name this coding session.",
       timeoutMs: 15_000,
       thinkingLevel: undefined,
@@ -199,16 +190,12 @@ describe("session auto-title extension", () => {
   });
 
   it("does not retry a second model after startup picks one resolved model", async () => {
-    const { default: sessionAutoTitleExtension } = await import(
-      "../extensions/session-auto-title.ts"
-    );
-    const { commands, handlers, pi } = createExtensionApi();
+    const { installAutoTitle } = await import("../extensions/session-auto-title/install.ts");
+    const { commands, pi } = createExtensionApi();
 
-    sessionAutoTitleExtension(pi as never);
-
-    const sessionStart = handlers.get("session_start");
+    const lifecycle = installAutoTitle(pi as never, buildDeps());
     const title = commands.get("title");
-    expect(sessionStart).toBeDefined();
+    expect(lifecycle.onSessionStart).toBeDefined();
     expect(title).toBeDefined();
 
     const configuredModel = { provider: "google", id: "gemini-flash-lite-latest" };
@@ -223,7 +210,7 @@ describe("session auto-title extension", () => {
       content: [],
     });
 
-    await sessionStart?.({}, ctx as never);
+    await lifecycle.onSessionStart?.({} as never, ctx as never);
     await title?.("", ctx as never);
 
     expect(completeSimpleMock).toHaveBeenCalledTimes(1);
@@ -232,16 +219,12 @@ describe("session auto-title extension", () => {
   });
 
   it("surfaces background auto-title failures as a warning notification", async () => {
-    const { default: sessionAutoTitleExtension } = await import(
-      "../extensions/session-auto-title.ts"
-    );
+    const { installAutoTitle } = await import("../extensions/session-auto-title/install.ts");
     const { handlers, pi } = createExtensionApi();
 
-    sessionAutoTitleExtension(pi as never);
-
-    const sessionStart = handlers.get("session_start");
+    const lifecycle = installAutoTitle(pi as never, buildDeps());
     const turnEnd = handlers.get("turn_end");
-    expect(sessionStart).toBeDefined();
+    expect(lifecycle.onSessionStart).toBeDefined();
     expect(turnEnd).toBeDefined();
 
     const configuredModel = { provider: "google", id: "gemini-flash-lite-latest" };
@@ -256,7 +239,7 @@ describe("session auto-title extension", () => {
       content: [],
     });
 
-    await sessionStart?.({}, ctx as never);
+    await lifecycle.onSessionStart?.({} as never, ctx as never);
     await turnEnd?.({}, ctx as never);
 
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -269,6 +252,35 @@ describe("session auto-title extension", () => {
     );
   });
 });
+
+function createRuntime(ctx: {
+  modelRegistry: {
+    getAll(): Array<{ provider: string; id: string }>;
+    getAvailable(): Array<{ provider: string; id: string }>;
+  };
+}) {
+  return createFakeModelRuntime({
+    all: ctx.modelRegistry.getAll(),
+    available: ctx.modelRegistry.getAvailable(),
+    completeSimple: completeSimpleMock,
+  }) as never;
+}
+
+function buildDeps() {
+  return {
+    settings: loadSettingsMock() as SessionSettings,
+    getModelRuntime: async (modelRegistry: {
+      getAll(): Array<{ provider: string; id: string }>;
+      getAvailable(): Array<{ provider: string; id: string }>;
+    }) =>
+      createFakeModelRuntime({
+        all: modelRegistry.getAll(),
+        available: modelRegistry.getAvailable(),
+        completeSimple: completeSimpleMock,
+      }) as never,
+    getSessionEpoch: () => 0,
+  };
+}
 
 function createExtensionApi() {
   const commands = new Map<string, (args: string, ctx: unknown) => Promise<void>>();

@@ -23,6 +23,7 @@ No build/compile step — The pi framework loads extensions directly from TypeSc
 
 ## Code Style
 
+- All extension registration (`pi.on`, `pi.register*`) should exist only in `install.ts` files
 - Use TypeBox to ensure runtime type safety
 - Do not change production types to make tests easier; mock the real type instead.
 - Treat the SQLite index as a read-layer cache; anything durable must be stored within the session file directly
@@ -37,12 +38,14 @@ No build/compile step — The pi framework loads extensions directly from TypeSc
 
 ## Project structure
 
-- **Session search**: entrypoint at `extensions/session-search.ts`; core logic at `extensions/session-search/` and `extensions/shared/session-index/`.
-- **Session ask**: entrypoint at `extensions/session-ask.ts`; navigation agent logic at `extensions/session-ask/`; retrieval support at `extensions/shared/session-index/`.
-- **Session index**: entrypoint at `extensions/session-index.ts`; core logic at `extensions/session-search/reindex.ts` and `extensions/shared/session-index/`.
-- **Session hooks**: entrypoint at `extensions/session-hooks.ts`; core logic at `extensions/session-search/hooks.ts`.
-- **Session handoff**: entrypoint at `extensions/session-handoff.ts`; core logic at `extensions/session-handoff/`.
-- **Session messaging**: entrypoint at `extensions/session-messaging.ts`; broker/client/runtime logic at `extensions/session-messaging/`.
-- **Session reference picker**: entrypoint at `extensions/session-handoff.ts`; core logic at `extensions/session-handoff/picker.ts` and `extensions/session-handoff/query.ts`.
-- **Session auto-title**: entrypoint at `extensions/session-auto-title.ts`; core logic at `extensions/session-auto-title/`.
+- **Composition root**: `extensions/pi-sessions.ts`; feature-toggle and dependency-wiring logic. Should be the only place where `session_start`/`session_shutdown` subscription exists.
+- **Shared ports** at `extensions/shared/composition.ts`.
+- **Session search**: `extensions/session-search/install.ts`; result rendering at `extensions/session-search/renderer.ts`; core logic at `extensions/session-search/` and `extensions/shared/session-index/`.
+- **Session ask**: `extensions/session-ask/install.ts`; navigation agent logic at `extensions/session-ask/`; retrieval support at `extensions/shared/session-index/`.
+- **Session index**: `extensions/session-index/install.ts`; core logic at `extensions/session-search/reindex.ts` and `extensions/shared/session-index/`.
+- **Session hooks**: `extensions/session-hooks/install.ts`; core logic at `extensions/session-search/hooks.ts`.
+- **Session handoff**: `extensions/session-handoff/install.ts`; core logic at `extensions/session-handoff/`.
+- **Session messaging**: `extensions/session-messaging/install.ts`; broker/client/runtime logic at `extensions/session-messaging/`.
+- **Session reference picker**: `extensions/session-handoff/install.ts`; core logic at `extensions/session-handoff/picker.ts` and `extensions/session-handoff/query.ts`.
+- **Session auto-title**: `extensions/session-auto-title/install.ts`; core logic at `extensions/session-auto-title/`.
 - **Shared utilities**: no primary entrypoint; core logic at `extensions/shared/`.

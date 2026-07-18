@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { MessageRenderer } from "@earendil-works/pi-coding-agent";
 import { Box, type Component, Text } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
 import type { RenderTheme } from "../shared/rendering/theme.ts";
@@ -55,17 +55,15 @@ export function buildHandoffKickoffSource(source: HandoffKickoffSource): Handoff
   };
 }
 
-export function registerHandoffKickoffRenderer(pi: ExtensionAPI): void {
-  pi.registerMessageRenderer(HANDOFF_KICKOFF_CUSTOM_TYPE, (message, _options, theme) => {
-    const details = safeParseTypeBoxValue(HANDOFF_KICKOFF_DETAILS_SCHEMA, message.details);
-    if (!details) {
-      return undefined;
-    }
+export const renderHandoffKickoffMessage: MessageRenderer = (message, _options, theme) => {
+  const details = safeParseTypeBoxValue(HANDOFF_KICKOFF_DETAILS_SCHEMA, message.details);
+  if (!details) {
+    return undefined;
+  }
 
-    const prompt = typeof message.content === "string" ? message.content : "";
-    return createHandoffKickoffComponent(details, prompt, theme);
-  });
-}
+  const prompt = typeof message.content === "string" ? message.content : "";
+  return createHandoffKickoffComponent(details, prompt, theme);
+};
 
 export function createHandoffKickoffComponent(
   details: HandoffKickoffDetails,

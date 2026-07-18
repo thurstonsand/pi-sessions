@@ -25,6 +25,24 @@ export function createFakeModelRegistry(options: {
   };
 }
 
+export function createFakeModelRuntime(options: {
+  available: FakeRegistryModel[];
+  all?: FakeRegistryModel[];
+  completeSimple?: (...args: unknown[]) => Promise<unknown>;
+}) {
+  const all = options.all ?? options.available;
+
+  return {
+    getModels: () => all,
+    getAvailableSnapshot: () => options.available,
+    getModel: (provider: string, modelId: string) =>
+      all.find((model) => model.provider === provider && model.id === modelId),
+    hasConfiguredAuth: (provider: string) =>
+      options.available.some((model) => model.provider === provider),
+    completeSimple: options.completeSimple,
+  };
+}
+
 export interface TestFilesystem {
   createTempDir(): string;
   cleanup(): void;

@@ -382,10 +382,25 @@ async function getHandoffCommand(): Promise<{
   pi: ExtensionAPI;
   handler: (args: string, ctx: unknown) => Promise<void>;
 }> {
-  const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+  const { installHandoff } = await import("../extensions/session-handoff/install.ts");
   const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
   const pi = createPiApi(commands);
-  sessionHandoffExtension(pi as never);
+  const settings = mockLoadSettings() as { index: { path: string } };
+  installHandoff(pi as never, {
+    settings: settings as never,
+    index: { path: settings.index.path },
+    getModelRuntime: async (modelRegistry) =>
+      ({
+        getModels: () => modelRegistry.getAll(),
+        getAvailableSnapshot: () => modelRegistry.getAvailable(),
+        getModel: (provider: string, modelId: string) =>
+          modelRegistry
+            .getAll()
+            .find((model) => model.provider === provider && model.id === modelId),
+        hasConfiguredAuth: (provider: string) =>
+          modelRegistry.getAvailable().some((model) => model.provider === provider),
+      }) as never,
+  });
   const command = commands.get("handoff");
   if (!command) {
     throw new Error("handoff command was not registered");

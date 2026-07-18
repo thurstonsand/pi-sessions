@@ -3,66 +3,66 @@ import type {
   ExtensionAPI,
   ExtensionCommandContext,
   ExtensionUIContext,
+  ModelRuntime,
 } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { consumePendingHandoffBootstrap } from "./session-handoff/bootstrap.ts";
-import { getHandoffModelCompletions } from "./session-handoff/completions.ts";
+import type { IndexHandle, SessionLifecycle } from "../shared/composition.ts";
+import { formatAvailableModelList } from "../shared/model-resolution.ts";
+import type { ModelRuntimeProvider } from "../shared/model-runtime.ts";
+import { isTuiMode } from "../shared/pi-mode.ts";
+import type { SessionSettings } from "../shared/settings.ts";
+import { THINKING_LEVELS } from "../shared/thinking-levels.ts";
+import { safeParseTypeBoxValue } from "../shared/typebox.ts";
+import { consumePendingHandoffBootstrap } from "./bootstrap.ts";
+import { getHandoffModelCompletions } from "./completions.ts";
 import {
   generateHandoffDraftFromSessionManager,
   type HandoffDraftResult,
   resolveHandoffSource,
-} from "./session-handoff/extract.ts";
+} from "./extract.ts";
 import {
   buildHandoffKickoffMessage,
   buildHandoffKickoffSource,
+  HANDOFF_KICKOFF_CUSTOM_TYPE,
   type HandoffKickoffMessage,
   type HandoffKickoffSource,
-  registerHandoffKickoffRenderer,
-} from "./session-handoff/kickoff.ts";
-import type { ClipboardStatus } from "./session-handoff/launch/backend.ts";
-import { createDeferredLaunchBackend } from "./session-handoff/launch/deferred.ts";
+  renderHandoffKickoffMessage,
+} from "./kickoff.ts";
+import type { ClipboardStatus } from "./launch/backend.ts";
+import { createDeferredLaunchBackend } from "./launch/deferred.ts";
 import {
   createGhosttyLaunchBackend,
   getFocusedGhosttyTerminalId,
   isGhosttyHandoffAvailable,
   validateSplitHandoffPrerequisites,
-} from "./session-handoff/launch/ghostty.ts";
+} from "./launch/ghostty.ts";
 import {
   createHandoffBootstrap,
   createHandoffSessionMetadata,
   HANDOFF_METADATA_CUSTOM_TYPE,
-} from "./session-handoff/metadata.ts";
-import {
-  formatModelArgument,
-  type HandoffModelOverride,
-  resolveModelOverride,
-} from "./session-handoff/model.ts";
-import { openSessionReferencePicker } from "./session-handoff/picker.ts";
-import { SESSION_TOKEN_PREFIX } from "./session-handoff/query.ts";
+} from "./metadata.ts";
+import { formatModelArgument, type HandoffModelOverride, resolveModelOverride } from "./model.ts";
+import { openSessionReferencePicker } from "./picker.ts";
+import { SESSION_TOKEN_PREFIX } from "./query.ts";
 import {
   buildLaunchReceipt,
+  createHandoffLaunchReceiptRenderer,
   HANDOFF_LAUNCH_RECEIPT_CUSTOM_TYPE,
-  registerHandoffLaunchReceiptRenderer,
-} from "./session-handoff/receipt.ts";
-import { reviewHandoffDraft } from "./session-handoff/review.ts";
-import { prepareHandoffLaunch } from "./session-handoff/spawn.ts";
+} from "./receipt.ts";
+import { reviewHandoffDraft } from "./review.ts";
+import { prepareHandoffLaunch } from "./spawn.ts";
 import {
   DEFERRED_LAUNCH,
   executeSessionHandoffTool,
   type HandoffLaunchTarget,
   type HandoffToolParams,
   LAUNCH_DIRECTIONS,
-} from "./session-handoff/tool.ts";
-import { HANDOFF_TOOL_DETAILS_SCHEMA } from "./session-handoff/tool-contract.ts";
-import { HandoffToolComponent } from "./session-handoff/tool-renderer.ts";
-import { buildHandoffToolView } from "./session-handoff/tool-view-model.ts";
-import { formatHandoffError, runHandoffTaskWithLoader } from "./session-handoff/ui.ts";
-import { formatAvailableModelList } from "./shared/model-resolution.ts";
-import { isTuiMode } from "./shared/pi-mode.ts";
-import { loadSettings } from "./shared/settings.ts";
-import { THINKING_LEVELS } from "./shared/thinking-levels.ts";
-import { safeParseTypeBoxValue } from "./shared/typebox.ts";
+} from "./tool.ts";
+import { HANDOFF_TOOL_DETAILS_SCHEMA } from "./tool-contract.ts";
+import { HandoffToolComponent } from "./tool-renderer.ts";
+import { buildHandoffToolView } from "./tool-view-model.ts";
+import { formatHandoffError, runHandoffTaskWithLoader } from "./ui.ts";
 
 const HANDOFF_USAGE =
   "Usage: /handoff [--left|--right|--up|--down|--deferred] <goal for new thread>";
@@ -96,15 +96,24 @@ interface HandoffPromptContext {
   sendMessage(message: HandoffKickoffMessage, options: { triggerTurn: true }): Promise<void>;
 }
 
-export default function sessionHandoffExtension(pi: ExtensionAPI): void {
-  const settings = loadSettings();
+export function installHandoff(
+  pi: ExtensionAPI,
+  deps: {
+    settings: SessionSettings;
+    index: IndexHandle;
+    getModelRuntime: ModelRuntimeProvider;
+  },
+): SessionLifecycle {
+  const { settings } = deps;
+  const indexPath = deps.index.path;
   let identifiedGhosttyTerminalId: string | undefined;
   let modelSnapshot: Model<Api>[] = [];
   const clipboardStatusBySessionId = new Map<string, ClipboardStatus>();
 
-  registerHandoffKickoffRenderer(pi);
-  registerHandoffLaunchReceiptRenderer(pi, (sessionId) =>
-    clipboardStatusBySessionId.get(sessionId),
+  pi.registerMessageRenderer(HANDOFF_KICKOFF_CUSTOM_TYPE, renderHandoffKickoffMessage);
+  pi.registerEntryRenderer(
+    HANDOFF_LAUNCH_RECEIPT_CUSTOM_TYPE,
+    createHandoffLaunchReceiptRenderer((sessionId) => clipboardStatusBySessionId.get(sessionId)),
   );
 
   function registerHandoffTool(models: readonly Model<Api>[], ghosttyAvailable: boolean): void {
@@ -186,10 +195,12 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         return new Text("", 0, 0);
       },
       async execute(_toolCallId, params: HandoffToolParams, _signal, _onUpdate, ctx) {
+        const modelRuntime = await deps.getModelRuntime(ctx.modelRegistry);
         return executeSessionHandoffTool(
           pi,
           params,
           ctx,
+          modelRuntime,
           identifiedGhosttyTerminalId,
           settings.handoff.deferred.copyToClipboard,
           (sessionId, status) => clipboardStatusBySessionId.set(sessionId, status),
@@ -243,10 +254,18 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         return;
       }
 
+      let modelRuntime: ModelRuntime;
+      try {
+        modelRuntime = await deps.getModelRuntime(ctx.modelRegistry);
+      } catch (error) {
+        ctx.ui.notify(formatHandoffError(error), "error");
+        return;
+      }
+
       let resolvedOverride: HandoffModelOverride | undefined;
       if (parsedArgs.model) {
         try {
-          resolvedOverride = resolveModelOverride(ctx.modelRegistry, parsedArgs.model);
+          resolvedOverride = resolveModelOverride(modelRuntime, parsedArgs.model);
         } catch (error) {
           ctx.ui.notify(formatHandoffError(error), "error");
           return;
@@ -269,6 +288,7 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
           async (signal: AbortSignal) =>
             generateHandoffDraftFromSessionManager(
               ctx,
+              modelRuntime,
               ctx.sessionManager,
               sourceLeafId,
               parsedArgs.goal,
@@ -415,7 +435,7 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
 
       const result = await openSessionReferencePicker(
         ctx,
-        settings.index.path,
+        indexPath,
         settings.handoff.pickerShortcut,
       );
       if (result.kind !== "insert-session-token") {
@@ -424,13 +444,6 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
 
       ctx.ui.pasteToEditor(`${SESSION_TOKEN_PREFIX}${result.sessionId}`);
     },
-  });
-
-  pi.on("session_start", async (_event, ctx) => {
-    modelSnapshot = ctx.modelRegistry.getAvailable();
-    registerHandoffTool(modelSnapshot, isGhosttyHandoffAvailable());
-
-    await consumePendingHandoffBootstrap(pi, ctx, pi.getThinkingLevel());
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
@@ -445,6 +458,15 @@ export default function sessionHandoffExtension(pi: ExtensionAPI): void {
         "\n\nWhen the user references @session:<uuid>, treat it as a session token. If you call session_ask, pass only the UUID value, not the @session: prefix.",
     };
   });
+
+  return {
+    async onSessionStart(_event, ctx) {
+      modelSnapshot = ctx.modelRegistry.getAvailable();
+      registerHandoffTool(modelSnapshot, isGhosttyHandoffAvailable());
+
+      await consumePendingHandoffBootstrap(pi, ctx, deps.getModelRuntime, pi.getThinkingLevel());
+    },
+  };
 }
 
 async function applyHandoffModelOverride(

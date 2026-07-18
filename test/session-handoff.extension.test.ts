@@ -5,7 +5,7 @@ import {
   HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
   HANDOFF_STALE_SESSION_MESSAGE,
 } from "../extensions/session-handoff/metadata.ts";
-import { createFakeModelRegistry } from "./test-helpers.ts";
+import { createFakeModelRegistry, createFakeModelRuntime } from "./test-helpers.ts";
 
 const mockLoadSettings = vi.fn();
 const mockOpenSessionReferencePicker = vi.fn();
@@ -62,13 +62,13 @@ beforeEach(() => {
 
 describe("session handoff extension", () => {
   it("registers the picker shortcut and keeps the session token system prompt note", async () => {
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
     const registerCommand = vi.fn();
     const pi = createPiApi(handlers, shortcuts, registerCommand);
 
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
 
     expect(registerCommand).toHaveBeenCalledWith(
       "handoff",
@@ -89,11 +89,11 @@ describe("session handoff extension", () => {
       sessionId: "88171ce4-9021-4464-8cab-f49d04a82815",
     });
 
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
     const pi = createPiApi(new Map(), shortcuts, vi.fn());
 
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
 
     const pasteToEditor = vi.fn();
     await shortcuts.get("alt+o")?.handler({
@@ -119,11 +119,11 @@ describe("session handoff extension", () => {
       autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
     });
 
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
     const pi = createPiApi(new Map(), shortcuts, vi.fn());
 
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
 
     expect(shortcuts.has("alt+p")).toBe(true);
     expect(shortcuts.has("alt+o")).toBe(false);
@@ -132,11 +132,11 @@ describe("session handoff extension", () => {
   it("does nothing when the picker is cancelled", async () => {
     mockOpenSessionReferencePicker.mockResolvedValue({ kind: "cancel" });
 
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const shortcuts = new Map<string, { handler: (ctx: unknown) => Promise<void> }>();
     const pi = createPiApi(new Map(), shortcuts, vi.fn());
 
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
 
     const pasteToEditor = vi.fn();
     await shortcuts.get("alt+o")?.handler({
@@ -151,11 +151,11 @@ describe("session handoff extension", () => {
   });
 
   it("re-registers the tool with available models in the model description on session start", async () => {
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
 
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
 
     const ctx = createSessionStartContext({
       sessionId: "child-session-123",
@@ -176,11 +176,11 @@ describe("session handoff extension", () => {
   });
 
   it("registers only at session start, adding split directions when Ghostty is present", async () => {
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
 
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
     const registerTool = pi.registerTool as ReturnType<typeof vi.fn>;
     expect(registerTool).not.toHaveBeenCalled();
 
@@ -199,11 +199,11 @@ describe("session handoff extension", () => {
 
   it("offers only deferred at session start when Ghostty is unavailable", async () => {
     mockIsGhosttyHandoffAvailable.mockReturnValue(false);
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
 
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
     await handlers.get("session_start")?.(
       {},
       createSessionStartContext({ sessionId: "x" }) as never,
@@ -214,10 +214,10 @@ describe("session handoff extension", () => {
   });
 
   it("runs a deferred handoff, copies the resume command, and reports it", async () => {
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
 
     const result = await runTool(pi, handlers, {
       goal: "Do it",
@@ -243,10 +243,10 @@ describe("session handoff extension", () => {
 
   it("degrades a split launch to deferred when Ghostty is unavailable", async () => {
     mockIsGhosttyHandoffAvailable.mockReturnValue(false);
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
 
     const result = await runTool(pi, handlers, {
       goal: "Do it",
@@ -260,10 +260,10 @@ describe("session handoff extension", () => {
   });
 
   it("rejects an unknown model override with the available list", async () => {
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
 
     await expect(
       runTool(
@@ -276,11 +276,11 @@ describe("session handoff extension", () => {
   });
 
   it("materializes handoff metadata and sends the initial prompt on matching child session start", async () => {
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
 
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
 
     const ctx = createSessionStartContext({
       sessionId: "child-session-123",
@@ -314,11 +314,11 @@ describe("session handoff extension", () => {
   });
 
   it("refuses bootstrap when the target session already has user input", async () => {
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
 
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
 
     const ctx = createSessionStartContext({
       sessionId: "child-session-123",
@@ -348,11 +348,11 @@ describe("session handoff extension", () => {
   });
 
   it("still sends the prompt when metadata already exists but there is no user input", async () => {
-    const { default: sessionHandoffExtension } = await import("../extensions/session-handoff.ts");
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
 
-    sessionHandoffExtension(pi as never);
+    installHandoffAndWire(installHandoff, pi);
 
     const ctx = createSessionStartContext({
       sessionId: "child-session-123",
@@ -382,6 +382,25 @@ describe("session handoff extension", () => {
     );
   });
 });
+
+function installHandoffAndWire(
+  installHandoff: typeof import("../extensions/session-handoff/install.ts").installHandoff,
+  pi: ReturnType<typeof createPiApi>,
+): void {
+  const settings = mockLoadSettings() as { index: { path: string } };
+  const lifecycle = installHandoff(pi as never, {
+    settings: settings as never,
+    index: { path: settings.index.path },
+    getModelRuntime: async (modelRegistry) =>
+      createFakeModelRuntime({
+        all: modelRegistry.getAll(),
+        available: modelRegistry.getAvailable(),
+      }) as never,
+  });
+  if (lifecycle.onSessionStart) {
+    pi.on("session_start", lifecycle.onSessionStart as never);
+  }
+}
 
 function createPiApi(
   handlers: Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>,

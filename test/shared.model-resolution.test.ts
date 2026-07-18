@@ -1,14 +1,14 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { resolveAuthenticatedModel } from "../extensions/shared/model-resolution.ts";
-import { createFakeModelRegistry } from "./test-helpers.ts";
+import { createFakeModelRuntime } from "./test-helpers.ts";
 
 const SLASH_ID = model("openrouter", "moonshotai/kimi-k2.6");
 const AVAILABLE = [model("openai", "gpt-5.4"), model("anthropic", "claude-sonnet-4-5"), SLASH_ID];
 
 function resolve(pattern: string, options?: { all?: Model<Api>[]; thinkingLevel?: "high" }) {
   return resolveAuthenticatedModel({
-    modelRegistry: createFakeModelRegistry({
+    modelRuntime: createFakeModelRuntime({
       available: AVAILABLE,
       ...(options?.all ? { all: options.all } : {}),
     }) as never,

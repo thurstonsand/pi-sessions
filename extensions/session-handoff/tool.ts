@@ -2,7 +2,7 @@ import { existsSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { resolveHandoffSource } from "./extract.ts";
 import type { ClipboardStatus } from "./launch/backend.ts";
 import { createDeferredLaunchBackend } from "./launch/deferred.ts";
@@ -39,6 +39,7 @@ export async function executeSessionHandoffTool(
   pi: ExtensionAPI,
   params: HandoffToolParams,
   ctx: ExtensionContext,
+  modelRuntime: ModelRuntime,
   terminalId: string | undefined,
   copyToClipboardSetting: boolean,
   recordClipboardStatus: (sessionId: string, status: ClipboardStatus) => void,
@@ -89,7 +90,7 @@ export async function executeSessionHandoffTool(
 
   const requestResponse = params.requestResponse ?? false;
   const override = params.model
-    ? resolveModelOverride(ctx.modelRegistry, params.model, params.thinkingLevel)
+    ? resolveModelOverride(modelRuntime, params.model, params.thinkingLevel)
     : undefined;
   const model = formatModelArgument(
     override?.model ?? ctx.model,

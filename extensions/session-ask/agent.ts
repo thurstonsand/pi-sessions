@@ -1,5 +1,5 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -9,6 +9,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { resolveAuthenticatedModel } from "../shared/model-resolution.ts";
+import { freshenModel } from "../shared/model-runtime.ts";
 import {
   type SessionLineageRow,
   searchSessionChunks,
@@ -122,6 +123,7 @@ export interface SessionAskAgentResult {
 
 export async function runSessionAskAgent(params: {
   ctx: ExtensionContext;
+  modelRuntime: ModelRuntime;
   target: SessionLineageRow;
   question: string;
   indexPath: string;
@@ -133,11 +135,14 @@ export async function runSessionAskAgent(params: {
   const navigationData = loadSessionNavigationData(params.target.sessionPath);
   const configured = params.askSettings?.model
     ? resolveAuthenticatedModel({
-        modelRegistry: params.ctx.modelRegistry,
+        modelRuntime: params.modelRuntime,
         modelPattern: params.askSettings.model,
       })
     : undefined;
-  const model = (configured?.ok ? configured.model : undefined) ?? params.ctx.model;
+  const currentModel = params.ctx.model
+    ? freshenModel(params.modelRuntime, params.ctx.model)
+    : undefined;
+  const model = (configured?.ok ? configured.model : undefined) ?? currentModel;
   if (!model) {
     throw new Error("No active model is available for session_ask.");
   }
@@ -282,7 +287,7 @@ export async function runSessionAskAgent(params: {
   const { session } = await createAgentSession({
     cwd,
     model,
-    modelRegistry: params.ctx.modelRegistry,
+    modelRuntime: params.modelRuntime,
     ...(thinkingLevel ? { thinkingLevel } : {}),
     tools: SESSION_ASK_AGENT_TOOLS,
     customTools: [searchSessionTool, sessionReadTool, provideResultsTool],

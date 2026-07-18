@@ -24,13 +24,7 @@
   ],
   "pi": {
     "extensions": [
-      "./extensions/session-ask.ts",
-      "./extensions/session-auto-title.ts",
-      "./extensions/session-handoff.ts",
-      "./extensions/session-hooks.ts",
-      "./extensions/session-index.ts",
-      "./extensions/session-messaging.ts",
-      "./extensions/session-search.ts"
+      "./extensions/pi-sessions.ts"
     ]
   },
   "scripts": {
@@ -46,10 +40,10 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.14",
-    "@earendil-works/pi-agent-core": "^0.80.6",
-    "@earendil-works/pi-ai": "^0.80.6",
-    "@earendil-works/pi-coding-agent": "^0.80.6",
-    "@earendil-works/pi-tui": "^0.80.6",
+    "@earendil-works/pi-agent-core": "^0.80.10",
+    "@earendil-works/pi-ai": "^0.80.10",
+    "@earendil-works/pi-coding-agent": "^0.80.10",
+    "@earendil-works/pi-tui": "^0.80.10",
     "@types/node": "^25.6.2",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.3",
@@ -57,10 +51,10 @@
     "vitest": "^4.1.5"
   },
   "peerDependencies": {
-    "@earendil-works/pi-agent-core": ">=0.80.6",
-    "@earendil-works/pi-ai": ">=0.80.6",
-    "@earendil-works/pi-coding-agent": ">=0.80.6",
-    "@earendil-works/pi-tui": ">=0.80.6"
+    "@earendil-works/pi-agent-core": ">=0.80.10",
+    "@earendil-works/pi-ai": ">=0.80.10",
+    "@earendil-works/pi-coding-agent": ">=0.80.10",
+    "@earendil-works/pi-tui": ">=0.80.10"
   },
   "lint-staged": {
     "*.{js,cjs,mjs,jsx,ts,tsx,json,jsonc}": "biome check --write --no-errors-on-unmatched"

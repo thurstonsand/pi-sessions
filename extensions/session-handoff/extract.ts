@@ -7,7 +7,11 @@ import type {
   ThinkingContent,
   ToolCall,
 } from "@earendil-works/pi-ai";
-import type { ExtensionContext, SessionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionContext,
+  ModelRuntime,
+  SessionContext,
+} from "@earendil-works/pi-coding-agent";
 import {
   buildSessionContext,
   convertToLlm,
@@ -19,6 +23,7 @@ import {
   serializeConversation,
 } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
+import { freshenModel } from "../shared/model-runtime.ts";
 import { parseTypeBoxValue } from "../shared/typebox.ts";
 
 const MAX_RELEVANT_FILES = 12;
@@ -95,6 +100,7 @@ export function resolveHandoffSource(
 
 export async function generateHandoffDraftFromSessionManager(
   ctx: ExtensionContext,
+  modelRuntime: ModelRuntime,
   sourceSessionManager: ExtensionContext["sessionManager"],
   sourceLeafId: string,
   goal: string,
@@ -106,12 +112,13 @@ export async function generateHandoffDraftFromSessionManager(
     throw new Error("No model is available for handoff.");
   }
 
-  const model = ctx.model;
+  const model = freshenModel(modelRuntime, ctx.model);
   const sessionContext = resolveHandoffSource(sourceSessionManager, sourceLeafId);
 
   const conversationText = serializeConversation(convertToLlm(sessionContext.messages));
   const handoffContext = await runHandoffExtractionAgent(
     ctx,
+    modelRuntime,
     model,
     conversationText,
     goal,
@@ -139,6 +146,7 @@ export function buildExtractionPrompt(conversationText: string, goal: string): s
 
 async function runHandoffExtractionAgent(
   ctx: ExtensionContext,
+  modelRuntime: ModelRuntime,
   model: Model<Api>,
   conversationText: string,
   goal: string,
@@ -176,7 +184,7 @@ async function runHandoffExtractionAgent(
   const { session } = await createAgentSession({
     cwd: ctx.cwd,
     model,
-    modelRegistry: ctx.modelRegistry,
+    modelRuntime,
     ...(thinkingLevel ? { thinkingLevel } : {}),
     tools: ["read", "grep", "find", "ls", "create_handoff_context"],
     customTools: [createHandoffContextTool],

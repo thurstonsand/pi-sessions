@@ -5,15 +5,16 @@ import {
   type Theme,
 } from "@earendil-works/pi-coding-agent";
 import { type Focusable, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
-import { type ReindexResult, rebuildSessionIndex } from "./session-search/reindex.ts";
-import { isTuiMode } from "./shared/pi-mode.ts";
-import { getIndexStatus, type SessionIndexStatus } from "./shared/session-index/index.ts";
-import { loadSettings } from "./shared/settings.ts";
+import { type ReindexResult, rebuildSessionIndex } from "../session-search/reindex.ts";
+import type { IndexHandle } from "../shared/composition.ts";
+import { isTuiMode } from "../shared/pi-mode.ts";
+import { getIndexStatus, type SessionIndexStatus } from "../shared/session-index/index.ts";
+import type { SessionSettings } from "../shared/settings.ts";
 
 type SessionIndexAction = "reindex" | undefined;
 
-export default function sessionIndexExtension(pi: ExtensionAPI): void {
-  const settings = loadSettings();
+export function installIndex(pi: ExtensionAPI, deps: { settings: SessionSettings }): IndexHandle {
+  const indexPath = deps.settings.index.path;
 
   pi.registerCommand("session-index", {
     description: "Open the session index control panel",
@@ -23,7 +24,6 @@ export default function sessionIndexExtension(pi: ExtensionAPI): void {
         return;
       }
 
-      const indexPath = settings.index.path;
       const status = getIndexStatus(indexPath);
       const action = await ctx.ui.custom<SessionIndexAction>(
         (_tui, theme, _keybindings, done) => new SessionIndexPanel(theme, status, done),
@@ -62,6 +62,8 @@ export default function sessionIndexExtension(pi: ExtensionAPI): void {
       );
     },
   });
+
+  return { path: indexPath };
 }
 
 class SessionIndexPanel implements Focusable {

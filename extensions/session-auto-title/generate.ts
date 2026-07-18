@@ -3,8 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model, TextContent, UserMessage } from "@earendil-works/pi-ai";
-import { completeSimple } from "@earendil-works/pi-ai/compat";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AutoTitleContext } from "./context.ts";
 import type { AutoTitleTrigger } from "./state.ts";
 
@@ -35,7 +34,7 @@ export type AutoTitleGenerationResult =
     };
 
 export async function generateAutoTitle(
-  ctx: ExtensionContext,
+  modelRuntime: ModelRuntime,
   model: Model<Api>,
   context: AutoTitleContext,
   trigger: AutoTitleTrigger,
@@ -49,14 +48,6 @@ export async function generateAutoTitle(
         model,
         "No conversation available for auto-title generation.",
       ),
-    };
-  }
-
-  const auth = await ctx.modelRegistry.getApiKeyAndHeaders(model);
-  if (!auth.ok) {
-    return {
-      ok: false,
-      failure: createAutoTitleFailure(trigger, model, "Failed to authenticate auto-title model."),
     };
   }
 
@@ -82,9 +73,7 @@ export async function generateAutoTitle(
       messages: [message],
     };
     writeAutoTitleDebugRequest(model, trigger, requestContext);
-    const response = await completeSimple(model, requestContext, {
-      ...(auth.apiKey && { apiKey: auth.apiKey }),
-      ...(auth.headers && { headers: auth.headers }),
+    const response = await modelRuntime.completeSimple(model, requestContext, {
       maxTokens: AUTO_TITLE_MAX_TOKENS,
       ...(thinkingLevel && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
       signal: abortController.signal,

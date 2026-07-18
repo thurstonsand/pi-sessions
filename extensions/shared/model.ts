@@ -6,7 +6,7 @@ export interface ExactModelReference {
 }
 
 export function findModelByReference(
-  availableModels: Model<Api>[],
+  availableModels: readonly Model<Api>[],
   reference: ExactModelReference,
 ): Model<Api> | undefined {
   return availableModels.find(

@@ -1,6 +1,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import type { ModelRuntimeProvider } from "../shared/model-runtime.ts";
 import { generateHandoffDraftFromSessionManager } from "./extract.ts";
 import { buildHandoffKickoffMessage, buildHandoffKickoffSource } from "./kickoff.ts";
 import {
@@ -21,6 +22,7 @@ import { formatHandoffError, runHandoffTaskWithLoader } from "./ui.ts";
 export async function consumePendingHandoffBootstrap(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
+  getModelRuntime: ModelRuntimeProvider,
   thinkingLevel: ThinkingLevel | undefined,
 ): Promise<void> {
   const scan = findPendingHandoffBootstrap(ctx.sessionManager.getBranch());
@@ -53,6 +55,7 @@ export async function consumePendingHandoffBootstrap(
       bootstrap,
       scan.entryId,
       consumeBootstrap,
+      getModelRuntime,
       thinkingLevel,
     );
     return;
@@ -101,6 +104,7 @@ async function startChildGeneratedHandoff(
   bootstrap: ChildGeneratedHandoffBootstrap,
   bootstrapEntryId: string,
   consumeBootstrap: (reason: HandoffBootstrapConsumedReason) => void,
+  getModelRuntime: ModelRuntimeProvider,
   thinkingLevel: ThinkingLevel | undefined,
 ): Promise<void> {
   const entries = ctx.sessionManager.getEntries();
@@ -120,12 +124,14 @@ async function startChildGeneratedHandoff(
   // review again; explicit user decisions consume it.
   try {
     const sourceSessionManager = SessionManager.open(bootstrap.parentSessionFile);
+    const modelRuntime = await getModelRuntime(ctx.modelRegistry);
     const generatedDraft = await runHandoffTaskWithLoader(
       ctx,
       "Generating handoff draft...",
       async (signal: AbortSignal) =>
         generateHandoffDraftFromSessionManager(
           ctx,
+          modelRuntime,
           sourceSessionManager,
           bootstrap.sourceLeafId,
           bootstrap.goal,

@@ -1,27 +1,37 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { runSessionAskAgent } from "./session-ask/agent.ts";
-import { renderSessionAskResult } from "./session-ask/renderer.ts";
-import type {
-  SessionAskProgressDetails,
-  SessionAskRelevantFile,
-  SessionAskResultDetails,
-} from "./session-ask/tool-contract.ts";
+import type { IndexHandle } from "../shared/composition.ts";
+import type { ModelRuntimeProvider } from "../shared/model-runtime.ts";
 import {
   getSessionById,
   type SessionLineageRow,
   withSessionIndex,
-} from "./shared/session-index/index.ts";
-import { isExactSessionId } from "./shared/session-ui.ts";
-import { loadSettings } from "./shared/settings.ts";
+} from "../shared/session-index/index.ts";
+import { isExactSessionId } from "../shared/session-ui.ts";
+import type { SessionSettings } from "../shared/settings.ts";
+import { runSessionAskAgent } from "./agent.ts";
+import { renderSessionAskResult } from "./renderer.ts";
+import type {
+  SessionAskProgressDetails,
+  SessionAskRelevantFile,
+  SessionAskResultDetails,
+} from "./tool-contract.ts";
 
 interface SessionAskToolParams {
   session: string;
   question: string;
 }
 
-export default function sessionAskExtension(pi: ExtensionAPI): void {
-  const settings = loadSettings();
+export function installAsk(
+  pi: ExtensionAPI,
+  deps: {
+    settings: SessionSettings;
+    index: IndexHandle;
+    getModelRuntime: ModelRuntimeProvider;
+  },
+): void {
+  const { settings } = deps;
+  const indexPath = deps.index.path;
 
   pi.registerTool({
     name: "session_ask",
@@ -48,7 +58,7 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         throw new Error("session_ask requires a question.");
       }
 
-      const resolvedTarget = resolveSessionAskTarget(sessionId, settings.index.path);
+      const resolvedTarget = resolveSessionAskTarget(sessionId, indexPath);
       if (!resolvedTarget.resolved) {
         throw new Error(resolvedTarget.error ?? "Unable to resolve session id.");
       }
@@ -78,11 +88,13 @@ export default function sessionAskExtension(pi: ExtensionAPI): void {
         details: progressDetails,
       });
 
+      const modelRuntime = await deps.getModelRuntime(ctx.modelRegistry);
       const agentResult = await runSessionAskAgent({
         ctx,
+        modelRuntime,
         target: resolvedTarget.resolved,
         question,
-        indexPath: settings.index.path,
+        indexPath,
         askSettings: settings.ask,
         thinkingLevel: pi.getThinkingLevel(),
         signal,

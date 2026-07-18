@@ -5,8 +5,6 @@ import { RECEIVED_MESSAGE_ENTRY_SCHEMA, type ReceivedMessageEntry } from "./mess
 export const MESSAGE_RECEIVED_CUSTOM_TYPE = "pi-sessions.message_received";
 export const SESSION_MESSAGE_CUSTOM_TYPE = "pi-sessions.session_message";
 
-type DeliveryResult = { delivered: true } | { delivered: false; error: string };
-
 interface IncomingMessageActions {
   appendEntry(customType: string, data: unknown): void;
   sendMessage(
@@ -39,19 +37,14 @@ export class IncomingSessionMessageRuntime {
     this.context = undefined;
   }
 
-  deliver(received: ReceivedMessageEntry): DeliveryResult {
-    const ctx = this.context;
-    if (!ctx) {
-      return { delivered: false, error: "Target session is not ready." };
-    }
+  deliver(received: ReceivedMessageEntry): void {
+    const ctx = this.requireContext();
+    this.actions.appendEntry(MESSAGE_RECEIVED_CUSTOM_TYPE, received);
+    this.inject(ctx, received);
+  }
 
-    try {
-      this.actions.appendEntry(MESSAGE_RECEIVED_CUSTOM_TYPE, received);
-      this.inject(ctx, received);
-      return { delivered: true };
-    } catch (error) {
-      return { delivered: false, error: formatError(error) };
-    }
+  cancel(): void {
+    this.requireContext().abort();
   }
 
   replayPending(ctx: ExtensionContext): void {
@@ -85,6 +78,13 @@ export class IncomingSessionMessageRuntime {
     }
   }
 
+  private requireContext(): ExtensionContext {
+    if (!this.context) {
+      throw new Error("Target session is not ready.");
+    }
+    return this.context;
+  }
+
   private inject(ctx: ExtensionContext, received: ReceivedMessageEntry): void {
     const deliveryOptions = ctx.isIdle()
       ? { triggerTurn: true as const }
@@ -108,8 +108,4 @@ function formatIncomingMessageForModel(received: ReceivedMessageEntry): string {
   const relationPart = received.relation ? `, relation: ${received.relation}` : "";
   const responseLine = received.requestResponse ? "\n\nResponse requested." : "";
   return `Incoming message from session${titlePart} (session: ${received.source.sessionId}${relationPart}):\n\n${received.body}${responseLine}`;
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error && error.message.trim() ? error.message : String(error);
 }

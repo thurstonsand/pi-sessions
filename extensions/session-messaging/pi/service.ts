@@ -1,11 +1,16 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
-  INCOMING_SESSION_MESSAGE_EVENT,
-  type SessionMessageSendResult,
+  INCOMING_SESSION_ENVELOPE_EVENT,
+  type SessionEnvelopeSendResult,
   SessionMessagingClient,
 } from "../../shared/session-broker/client.ts";
-import type { SessionMessagePayload } from "../../shared/session-broker/protocol.ts";
+import type {
+  OutboundSessionEnvelope,
+  SessionCancelEnvelope,
+  SessionEnvelope,
+  SessionMessageEnvelope,
+} from "../../shared/session-broker/protocol.ts";
 import type {
   SessionLineageRelation,
   SessionLineageRow,
@@ -16,10 +21,10 @@ import {
   withSessionIndex,
 } from "../../shared/session-index/index.ts";
 import { spawnSessionMessagingBrokerIfNeeded } from "../broker/spawn.ts";
-import type { IncomingSessionMessageRuntime } from "./incoming-runtime.ts";
 import type { ReceivedMessageEndpoint, ReceivedMessageEntry } from "./message-contracts.ts";
 
 const RECONNECT_DELAYS_MS = [250, 500, 1_000, 2_000, 5_000, 10_000, 30_000] as const;
+const SESSION_WAIT_POLL_MS = 100;
 
 export interface SendMessageRequest {
   target: string;
@@ -41,6 +46,22 @@ export type SendMessageResult =
       relation?: SessionLineageRelation | undefined;
     };
 
+export type CancelSessionResult =
+  | {
+      cancelId: string;
+      delivered: false;
+      error?: string | undefined;
+    }
+  | {
+      cancelId: string;
+      delivered: true;
+      target: ReceivedMessageEndpoint;
+      relation?: SessionLineageRelation | undefined;
+    };
+
+export type IncomingMessageHandler = (envelope: SessionMessageEnvelope) => Promise<void> | void;
+export type IncomingCancelHandler = (envelope: SessionCancelEnvelope) => Promise<void> | void;
+
 interface IncomingMessageIndexContext {
   source: ReceivedMessageEndpoint;
   target: ReceivedMessageEndpoint;
@@ -49,15 +70,13 @@ interface IncomingMessageIndexContext {
 
 export class SessionMessagingService {
   private readonly indexPath: string;
-  private readonly incomingRuntime: IncomingSessionMessageRuntime;
   private relationBySessionId = new Map<string, SessionLineageRelation | undefined>();
-  private readonly connection = new BrokerConnection((requestId, message) =>
-    this.handleIncoming(requestId, message),
-  );
+  private incomingMessageHandler: IncomingMessageHandler | undefined;
+  private incomingCancelHandler: IncomingCancelHandler | undefined;
+  private readonly connection = new BrokerConnection((envelope) => this.acceptIncoming(envelope));
 
-  constructor(indexPath: string, incomingRuntime: IncomingSessionMessageRuntime) {
+  constructor(indexPath: string) {
     this.indexPath = indexPath;
-    this.incomingRuntime = incomingRuntime;
   }
 
   async start(ctx: ExtensionContext): Promise<void> {
@@ -71,42 +90,123 @@ export class SessionMessagingService {
     this.connection.stop();
   }
 
-  async listSessionIds(): Promise<string[]> {
+  onIncomingMessage(handler: IncomingMessageHandler): void {
+    if (this.incomingMessageHandler) {
+      throw new Error("An incoming message handler is already registered.");
+    }
+    this.incomingMessageHandler = handler;
+  }
+
+  onIncomingCancel(handler: IncomingCancelHandler): void {
+    if (this.incomingCancelHandler) {
+      throw new Error("An incoming cancel handler is already registered.");
+    }
+    this.incomingCancelHandler = handler;
+  }
+
+  async listSessions(): Promise<string[]> {
     return this.connection.listSessionIds();
+  }
+
+  async waitForSession(sessionId: string, timeoutMs: number): Promise<boolean> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 0) {
+      throw new Error("Session wait timeout must be a non-negative finite number.");
+    }
+
+    const deadline = Date.now() + timeoutMs;
+    while (true) {
+      if ((await this.listSessions()).includes(sessionId)) {
+        return true;
+      }
+
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) {
+        return false;
+      }
+      await delay(Math.min(SESSION_WAIT_POLL_MS, remainingMs));
+    }
   }
 
   async sendMessage(request: SendMessageRequest): Promise<SendMessageResult> {
     const relation = this.getCachedRelationTo(request.target, true);
-    const sentAt = new Date().toISOString();
     const messageId = randomUUID();
-    const result = await this.connection.sendMessage({
-      messageId,
+    const result = await this.connection.sendEnvelope({
       target: request.target,
-      body: request.body,
-      sentAt,
-      requestResponse: request.requestResponse,
-      sourceToolCallId: request.sourceToolCallId,
+      envelope: {
+        kind: "message",
+        messageId,
+        body: request.body,
+        ...(request.requestResponse === undefined
+          ? {}
+          : { requestResponse: request.requestResponse }),
+        ...(request.sourceToolCallId === undefined
+          ? {}
+          : { sourceToolCallId: request.sourceToolCallId }),
+        sentAt: new Date().toISOString(),
+      },
     });
 
     if (!result.delivered) {
       return {
-        messageId: result.messageId,
+        messageId,
         delivered: false,
         ...(result.error === undefined ? {} : { error: result.error }),
       };
     }
 
     return {
-      ...result,
+      messageId,
+      delivered: true,
       target: this.getTargetEndpoint(request.target),
       ...(relation === undefined ? {} : { relation }),
     };
   }
 
-  private handleIncoming(requestId: string, message: SessionMessagePayload): void {
-    const received = this.buildReceivedMessageEntry(message);
-    const result = this.incomingRuntime.deliver(received);
-    this.connection.acknowledgeIncoming(requestId, message.messageId, result);
+  async cancelSession(sessionId: string): Promise<CancelSessionResult> {
+    const relation = this.getCachedRelationTo(sessionId, true);
+    const cancelId = randomUUID();
+    const result = await this.connection.sendEnvelope({
+      target: sessionId,
+      envelope: {
+        kind: "cancel",
+        cancelId,
+        sentAt: new Date().toISOString(),
+      },
+    });
+
+    if (!result.delivered) {
+      return {
+        cancelId,
+        delivered: false,
+        ...(result.error === undefined ? {} : { error: result.error }),
+      };
+    }
+
+    return {
+      cancelId,
+      delivered: true,
+      target: this.getTargetEndpoint(sessionId),
+      ...(relation === undefined ? {} : { relation }),
+    };
+  }
+
+  buildReceivedMessage(message: SessionMessageEnvelope): ReceivedMessageEntry {
+    const context = this.getIncomingMessageIndexContext(message.source, message.target);
+    return {
+      messageId: message.messageId,
+      source: context.source,
+      target: context.target,
+      body: message.body,
+      sentAt: message.sentAt,
+      receivedAt: new Date().toISOString(),
+      ...(message.requestResponse === undefined
+        ? {}
+        : { requestResponse: message.requestResponse }),
+      ...(message.sourceToolCallId === undefined
+        ? {}
+        : { sourceToolCallId: message.sourceToolCallId }),
+      ...(context.relation === undefined ? {} : { relation: context.relation }),
+    };
   }
 
   getCachedRelationTo(
@@ -138,23 +238,31 @@ export class SessionMessagingService {
     return this.relationBySessionId.get(sessionId);
   }
 
-  private buildReceivedMessageEntry(message: SessionMessagePayload): ReceivedMessageEntry {
-    const context = this.getIncomingMessageIndexContext(message.source, message.target);
-    return {
-      messageId: message.messageId,
-      source: context.source,
-      target: context.target,
-      body: message.body,
-      sentAt: message.sentAt,
-      receivedAt: new Date().toISOString(),
-      ...(message.requestResponse === undefined
-        ? {}
-        : { requestResponse: message.requestResponse }),
-      ...(message.sourceToolCallId === undefined
-        ? {}
-        : { sourceToolCallId: message.sourceToolCallId }),
-      ...(context.relation === undefined ? {} : { relation: context.relation }),
-    };
+  private async acceptIncoming(envelope: SessionEnvelope): Promise<IncomingAcceptance> {
+    try {
+      switch (envelope.kind) {
+        case "message": {
+          if (!this.incomingMessageHandler) {
+            throw new Error("Target session has no incoming message handler.");
+          }
+          await this.incomingMessageHandler(envelope);
+          break;
+        }
+        case "cancel": {
+          if (!this.incomingCancelHandler) {
+            throw new Error("Target session has no incoming cancel handler.");
+          }
+          await this.incomingCancelHandler(envelope);
+          break;
+        }
+      }
+      return { delivered: true };
+    } catch (error) {
+      return {
+        delivered: false,
+        error: formatError(error),
+      };
+    }
   }
 
   private getTargetEndpoint(targetSessionId: string): ReceivedMessageEndpoint {
@@ -218,6 +326,8 @@ export class SessionMessagingService {
   }
 }
 
+type IncomingAcceptance = { delivered: true } | { delivered: false; error: string };
+
 class BrokerConnection {
   private client: SessionMessagingClient | undefined;
   private sessionId: string | undefined;
@@ -227,7 +337,7 @@ class BrokerConnection {
   private connectPromise: Promise<void> | undefined;
 
   constructor(
-    private readonly onIncoming: (requestId: string, message: SessionMessagePayload) => void,
+    private readonly onIncoming: (envelope: SessionEnvelope) => Promise<IncomingAcceptance>,
   ) {}
 
   get currentSessionId(): string | undefined {
@@ -254,25 +364,26 @@ class BrokerConnection {
     return this.requireClient().listSessionIds();
   }
 
-  async sendMessage(options: {
-    messageId: string;
+  async sendEnvelope(options: {
     target: string;
-    body: string;
-    sentAt: string;
-    requestResponse?: boolean | undefined;
-    sourceToolCallId?: string | undefined;
-  }): Promise<SessionMessageSendResult> {
+    envelope: OutboundSessionEnvelope;
+  }): Promise<SessionEnvelopeSendResult> {
     await this.ensureConnectedNow();
-    return this.requireClient().sendMessage(options);
+    return this.requireClient().sendEnvelope(options);
   }
 
-  acknowledgeIncoming(
+  private async acceptIncoming(
+    client: SessionMessagingClient,
     requestId: string,
-    messageId: string,
-    result: { delivered: true } | { delivered: false; error: string },
-  ): void {
+    envelope: SessionEnvelope,
+  ): Promise<void> {
+    const result = await this.onIncoming(envelope);
+    if (this.client !== client || !client.isConnected) {
+      return;
+    }
+
     try {
-      this.requireClient().acknowledgeIncoming(requestId, messageId, result);
+      client.acknowledgeIncoming(requestId, result);
     } catch {}
   }
 
@@ -310,7 +421,9 @@ class BrokerConnection {
 
     await spawnSessionMessagingBrokerIfNeeded();
     const client = new SessionMessagingClient();
-    client.on(INCOMING_SESSION_MESSAGE_EVENT, this.onIncoming);
+    client.on(INCOMING_SESSION_ENVELOPE_EVENT, (requestId: string, envelope: SessionEnvelope) => {
+      void this.acceptIncoming(client, requestId, envelope);
+    });
     client.on("disconnect", () => {
       if (this.client === client) {
         this.client = undefined;
@@ -328,7 +441,7 @@ class BrokerConnection {
       return;
     }
 
-    const delay = RECONNECT_DELAYS_MS[this.reconnectDelayIndex] ?? 30_000;
+    const delayMs = RECONNECT_DELAYS_MS[this.reconnectDelayIndex] ?? 30_000;
     this.reconnectDelayIndex = Math.min(
       this.reconnectDelayIndex + 1,
       RECONNECT_DELAYS_MS.length - 1,
@@ -336,7 +449,7 @@ class BrokerConnection {
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
       this.ensureConnectedNow().catch(() => {});
-    }, delay);
+    }, delayMs);
   }
 
   private clearReconnectTimer(): void {
@@ -378,4 +491,12 @@ function getRelationMapForSession(
       ({ db }) => new Map(getLineageRelationMap(db, sessionId)),
     ) ?? new Map()
   );
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error && error.message.trim() ? error.message : String(error);
 }

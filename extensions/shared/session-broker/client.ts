@@ -2,10 +2,14 @@ import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import net from "node:net";
 import { readFrames, writeFrame } from "./framing.ts";
-import { BROKER_FRAME_SCHEMA, type SessionMessagingBrokerFrame } from "./protocol.ts";
+import {
+  BROKER_FRAME_SCHEMA,
+  type OutboundSessionEnvelope,
+  type SessionMessagingBrokerFrame,
+} from "./protocol.ts";
 import { getSessionMessagingSocketPath } from "./socket-path.ts";
 
-export const INCOMING_SESSION_MESSAGE_EVENT = "session_messaging.incoming_message";
+export const INCOMING_SESSION_ENVELOPE_EVENT = "session_messaging.incoming";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const SOCKET_PATH = getSessionMessagingSocketPath();
@@ -17,24 +21,19 @@ interface PendingListRequest {
 }
 
 interface PendingSendRequest {
-  resolve(result: SessionMessageSendResult): void;
+  resolve(result: SessionEnvelopeSendResult): void;
   reject(error: Error): void;
   timeout: NodeJS.Timeout;
 }
 
-export interface SessionMessageSendResult {
-  messageId: string;
+export interface SessionEnvelopeSendResult {
   delivered: boolean;
   error?: string | undefined;
 }
 
-export interface SendSessionMessageOptions {
-  messageId: string;
+export interface SendSessionEnvelopeOptions {
   target: string;
-  body: string;
-  sentAt: string;
-  requestResponse?: boolean | undefined;
-  sourceToolCallId?: string | undefined;
+  envelope: OutboundSessionEnvelope;
 }
 
 export class SessionMessagingClient extends EventEmitter {
@@ -139,39 +138,33 @@ export class SessionMessagingClient extends EventEmitter {
     });
   }
 
-  sendMessage(options: SendSessionMessageOptions): Promise<SessionMessageSendResult> {
+  sendEnvelope(options: SendSessionEnvelopeOptions): Promise<SessionEnvelopeSendResult> {
     const socket = this.requireSocket();
     const requestId = randomUUID();
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingSends.delete(requestId);
-        reject(new Error("Session message send timed out."));
+        reject(new Error("Session envelope send timed out."));
       }, REQUEST_TIMEOUT_MS + 1_000);
       this.pendingSends.set(requestId, { resolve, reject, timeout });
       writeFrame(socket, {
         type: "send",
         requestId,
-        messageId: options.messageId,
         target: options.target,
-        body: options.body,
-        requestResponse: options.requestResponse,
-        sourceToolCallId: options.sourceToolCallId,
-        sentAt: options.sentAt,
+        envelope: options.envelope,
       });
     });
   }
 
   acknowledgeIncoming(
     requestId: string,
-    messageId: string,
     result: { delivered: true } | { delivered: false; error: string },
   ): void {
     const socket = this.requireSocket();
     writeFrame(socket, {
       type: "incoming_ack",
       requestId,
-      messageId,
       delivered: result.delivered,
       error: result.delivered ? undefined : result.error,
     });
@@ -209,7 +202,7 @@ export class SessionMessagingClient extends EventEmitter {
         break;
       }
       case "incoming":
-        this.emit(INCOMING_SESSION_MESSAGE_EVENT, frame.requestId, frame.message);
+        this.emit(INCOMING_SESSION_ENVELOPE_EVENT, frame.requestId, frame.envelope);
         break;
       case "send_result": {
         const pending = this.pendingSends.get(frame.requestId);
@@ -217,7 +210,6 @@ export class SessionMessagingClient extends EventEmitter {
         clearTimeout(pending.timeout);
         this.pendingSends.delete(frame.requestId);
         pending.resolve({
-          messageId: frame.messageId,
           delivered: frame.delivered,
           error: frame.error,
         });

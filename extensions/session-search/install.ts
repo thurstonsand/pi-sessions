@@ -171,7 +171,7 @@ async function getLiveSessionIds(messaging: MessagingHandle | undefined): Promis
   }
 
   try {
-    return await messaging.listSessionIds();
+    return await messaging.listSessions();
   } catch (error) {
     throw new Error(`Session messaging is unavailable: ${formatError(error)}`);
   }

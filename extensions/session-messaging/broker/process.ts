@@ -4,6 +4,8 @@ import { join } from "node:path";
 import { readFrames, writeFrame } from "../../shared/session-broker/framing.ts";
 import {
   CLIENT_FRAME_SCHEMA,
+  type OutboundSessionEnvelope,
+  type SessionEnvelope,
   type SessionMessagingClientFrame,
   type SessionMessagingIncomingAckClientFrame,
   type SessionMessagingSendClientFrame,
@@ -23,8 +25,8 @@ const pidPath = join(messagingDir, "broker.pid");
 
 interface PendingSend {
   source: Socket;
+  target: Socket;
   timeout: NodeJS.Timeout;
-  messageId: string;
   targetSessionId: string;
 }
 
@@ -119,7 +121,7 @@ function handleFrame(
       break;
 
     case "incoming_ack":
-      handleIncomingAck(message);
+      handleIncomingAck(socket, message);
       break;
   }
 }
@@ -130,13 +132,11 @@ function handleSend(
   message: SessionMessagingSendClientFrame,
 ): void {
   const source = currentSessionId ? sessions.get(currentSessionId) : undefined;
-  const { messageId } = message;
 
   if (!currentSessionId || !source) {
     writeFrame(socket, {
       type: "send_result",
       requestId: message.requestId,
-      messageId,
       delivered: false,
       error: "Sender session is not registered.",
     });
@@ -148,7 +148,6 @@ function handleSend(
     writeFrame(socket, {
       type: "send_result",
       requestId: message.requestId,
-      messageId,
       delivered: false,
       error: resolved.error,
     });
@@ -159,9 +158,8 @@ function handleSend(
     writeFrame(socket, {
       type: "send_result",
       requestId: message.requestId,
-      messageId,
       delivered: false,
-      error: "Cannot send a session message to the current session.",
+      error: "Cannot send a session envelope to the current session.",
     });
     return;
   }
@@ -171,34 +169,21 @@ function handleSend(
     writeFrame(socket, {
       type: "send_result",
       requestId: message.requestId,
-      messageId,
       delivered: false,
-      error: "Timed out waiting for target session to accept the message.",
+      error: "Timed out waiting for target session to accept the envelope.",
     });
   }, SEND_TIMEOUT_MS);
   pendingSends.set(message.requestId, {
     source: socket,
+    target: resolved.socket,
     timeout,
-    messageId,
     targetSessionId: resolved.sessionId,
   });
 
   writeFrame(resolved.socket, {
     type: "incoming",
     requestId: message.requestId,
-    message: {
-      messageId,
-      source: currentSessionId,
-      target: resolved.sessionId,
-      body: message.body,
-      ...(message.requestResponse === undefined
-        ? {}
-        : { requestResponse: message.requestResponse }),
-      sentAt: message.sentAt,
-      ...(message.sourceToolCallId === undefined
-        ? {}
-        : { sourceToolCallId: message.sourceToolCallId }),
-    },
+    envelope: stampEnvelope(message.envelope, currentSessionId, resolved.sessionId),
   });
 }
 
@@ -213,26 +198,32 @@ function failPendingSendsTo(targetSessionId: string): void {
     writeFrame(pending.source, {
       type: "send_result",
       requestId,
-      messageId: pending.messageId,
       delivered: false,
-      error: "Target disconnected before accepting the message.",
+      error: "Target disconnected before accepting the envelope.",
     });
   }
 }
 
-function handleIncomingAck(message: SessionMessagingIncomingAckClientFrame): void {
+function handleIncomingAck(socket: Socket, message: SessionMessagingIncomingAckClientFrame): void {
   const pending = pendingSends.get(message.requestId);
-  if (!pending) return;
+  if (!pending || pending.target !== socket) return;
 
   clearTimeout(pending.timeout);
   pendingSends.delete(message.requestId);
   writeFrame(pending.source, {
     type: "send_result",
     requestId: message.requestId,
-    messageId: message.messageId,
     delivered: message.delivered,
     ...(message.error === undefined ? {} : { error: message.error }),
   });
+}
+
+function stampEnvelope(
+  envelope: OutboundSessionEnvelope,
+  source: string,
+  target: string,
+): SessionEnvelope {
+  return { ...envelope, source, target };
 }
 
 function handleConnection(socket: Socket): void {

@@ -26,6 +26,17 @@ export const SEND_MESSAGE_TOOL_DETAILS_SCHEMA = Type.Object({
   relation: Type.Optional(Type.String()),
 });
 
+export const CANCEL_SESSION_PARAMS = Type.Object({
+  session: Type.String({ description: "Bare UUID for the live session to cancel." }),
+});
+
+export const CANCEL_SESSION_TOOL_DETAILS_SCHEMA = Type.Object({
+  delivered: Type.Literal(true),
+  cancelId: Type.String(),
+  target: RECEIVED_MESSAGE_ENDPOINT_SCHEMA,
+  relation: Type.Optional(Type.String()),
+});
+
 export const RECEIVED_MESSAGE_ENTRY_SCHEMA = Type.Object({
   messageId: Type.String(),
   source: RECEIVED_MESSAGE_ENDPOINT_SCHEMA,
@@ -40,5 +51,7 @@ export const RECEIVED_MESSAGE_ENTRY_SCHEMA = Type.Object({
 
 export type SendMessageParams = Static<typeof SEND_MESSAGE_PARAMS>;
 export type SendMessageToolDetails = Static<typeof SEND_MESSAGE_TOOL_DETAILS_SCHEMA>;
+export type CancelSessionParams = Static<typeof CANCEL_SESSION_PARAMS>;
+export type CancelSessionToolDetails = Static<typeof CANCEL_SESSION_TOOL_DETAILS_SCHEMA>;
 export type ReceivedMessageEndpoint = Static<typeof RECEIVED_MESSAGE_ENDPOINT_SCHEMA>;
 export type ReceivedMessageEntry = Static<typeof RECEIVED_MESSAGE_ENTRY_SCHEMA>;

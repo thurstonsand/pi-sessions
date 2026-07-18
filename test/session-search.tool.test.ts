@@ -388,8 +388,8 @@ describe("session_search tool", () => {
     db.close();
 
     const brokerConnection = {
-      listSessionIds: async () => ["current-session", "live-child", "missing-live"],
-    };
+      listSessions: async () => ["current-session", "live-child", "missing-live"],
+    } as MessagingHandle;
     const tool = registerSessionSearchTool({ messaging: brokerConnection });
     const result = await tool.execute(
       "tool-1",

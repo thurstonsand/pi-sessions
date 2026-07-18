@@ -21,7 +21,7 @@ test("broker lists session ids and routes messages after target acknowledgement"
   const { spawnSessionMessagingBrokerIfNeeded } = await import(
     "../extensions/session-messaging/broker/spawn.ts"
   );
-  const { INCOMING_SESSION_MESSAGE_EVENT, SessionMessagingClient } = await import(
+  const { INCOMING_SESSION_ENVELOPE_EVENT, SessionMessagingClient } = await import(
     "../extensions/shared/session-broker/client.ts"
   );
 
@@ -34,28 +34,31 @@ test("broker lists session ids and routes messages after target acknowledgement"
     await target.connect("target-session");
 
     const incoming = new Promise<unknown>((resolve) => {
-      target.once(INCOMING_SESSION_MESSAGE_EVENT, (requestId, message) => {
-        target.acknowledgeIncoming(requestId, message.messageId, { delivered: true });
-        resolve(message);
+      target.once(INCOMING_SESSION_ENVELOPE_EVENT, (requestId, envelope) => {
+        target.acknowledgeIncoming(requestId, { delivered: true });
+        resolve(envelope);
       });
     });
 
     const sessionIds = await source.listSessionIds();
     expect(sessionIds.sort()).toEqual(["source-session", "target-session"]);
 
-    const result = await source.sendMessage({
-      messageId: "message-1",
+    const result = await source.sendEnvelope({
       target: "target-session",
-      body: "Investigation complete.",
-      sentAt: new Date().toISOString(),
-      requestResponse: true,
-      sourceToolCallId: "tool-1",
+      envelope: {
+        kind: "message",
+        messageId: "message-1",
+        body: "Investigation complete.",
+        sentAt: new Date().toISOString(),
+        requestResponse: true,
+        sourceToolCallId: "tool-1",
+      },
     });
 
     expect(result.delivered).toBe(true);
-    expect(result.messageId).toBe("message-1");
     await expect(incoming).resolves.toMatchObject({
-      messageId: result.messageId,
+      kind: "message",
+      messageId: "message-1",
       body: "Investigation complete.",
       requestResponse: true,
       sourceToolCallId: "tool-1",
@@ -65,6 +68,102 @@ test("broker lists session ids and routes messages after target acknowledgement"
   } finally {
     source.disconnect();
     target.disconnect();
+  }
+});
+
+test("broker stamps envelope identity instead of trusting sender fields", async () => {
+  const { spawnSessionMessagingBrokerIfNeeded } = await import(
+    "../extensions/session-messaging/broker/spawn.ts"
+  );
+  const { INCOMING_SESSION_ENVELOPE_EVENT, SessionMessagingClient } = await import(
+    "../extensions/shared/session-broker/client.ts"
+  );
+
+  await spawnSessionMessagingBrokerIfNeeded();
+
+  const source = new SessionMessagingClient();
+  const target = new SessionMessagingClient();
+  try {
+    await source.connect("actual-source");
+    await target.connect("actual-target");
+
+    const incoming = new Promise<unknown>((resolve) => {
+      target.once(INCOMING_SESSION_ENVELOPE_EVENT, (requestId, envelope) => {
+        target.acknowledgeIncoming(requestId, { delivered: true });
+        resolve(envelope);
+      });
+    });
+
+    const result = await source.sendEnvelope({
+      target: "actual-target",
+      envelope: {
+        kind: "message",
+        messageId: "forged-source-message",
+        source: "forged-source",
+        target: "forged-target",
+        body: "Identity must come from the broker.",
+        sentAt: "2026-03-24T00:00:00.000Z",
+      } as never,
+    });
+
+    expect(result.delivered).toBe(true);
+    await expect(incoming).resolves.toMatchObject({
+      kind: "message",
+      messageId: "forged-source-message",
+      source: "actual-source",
+      target: "actual-target",
+    });
+  } finally {
+    source.disconnect();
+    target.disconnect();
+  }
+});
+
+test("service acknowledges only after the typed incoming handler accepts", async () => {
+  if (!cleanupDir) {
+    throw new Error("Missing messaging temp directory");
+  }
+
+  const { SessionMessagingService } = await import("../extensions/session-messaging/pi/service.ts");
+  const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
+
+  const target = new SessionMessagingService(join(cleanupDir, "acceptance.sqlite"));
+  const source = new SessionMessagingClient();
+  let accept: (() => void) | undefined;
+  const acceptance = new Promise<void>((resolve) => {
+    accept = resolve;
+  });
+  target.onIncomingMessage(async () => {
+    await acceptance;
+  });
+
+  try {
+    await target.start({ sessionManager: { getSessionId: () => "acceptance-target" } } as never);
+    await source.connect("acceptance-source");
+
+    let acknowledged = false;
+    const send = source
+      .sendEnvelope({
+        target: "acceptance-target",
+        envelope: {
+          kind: "message",
+          messageId: "acceptance-message",
+          body: "Persist this first.",
+          sentAt: "2026-03-24T00:01:00.000Z",
+        },
+      })
+      .then((result) => {
+        acknowledged = true;
+        return result;
+      });
+
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(acknowledged).toBe(false);
+    accept?.();
+    await expect(send).resolves.toMatchObject({ delivered: true });
+  } finally {
+    source.disconnect();
+    target.stop();
   }
 });
 
@@ -120,28 +219,29 @@ test("service enriches incoming receipts from the session index", async () => {
   db.close();
 
   const receivedMessages: unknown[] = [];
-  const service = new SessionMessagingService(indexPath, {
-    deliver(received: unknown) {
-      receivedMessages.push(received);
-      return { delivered: true as const };
-    },
-  } as never);
+  const service = new SessionMessagingService(indexPath);
+  service.onIncomingMessage((envelope) => {
+    receivedMessages.push(service.buildReceivedMessage(envelope));
+  });
   const source = new SessionMessagingClient();
 
   try {
     await service.start({ sessionManager: { getSessionId: () => targetId } } as never);
     await source.connect(sourceId);
 
-    const result = await source.sendMessage({
-      messageId: "receipt-message",
+    const result = await source.sendEnvelope({
       target: targetId,
-      body: "Receipt enrichment check.",
-      sentAt: "2026-03-22T00:31:00.000Z",
-      requestResponse: true,
-      sourceToolCallId: "tool-receipt",
+      envelope: {
+        kind: "message",
+        messageId: "receipt-message",
+        body: "Receipt enrichment check.",
+        sentAt: "2026-03-22T00:31:00.000Z",
+        requestResponse: true,
+        sourceToolCallId: "tool-receipt",
+      },
     });
 
-    expect(result).toMatchObject({ delivered: true, messageId: "receipt-message" });
+    expect(result).toMatchObject({ delivered: true });
     expect(receivedMessages).toHaveLength(1);
     expect(receivedMessages[0]).toMatchObject({
       messageId: "receipt-message",
@@ -168,6 +268,52 @@ test("service enriches incoming receipts from the session index", async () => {
   }
 });
 
+test("service cancels a live target and waits for broker registration", async () => {
+  if (!cleanupDir) {
+    throw new Error("Missing messaging temp directory");
+  }
+
+  const { SessionMessagingService } = await import("../extensions/session-messaging/pi/service.ts");
+  const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
+
+  const source = new SessionMessagingService(join(cleanupDir, "cancel.sqlite"));
+  const target = new SessionMessagingService(join(cleanupDir, "cancel.sqlite"));
+  const late = new SessionMessagingClient();
+  const cancellations: unknown[] = [];
+  target.onIncomingCancel((envelope) => {
+    cancellations.push(envelope);
+  });
+
+  try {
+    await source.start({ sessionManager: { getSessionId: () => "cancel-source" } } as never);
+    await target.start({ sessionManager: { getSessionId: () => "cancel-target" } } as never);
+
+    const result = await source.cancelSession("cancel-target");
+    expect(result).toMatchObject({
+      delivered: true,
+      cancelId: expect.any(String),
+      target: { sessionId: "cancel-target" },
+    });
+    expect(cancellations).toEqual([
+      expect.objectContaining({
+        kind: "cancel",
+        cancelId: result.cancelId,
+        source: "cancel-source",
+        target: "cancel-target",
+      }),
+    ]);
+
+    const wait = source.waitForSession("late-registration", 1_000);
+    await late.connect("late-registration");
+    await expect(wait).resolves.toBe(true);
+    await expect(source.waitForSession("missing-registration", 0)).resolves.toBe(false);
+  } finally {
+    late.disconnect();
+    target.stop();
+    source.stop();
+  }
+});
+
 test("broker requires exact target session ids", async () => {
   const { spawnSessionMessagingBrokerIfNeeded } = await import(
     "../extensions/session-messaging/broker/spawn.ts"
@@ -182,15 +328,17 @@ test("broker requires exact target session ids", async () => {
     await source.connect("exact-source");
     await target.connect("exact-target");
 
-    const result = await source.sendMessage({
-      messageId: "message-prefix-rejected",
+    const result = await source.sendEnvelope({
       target: "exact",
-      body: "Prefix should not route.",
-      sentAt: new Date().toISOString(),
+      envelope: {
+        kind: "message",
+        messageId: "message-prefix-rejected",
+        body: "Prefix should not route.",
+        sentAt: new Date().toISOString(),
+      },
     });
 
     expect(result).toMatchObject({
-      messageId: "message-prefix-rejected",
       delivered: false,
       error: "No live session found for id: exact",
     });
@@ -224,7 +372,7 @@ test("broker fails pending sends when target disconnects before acknowledgement"
   const { spawnSessionMessagingBrokerIfNeeded } = await import(
     "../extensions/session-messaging/broker/spawn.ts"
   );
-  const { INCOMING_SESSION_MESSAGE_EVENT, SessionMessagingClient } = await import(
+  const { INCOMING_SESSION_ENVELOPE_EVENT, SessionMessagingClient } = await import(
     "../extensions/shared/session-broker/client.ts"
   );
 
@@ -236,21 +384,23 @@ test("broker fails pending sends when target disconnects before acknowledgement"
     await source.connect("disconnect-source");
     await target.connect("disconnect-target");
 
-    target.once(INCOMING_SESSION_MESSAGE_EVENT, () => {
+    target.once(INCOMING_SESSION_ENVELOPE_EVENT, () => {
       target.disconnect();
     });
 
-    const result = await source.sendMessage({
-      messageId: "message-before-disconnect",
+    const result = await source.sendEnvelope({
       target: "disconnect-target",
-      body: "This will be accepted ambiguously.",
-      sentAt: new Date().toISOString(),
+      envelope: {
+        kind: "message",
+        messageId: "message-before-disconnect",
+        body: "This will be accepted ambiguously.",
+        sentAt: new Date().toISOString(),
+      },
     });
 
     expect(result).toMatchObject({
-      messageId: "message-before-disconnect",
       delivered: false,
-      error: "Target disconnected before accepting the message.",
+      error: "Target disconnected before accepting the envelope.",
     });
   } finally {
     source.disconnect();

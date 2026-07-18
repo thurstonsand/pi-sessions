@@ -126,7 +126,7 @@ session_cancel(sessionId);
 ```
 
 - Owned sub-agent → durable cancellation ledger entry **first**, then live-cancel envelope if broker-registered (covers external resumes), then verified tmux kill. Unverified teardown reports `stopping`, never `stopped`.
-- Other broker-live session → cancel envelope; the target's runtime calls `pi.abort()`. Guidance: only against user sessions when the user directs it.
+- Other broker-live session → cancel envelope; the target's runtime calls `ctx.abort()`. Guidance: only against user sessions when the user directs it.
 - Anything else → error; nothing to cancel.
 
 Owned-managed is checked before broker-liveness because aborting a turn does not remove a managed process; cancellation must converge both.
@@ -188,7 +188,8 @@ interface MessagingHandle {
   cancelSession(sessionId): Promise<CancelResult>;
   listSessions(): Promise<string[]>;
   waitForSession(sessionId, timeoutMs): Promise<boolean>;
-  onIncoming(kind, handler): void; // typed handler owns durable acceptance before ack
+  onIncomingMessage(handler): void;
+  onIncomingCancel(handler): void; // typed handlers own durable acceptance before ack
 }
 ```
 
@@ -324,16 +325,16 @@ Tool descriptions state capabilities (launch values, `requestResponse` semantics
 
 Every phase is independently shippable: `npm run check` green, no half-finished concept exposed, inert-but-unused code acceptable. Phases assume the post-cleanup baseline (`845739b`: designs 15/16/17 implemented; the first 18's implementation discarded). Design 16's surfaces — child-file bootstrap persistence, kickoff entries, launch receipts, the canonical resume-command builder — are consumed as-is, not rebuilt.
 
-- [ ] Phase 1: Composition root
+- [x] Phase 1: Composition root
   - Goal: One advertised entrypoint wiring all existing features with behavior identical to today; `active.ts` deleted.
   - Files: new `extensions/pi-sessions.ts`; `package.json` (`pi.extensions`); each `extensions/session-*.ts` entrypoint becomes an `install*` function in its feature directory; `extensions/shared/settings.ts` (`sessions.features` toggles); delete `extensions/shared/session-broker/active.ts`; search's live-filter path takes the messaging handle as a parameter.
   - Work: Root constructs settings → index → messaging → handoff/search/ask/auto-title/hooks in order; single `session_start`/`session_shutdown` subscription driving feature hooks deterministically (broker registration outcome first); disabled features are explicit `undefined` wiring with loud notices; epoch-guarded session state object owned by the root.
   - Validation: Full test suite passes with entrypoints converted; smoke: search `live:` works via injected handle; disabling `features.messaging` degrades search's live filter with the existing notice; broker duplicate-registration still rejects loudly.
 
-- [ ] Phase 2: Typed envelopes and the messaging handle
+- [x] Phase 2: Typed envelopes and the messaging handle
   - Goal: Broker traffic is a validated `message | cancel` union; `session_cancel` ships for broker-live targets; the `MessagingHandle` port exists.
   - Files: `extensions/shared/session-broker/protocol.ts`, `client.ts`; `extensions/session-messaging/pi/` (service, tools, incoming runtime); tests.
-  - Work: Envelope union with TypeBox validation and broker-stamped source; `onIncoming(kind, handler)` with durable-before-ack ownership per kind; `cancelSession` → target runtime `pi.abort()`; plain `session_cancel` tool (live targets; dead targets error); `waitForSession`.
+  - Work: Envelope union with TypeBox validation and broker-stamped source; named incoming handlers with durable-before-ack ownership per kind; `cancelSession` → target runtime `ctx.abort()`; plain `session_cancel` tool (live targets; dead targets error); `waitForSession`.
   - Validation: Envelope round-trip and forged-source tests; smoke: cancel a live session's turn from another session.
 
 - [ ] Phase 3: Tmux substrate and visible tmux splits

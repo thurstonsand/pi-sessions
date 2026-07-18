@@ -6,12 +6,24 @@ import {
   SESSION_MESSAGE_CUSTOM_TYPE,
 } from "./pi/incoming-runtime.ts";
 import { renderIncomingSessionMessage } from "./pi/renderer.ts";
-import { SessionMessagingService } from "./pi/service.ts";
-import { createSessionSendMessageTool } from "./pi/tools.ts";
+import {
+  type CancelSessionResult,
+  type IncomingCancelHandler,
+  type IncomingMessageHandler,
+  type SendMessageRequest,
+  type SendMessageResult,
+  SessionMessagingService,
+} from "./pi/service.ts";
+import { createSessionCancelTool, createSessionSendMessageTool } from "./pi/tools.ts";
 
 /** The live surface the messaging feature exposes to other features (search, sub-agents). */
 export interface MessagingHandle {
-  listSessionIds(): Promise<string[]>;
+  sendMessage(request: SendMessageRequest): Promise<SendMessageResult>;
+  cancelSession(sessionId: string): Promise<CancelSessionResult>;
+  listSessions(): Promise<string[]>;
+  waitForSession(sessionId: string, timeoutMs: number): Promise<boolean>;
+  onIncomingMessage(handler: IncomingMessageHandler): void;
+  onIncomingCancel(handler: IncomingCancelHandler): void;
 }
 
 export function installMessaging(
@@ -19,13 +31,26 @@ export function installMessaging(
   deps: { settings: SessionSettings; index: IndexHandle },
 ): MessagingHandle & SessionLifecycle {
   const incomingRuntime = new IncomingSessionMessageRuntime(pi);
-  const service = new SessionMessagingService(deps.index.path, incomingRuntime);
+  const service = new SessionMessagingService(deps.index.path);
+
+  service.onIncomingMessage((envelope) => {
+    incomingRuntime.deliver(service.buildReceivedMessage(envelope));
+  });
+  service.onIncomingCancel(() => {
+    incomingRuntime.cancel();
+  });
 
   pi.registerTool(createSessionSendMessageTool(service));
+  pi.registerTool(createSessionCancelTool(service));
   pi.registerMessageRenderer(SESSION_MESSAGE_CUSTOM_TYPE, renderIncomingSessionMessage);
 
   return {
-    listSessionIds: () => service.listSessionIds(),
+    sendMessage: (request) => service.sendMessage(request),
+    cancelSession: (sessionId) => service.cancelSession(sessionId),
+    listSessions: () => service.listSessions(),
+    waitForSession: (sessionId, timeoutMs) => service.waitForSession(sessionId, timeoutMs),
+    onIncomingMessage: (handler) => service.onIncomingMessage(handler),
+    onIncomingCancel: (handler) => service.onIncomingCancel(handler),
     async onSessionStart(_event, ctx) {
       incomingRuntime.bindContext(ctx);
       incomingRuntime.replayPending(ctx);

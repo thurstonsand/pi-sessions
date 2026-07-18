@@ -1,6 +1,26 @@
 import { type Static, Type } from "typebox";
 
-export const SESSION_MESSAGE_PAYLOAD_SCHEMA = Type.Object({
+const OUTBOUND_MESSAGE_ENVELOPE_SCHEMA = Type.Object({
+  kind: Type.Literal("message"),
+  messageId: Type.String(),
+  body: Type.String(),
+  requestResponse: Type.Optional(Type.Boolean()),
+  sentAt: Type.String(),
+  sourceToolCallId: Type.Optional(Type.String()),
+});
+const OUTBOUND_CANCEL_ENVELOPE_SCHEMA = Type.Object({
+  kind: Type.Literal("cancel"),
+  cancelId: Type.String(),
+  sentAt: Type.String(),
+});
+
+export const OUTBOUND_SESSION_ENVELOPE_SCHEMA = Type.Union([
+  OUTBOUND_MESSAGE_ENVELOPE_SCHEMA,
+  OUTBOUND_CANCEL_ENVELOPE_SCHEMA,
+]);
+
+export const SESSION_MESSAGE_ENVELOPE_SCHEMA = Type.Object({
+  kind: Type.Literal("message"),
   messageId: Type.String(),
   source: Type.String(),
   target: Type.String(),
@@ -9,6 +29,18 @@ export const SESSION_MESSAGE_PAYLOAD_SCHEMA = Type.Object({
   sentAt: Type.String(),
   sourceToolCallId: Type.Optional(Type.String()),
 });
+export const SESSION_CANCEL_ENVELOPE_SCHEMA = Type.Object({
+  kind: Type.Literal("cancel"),
+  cancelId: Type.String(),
+  source: Type.String(),
+  target: Type.String(),
+  sentAt: Type.String(),
+});
+
+export const SESSION_ENVELOPE_SCHEMA = Type.Union([
+  SESSION_MESSAGE_ENVELOPE_SCHEMA,
+  SESSION_CANCEL_ENVELOPE_SCHEMA,
+]);
 
 const REGISTER_CLIENT_FRAME_SCHEMA = Type.Object({
   type: Type.Literal("register"),
@@ -24,17 +56,12 @@ const LIST_CLIENT_FRAME_SCHEMA = Type.Object({
 const SEND_CLIENT_FRAME_SCHEMA = Type.Object({
   type: Type.Literal("send"),
   requestId: Type.String(),
-  messageId: Type.String(),
   target: Type.String(),
-  body: Type.String(),
-  requestResponse: Type.Optional(Type.Boolean()),
-  sentAt: Type.String(),
-  sourceToolCallId: Type.Optional(Type.String()),
+  envelope: OUTBOUND_SESSION_ENVELOPE_SCHEMA,
 });
 const INCOMING_ACK_CLIENT_FRAME_SCHEMA = Type.Object({
   type: Type.Literal("incoming_ack"),
   requestId: Type.String(),
-  messageId: Type.String(),
   delivered: Type.Boolean(),
   error: Type.Optional(Type.String()),
 });
@@ -55,12 +82,11 @@ const SESSIONS_BROKER_FRAME_SCHEMA = Type.Object({
 const INCOMING_BROKER_FRAME_SCHEMA = Type.Object({
   type: Type.Literal("incoming"),
   requestId: Type.String(),
-  message: SESSION_MESSAGE_PAYLOAD_SCHEMA,
+  envelope: SESSION_ENVELOPE_SCHEMA,
 });
 const SEND_RESULT_BROKER_FRAME_SCHEMA = Type.Object({
   type: Type.Literal("send_result"),
   requestId: Type.String(),
-  messageId: Type.String(),
   delivered: Type.Boolean(),
   error: Type.Optional(Type.String()),
 });
@@ -86,7 +112,12 @@ export const BROKER_FRAME_SCHEMA = Type.Union([
   ERROR_BROKER_FRAME_SCHEMA,
 ]);
 
-export type SessionMessagePayload = Static<typeof SESSION_MESSAGE_PAYLOAD_SCHEMA>;
+export type OutboundSessionMessageEnvelope = Static<typeof OUTBOUND_MESSAGE_ENVELOPE_SCHEMA>;
+export type OutboundSessionCancelEnvelope = Static<typeof OUTBOUND_CANCEL_ENVELOPE_SCHEMA>;
+export type OutboundSessionEnvelope = Static<typeof OUTBOUND_SESSION_ENVELOPE_SCHEMA>;
+export type SessionMessageEnvelope = Static<typeof SESSION_MESSAGE_ENVELOPE_SCHEMA>;
+export type SessionCancelEnvelope = Static<typeof SESSION_CANCEL_ENVELOPE_SCHEMA>;
+export type SessionEnvelope = Static<typeof SESSION_ENVELOPE_SCHEMA>;
 export type SessionMessagingSendClientFrame = Static<typeof SEND_CLIENT_FRAME_SCHEMA>;
 export type SessionMessagingIncomingAckClientFrame = Static<
   typeof INCOMING_ACK_CLIENT_FRAME_SCHEMA

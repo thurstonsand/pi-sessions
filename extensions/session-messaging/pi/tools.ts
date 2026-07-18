@@ -3,6 +3,9 @@ import { Text } from "@earendil-works/pi-tui";
 import { ExpandableContentLayout } from "../../shared/rendering/expandable-content-layout.ts";
 import { safeParseTypeBoxValue } from "../../shared/typebox.ts";
 import {
+  CANCEL_SESSION_PARAMS,
+  type CancelSessionParams,
+  type CancelSessionToolDetails,
   SEND_MESSAGE_PARAMS,
   SEND_MESSAGE_TOOL_DETAILS_SCHEMA,
   type SendMessageParams,
@@ -58,13 +61,7 @@ export function createSessionSendMessageTool(service: SessionMessagingService): 
       return new Text("", 0, 0);
     },
     async execute(toolCallId, params: SendMessageParams, _signal, _onUpdate, _ctx) {
-      const target = params.session.trim();
-      if (!target) {
-        throw new Error("session_send_message requires a target session id.");
-      }
-      if (target.startsWith("@session:")) {
-        throw new Error("Use the bare session UUID, not an @session token.");
-      }
+      const target = parseSessionTarget(params.session, "session_send_message");
 
       const body = params.message.trim();
       if (!body) {
@@ -101,6 +98,50 @@ export function createSessionSendMessageTool(service: SessionMessagingService): 
       }
     },
   });
+}
+
+export function createSessionCancelTool(service: SessionMessagingService): ToolDefinition {
+  return defineTool({
+    name: "session_cancel",
+    label: "Cancel a running session",
+    description: "Cancel another running pi session",
+    promptSnippet: "Cancel another running pi session",
+    promptGuidelines: ["Only cancel a user session when the user directs it."],
+    parameters: CANCEL_SESSION_PARAMS,
+    async execute(_toolCallId, params: CancelSessionParams) {
+      const target = parseSessionTarget(params.session, "session_cancel");
+      const result = await service.cancelSession(target);
+      if (!result.delivered) {
+        throw new Error(result.error ?? "Cancellation was not delivered.");
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Cancellation delivered to ${target}.`,
+          },
+        ],
+        details: {
+          delivered: true,
+          cancelId: result.cancelId,
+          target: result.target,
+          ...(result.relation === undefined ? {} : { relation: result.relation }),
+        } satisfies CancelSessionToolDetails,
+      };
+    },
+  });
+}
+
+function parseSessionTarget(raw: string, toolName: string): string {
+  const target = raw.trim();
+  if (!target) {
+    throw new Error(`${toolName} requires a target session id.`);
+  }
+  if (target.startsWith("@session:")) {
+    throw new Error("Use the bare session UUID, not an @session token.");
+  }
+  return target;
 }
 
 function getFirstText(result: { content: Array<{ type: string; text?: string }> }): string {

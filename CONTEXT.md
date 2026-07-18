@@ -14,7 +14,7 @@
 - **Session reference**: An `@session:<uuid>` token inserted into a prompt to refer to a specific prior session. Tools that consume the reference should use the bare UUID value.
 - **Session reference picker**: The interactive picker opened from the prompt editor to find a prior session and insert its session reference.
 - **Handoff**: A transfer of work from one session into a new child session using a generated prompt based on the current session's context.
-- **Launch backend**: A pluggable mechanism that gets a created handoff session running: a Ghostty split or deferred delivery. All backends consume the resume command.
+- **Launch backend**: A pluggable mechanism that gets a created handoff session running: a tmux split, Ghostty split, or deferred delivery. All backends consume the resume command.
 - **Background handoff**: A handoff launched through a launch backend while the current session keeps running.
 - **Deferred handoff**: A handoff that creates the child session without launching it; the resume command is returned (and copied to the clipboard) for the user to run anywhere.
 - **Auto-title**: A generated session name based on the session conversation, refreshed over time unless the user manually renames the session.

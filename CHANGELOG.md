@@ -6,7 +6,7 @@
 
 - Added support for the Pi 0.80.6 `max` thinking level across handoff, session_ask, and auto-title settings.
 - Added a required `title` parameter and live streaming call rendering to `session_handoff`.
-- Added durable handoff launch receipts for deferred and Ghostty split launches.
+- Added durable handoff launch receipts for deferred, tmux split, and Ghostty split launches.
 - Added a compact renderer for durable sent session-message receipts.
 - Added `session_cancel` for aborting another live Pi session's current turn.
 - Added auto-title `thinkingLevel` passthrough; an explicit setting overrides a thinking suffix on the configured model.

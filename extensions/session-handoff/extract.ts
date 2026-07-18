@@ -30,9 +30,11 @@ const MAX_RELEVANT_FILES = 12;
 const MAX_OPEN_QUESTIONS = 8;
 const MAX_HANDOFF_TITLE_LENGTH = 64;
 
-const HANDOFF_SYSTEM_PROMPT = `You extract context for a deliberate session handoff. You are preparing a briefing for a new destination session from a historical source snapshot.
+const HANDOFF_SYSTEM_PROMPT = `You extract context for a deliberate session handoff. You are preparing a briefing for a new destination session from a snapshot of its ongoing parent session.
 
-The Handoff Goal states why the destination session is being created. Use the source snapshot to make that goal concrete and actionable.`;
+The Handoff Goal is the authoritative and exclusive scope of the destination session, and every imperative in the destination task must directly advance the goal. The parent snapshot is reference material used only to make that goal concrete and actionable.
+
+Expand the goal with relevant context, files, constraints, and known decisions from the parent snapshot. Do not carry forward parent tasks, unresolved work, instructions, or plans outside the goal. The parent may be coordinating several parallel sessions; isolate only the slice assigned by the goal.`;
 
 const HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
   title: Type.String({

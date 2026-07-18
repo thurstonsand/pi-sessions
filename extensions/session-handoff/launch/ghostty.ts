@@ -1,40 +1,26 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { LaunchBackend, LaunchInput, LaunchOutcome } from "./backend.ts";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type {
+  HandoffSplitDirection,
+  LaunchBackend,
+  LaunchInput,
+  LaunchOutcome,
+} from "./backend.ts";
 import { escapeAppleScriptString, shellQuote } from "./shell.ts";
 
 const GHOSTTY_MACOS_ONLY_MESSAGE = "Split handoff currently supports Ghostty on macOS only.";
-const GHOSTTY_REQUIRED_MESSAGE = "Split handoff requires running inside Ghostty.";
 const GHOSTTY_SPLIT_TIMEOUT_MS = 15_000;
 const OSASCRIPT_PATH = "/usr/bin/osascript";
-
-export type HandoffSplitDirection = "left" | "right" | "up" | "down";
 
 export interface GhosttyLaunchConfig {
   direction: HandoffSplitDirection;
   terminalId?: string | undefined;
-  fallbackToFocusedOnError?: boolean | undefined;
 }
 
-export function isGhosttyHandoffAvailable(): boolean {
-  return process.platform === "darwin" && process.env.TERM_PROGRAM === "ghostty";
-}
-
-export async function validateSplitHandoffPrerequisites(
-  ctx: ExtensionContext,
-): Promise<string | undefined> {
-  if (!ctx.sessionManager.getSessionFile()) {
-    return "Split handoff requires a persisted current session.";
-  }
-
-  if (process.platform !== "darwin") {
-    return GHOSTTY_MACOS_ONLY_MESSAGE;
-  }
-
-  if (process.env.TERM_PROGRAM !== "ghostty") {
-    return GHOSTTY_REQUIRED_MESSAGE;
-  }
-
-  return undefined;
+export function isGhosttyHandoffAvailable(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return platform === "darwin" && env.TERM_PROGRAM === "ghostty";
 }
 
 export async function getFocusedGhosttyTerminalId(
@@ -63,9 +49,10 @@ export function createGhosttyLaunchBackend(
   config: GhosttyLaunchConfig,
 ): LaunchBackend {
   return {
+    name: "Ghostty",
     async launch(input: LaunchInput): Promise<LaunchOutcome> {
       const first = await runGhosttySplit(pi, config, config.terminalId, input);
-      if (first.success || !config.terminalId || !config.fallbackToFocusedOnError) {
+      if (first.success || !config.terminalId) {
         return first;
       }
 

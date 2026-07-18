@@ -32,11 +32,10 @@ import {
 import type { ClipboardStatus } from "./launch/backend.ts";
 import { createDeferredLaunchBackend } from "./launch/deferred.ts";
 import {
-  createGhosttyLaunchBackend,
-  getFocusedGhosttyTerminalId,
-  isGhosttyHandoffAvailable,
+  resolveSplitLaunchBackend,
+  type SplitLaunchBackend,
   validateSplitHandoffPrerequisites,
-} from "./launch/ghostty.ts";
+} from "./launch/resolution.ts";
 import {
   createHandoffBootstrap,
   createHandoffSessionMetadata,
@@ -66,12 +65,12 @@ import { formatHandoffError, runHandoffTaskWithLoader } from "./ui.ts";
 
 const HANDOFF_USAGE =
   "Usage: /handoff [--left|--right|--up|--down|--deferred] <goal for new thread>";
-function handoffLaunchSchema(ghosttyAvailable: boolean) {
-  const values: HandoffLaunchTarget[] = ghosttyAvailable
+function handoffLaunchSchema(splitBackend: SplitLaunchBackend | undefined) {
+  const values: HandoffLaunchTarget[] = splitBackend
     ? [...LAUNCH_DIRECTIONS, DEFERRED_LAUNCH]
     : [DEFERRED_LAUNCH];
-  const description = ghosttyAvailable
-    ? "Where to launch the child session. 'deferred' creates the session and returns the resume command without opening anything; direction values open a Ghostty split. If the user does not make it clear which launch target to use, ask for clarification."
+  const description = splitBackend
+    ? `Where to launch the child session. 'deferred' creates the session and returns the resume command without opening anything; direction values open a ${splitBackend.name} split. If the user does not make it clear which launch target to use, ask for clarification.`
     : "Where to launch the child session. 'deferred' creates the session and returns the resume command without opening anything.";
   return Type.Union(
     values.map((value) => Type.Literal(value)),
@@ -109,6 +108,9 @@ export function installHandoff(
   let identifiedGhosttyTerminalId: string | undefined;
   let modelSnapshot: Model<Api>[] = [];
   const clipboardStatusBySessionId = new Map<string, ClipboardStatus>();
+  const splitBackend = resolveSplitLaunchBackend(pi, {
+    getTerminalId: () => identifiedGhosttyTerminalId,
+  });
 
   pi.registerMessageRenderer(HANDOFF_KICKOFF_CUSTOM_TYPE, renderHandoffKickoffMessage);
   pi.registerEntryRenderer(
@@ -116,7 +118,10 @@ export function installHandoff(
     createHandoffLaunchReceiptRenderer((sessionId) => clipboardStatusBySessionId.get(sessionId)),
   );
 
-  function registerHandoffTool(models: readonly Model<Api>[], ghosttyAvailable: boolean): void {
+  function registerHandoffTool(
+    models: readonly Model<Api>[],
+    splitBackend: SplitLaunchBackend | undefined,
+  ): void {
     pi.registerTool({
       name: "session_handoff",
       label: "Session Handoff",
@@ -140,7 +145,7 @@ export function installHandoff(
           description:
             "Short display title for the child session, 64 characters or less. Summarize the mission; do not repeat the full goal.",
         }),
-        launch: handoffLaunchSchema(ghosttyAvailable),
+        launch: handoffLaunchSchema(splitBackend),
         cwd: Type.Optional(
           Type.String({
             description:
@@ -201,7 +206,7 @@ export function installHandoff(
           params,
           ctx,
           modelRuntime,
-          identifiedGhosttyTerminalId,
+          splitBackend,
           settings.handoff.deferred.copyToClipboard,
           (sessionId, status) => clipboardStatusBySessionId.set(sessionId, status),
         );
@@ -226,7 +231,11 @@ export function installHandoff(
       }
 
       if (parsedArgs.kind === "identify") {
-        const terminalId = await getFocusedGhosttyTerminalId(pi, ctx.cwd);
+        if (!splitBackend?.identifyTerminalId) {
+          ctx.ui.notify("--identify applies only to Ghostty splits.", "error");
+          return;
+        }
+        const terminalId = await splitBackend.identifyTerminalId(ctx.cwd);
         if (!terminalId) {
           ctx.ui.notify("Unable to identify the focused Ghostty terminal.", "error");
           return;
@@ -273,7 +282,7 @@ export function installHandoff(
       }
 
       if (parsedArgs.launch && parsedArgs.launch !== DEFERRED_LAUNCH) {
-        const preflightError = await validateSplitHandoffPrerequisites(ctx);
+        const preflightError = validateSplitHandoffPrerequisites(ctx, splitBackend);
         if (preflightError) {
           ctx.ui.notify(preflightError, "error");
           return;
@@ -381,11 +390,10 @@ export function installHandoff(
           return;
         }
 
-        const backend = createGhosttyLaunchBackend(pi, {
-          direction: parsedArgs.launch,
-          terminalId: identifiedGhosttyTerminalId,
-          fallbackToFocusedOnError: true,
-        });
+        if (!splitBackend) {
+          throw new Error("Split launch backend became unavailable after preflight.");
+        }
+        const backend = splitBackend.create(parsedArgs.launch);
         const outcome = await backend.launch({
           cwd: ctx.cwd,
           title: handoffMetadata.title,
@@ -400,7 +408,7 @@ export function installHandoff(
           return;
         }
 
-        appendLaunchReceipt(parsedArgs.launch, "Ghostty");
+        appendLaunchReceipt(parsedArgs.launch, backend.name);
         return;
       }
 
@@ -447,9 +455,9 @@ export function installHandoff(
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    if (isGhosttyHandoffAvailable() && ctx) {
+    if (splitBackend?.identifyTerminalId && ctx) {
       identifiedGhosttyTerminalId =
-        (await getFocusedGhosttyTerminalId(pi, ctx.cwd)) ?? identifiedGhosttyTerminalId;
+        (await splitBackend.identifyTerminalId(ctx.cwd)) ?? identifiedGhosttyTerminalId;
     }
 
     return {
@@ -462,7 +470,7 @@ export function installHandoff(
   return {
     async onSessionStart(_event, ctx) {
       modelSnapshot = ctx.modelRegistry.getAvailable();
-      registerHandoffTool(modelSnapshot, isGhosttyHandoffAvailable());
+      registerHandoffTool(modelSnapshot, splitBackend);
 
       await consumePendingHandoffBootstrap(pi, ctx, deps.getModelRuntime, pi.getThinkingLevel());
     },

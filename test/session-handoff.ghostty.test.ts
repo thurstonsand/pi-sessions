@@ -3,14 +3,15 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createGhosttyLaunchBackend,
   getFocusedGhosttyTerminalId,
-  validateSplitHandoffPrerequisites,
 } from "../extensions/session-handoff/launch/ghostty.ts";
+import { validateSplitHandoffPrerequisites } from "../extensions/session-handoff/launch/resolution.ts";
 
 import { buildPiResumeCommand } from "../extensions/session-handoff/spawn.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.TERM_PROGRAM;
+  delete process.env.TMUX;
 });
 
 describe("ghostty launch backend", () => {
@@ -24,43 +25,34 @@ describe("ghostty launch backend", () => {
       },
     };
 
-    await expect(validateSplitHandoffPrerequisites(ctx as never)).resolves.toBe(
+    expect(validateSplitHandoffPrerequisites(ctx as never, undefined)).toBe(
       "Split handoff requires a persisted current session.",
     );
   });
 
-  it("fails split preflight outside macOS", async () => {
+  it("accepts split preflight inside tmux on any platform", () => {
     vi.spyOn(process, "platform", "get").mockReturnValue("linux");
-    process.env.TERM_PROGRAM = "ghostty";
-
+    process.env.TMUX = "/tmp/tmux-501/default,1,0";
     const ctx = {
-      cwd: "/tmp/project",
-      sessionManager: {
-        getSessionFile() {
-          return "/tmp/project/current.jsonl";
-        },
-      },
+      sessionManager: { getSessionFile: () => "/tmp/project/current.jsonl" },
     };
 
-    await expect(validateSplitHandoffPrerequisites(ctx as never)).resolves.toBe(
-      "Split handoff currently supports Ghostty on macOS only.",
-    );
+    expect(
+      validateSplitHandoffPrerequisites(ctx as never, {
+        name: "tmux",
+        create: vi.fn(),
+      }),
+    ).toBeUndefined();
   });
 
-  it("fails split preflight when not running inside Ghostty", async () => {
+  it("fails split preflight without tmux or Ghostty", () => {
     vi.spyOn(process, "platform", "get").mockReturnValue("darwin");
-
     const ctx = {
-      cwd: "/tmp/project",
-      sessionManager: {
-        getSessionFile() {
-          return "/tmp/project/current.jsonl";
-        },
-      },
+      sessionManager: { getSessionFile: () => "/tmp/project/current.jsonl" },
     };
 
-    await expect(validateSplitHandoffPrerequisites(ctx as never)).resolves.toBe(
-      "Split handoff requires running inside Ghostty.",
+    expect(validateSplitHandoffPrerequisites(ctx as never, undefined)).toBe(
+      "Split handoff requires running inside tmux or Ghostty on macOS.",
     );
   });
 
@@ -138,7 +130,6 @@ describe("ghostty launch backend", () => {
     const backend = createGhosttyLaunchBackend(pi as never, {
       direction: "right",
       terminalId: "terminal-123",
-      fallbackToFocusedOnError: true,
     });
 
     const result = await backend.launch({

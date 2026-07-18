@@ -1,3 +1,5 @@
+export type HandoffSplitDirection = "left" | "right" | "up" | "down";
+
 export interface LaunchInput {
   cwd: string;
   title: string;
@@ -11,5 +13,6 @@ export type LaunchOutcome =
   | { success: false; error: string };
 
 export interface LaunchBackend {
+  name: string;
   launch(input: LaunchInput): Promise<LaunchOutcome>;
 }

@@ -11,6 +11,8 @@ const mockLoadSettings = vi.fn();
 const mockOpenSessionReferencePicker = vi.fn();
 const mockIsGhosttyHandoffAvailable = vi.fn(() => true);
 const mockCreateGhosttyLaunchBackend = vi.fn();
+const mockCreateTmuxSplitLaunchBackend = vi.fn();
+const mockResolveSplitLaunchBackend = vi.fn();
 const mockCreateDeferredLaunchBackend = vi.fn();
 const mockDeferredLaunch = vi.fn();
 const mockPrepareHandoffLaunch = vi.fn();
@@ -27,7 +29,15 @@ vi.mock("../extensions/session-handoff/launch/ghostty.ts", () => ({
   isGhosttyHandoffAvailable: mockIsGhosttyHandoffAvailable,
   getFocusedGhosttyTerminalId: vi.fn(),
   createGhosttyLaunchBackend: mockCreateGhosttyLaunchBackend,
+}));
+
+vi.mock("../extensions/session-handoff/launch/resolution.ts", () => ({
+  resolveSplitLaunchBackend: mockResolveSplitLaunchBackend,
   validateSplitHandoffPrerequisites: vi.fn(),
+}));
+
+vi.mock("../extensions/session-handoff/launch/tmux.ts", () => ({
+  createTmuxSplitLaunchBackend: mockCreateTmuxSplitLaunchBackend,
 }));
 
 vi.mock("../extensions/session-handoff/launch/deferred.ts", () => ({
@@ -49,6 +59,16 @@ beforeEach(() => {
   });
   mockOpenSessionReferencePicker.mockResolvedValue({ kind: "cancel" });
   mockIsGhosttyHandoffAvailable.mockReturnValue(true);
+  mockResolveSplitLaunchBackend.mockImplementation(
+    (pi: unknown, options: { getTerminalId: () => string | undefined }) => ({
+      name: "Ghostty",
+      create: (direction: string) =>
+        mockCreateGhosttyLaunchBackend(pi, {
+          direction,
+          terminalId: options.getTerminalId(),
+        }),
+    }),
+  );
   mockDeferredLaunch.mockImplementation(async () => ({
     success: true,
     clipboardStatus: "copied",
@@ -188,17 +208,32 @@ describe("session handoff extension", () => {
       {},
       createSessionStartContext({ sessionId: "x" }) as never,
     );
-    expect(launchValues(registerTool.mock.calls.at(-1)?.[0])).toEqual([
-      "left",
-      "right",
-      "up",
-      "down",
-      "deferred",
-    ]);
+    const definition = registerTool.mock.calls.at(-1)?.[0];
+    expect(launchValues(definition)).toEqual(["left", "right", "up", "down", "deferred"]);
+    expect(launchDescription(definition)).toContain("direction values open a Ghostty split");
   });
 
-  it("offers only deferred at session start when Ghostty is unavailable", async () => {
+  it("describes tmux when tmux is the selected split backend", async () => {
+    mockResolveSplitLaunchBackend.mockReturnValue({ name: "tmux", create: vi.fn() });
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+
+    installHandoffAndWire(installHandoff, pi);
+    await handlers.get("session_start")?.(
+      {},
+      createSessionStartContext({ sessionId: "x" }) as never,
+    );
+
+    const registerTool = pi.registerTool as ReturnType<typeof vi.fn>;
+    expect(launchDescription(registerTool.mock.calls.at(-1)?.[0])).toContain(
+      "direction values open a tmux split",
+    );
+  });
+
+  it("offers only deferred at session start when no split backend is available", async () => {
     mockIsGhosttyHandoffAvailable.mockReturnValue(false);
+    mockResolveSplitLaunchBackend.mockReturnValue(undefined);
     const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
@@ -241,8 +276,9 @@ describe("session handoff extension", () => {
     });
   });
 
-  it("degrades a split launch to deferred when Ghostty is unavailable", async () => {
+  it("degrades a split launch to deferred when no split backend is available", async () => {
     mockIsGhosttyHandoffAvailable.mockReturnValue(false);
+    mockResolveSplitLaunchBackend.mockReturnValue(undefined);
     const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
@@ -257,6 +293,29 @@ describe("session handoff extension", () => {
     expect(mockCreateDeferredLaunchBackend).toHaveBeenCalled();
     expect(mockCreateGhosttyLaunchBackend).not.toHaveBeenCalled();
     expect(result.details).toMatchObject({ launch: "deferred", degradedFrom: "right" });
+  });
+
+  it("routes tool splits through tmux before Ghostty", async () => {
+    const mockTmuxLaunch = vi.fn().mockResolvedValue({ success: true });
+    mockResolveSplitLaunchBackend.mockImplementation((pi: unknown) => ({
+      name: "tmux",
+      create: (direction: string) => mockCreateTmuxSplitLaunchBackend(pi, direction),
+    }));
+    mockCreateTmuxSplitLaunchBackend.mockReturnValue({ name: "tmux", launch: mockTmuxLaunch });
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi);
+
+    const result = await runTool(pi, handlers, {
+      goal: "Do it",
+      title: "Do it now",
+      launch: "right",
+    });
+
+    expect(mockCreateTmuxSplitLaunchBackend).toHaveBeenCalledWith(pi, "right");
+    expect(mockCreateGhosttyLaunchBackend).not.toHaveBeenCalled();
+    expect(result.details).toMatchObject({ launch: "right", backend: "tmux" });
   });
 
   it("rejects an unknown model override with the available list", async () => {
@@ -427,6 +486,11 @@ function createPiApi(
       handlers.set(event, handler);
     },
   };
+}
+
+function launchDescription(definition: unknown): string {
+  return (definition as { parameters: { properties: { launch: { description: string } } } })
+    .parameters.properties.launch.description;
 }
 
 function launchValues(definition: unknown): string[] {

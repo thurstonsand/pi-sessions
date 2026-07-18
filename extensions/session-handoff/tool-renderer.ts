@@ -54,7 +54,7 @@ export class HandoffToolComponent implements Component {
         new Text(
           this.theme.fg(
             "muted",
-            `(requested ${this.model.result.degradedFrom}; Ghostty unavailable)`,
+            `(requested ${this.model.result.degradedFrom}; split backend unavailable)`,
           ),
           0,
           0,

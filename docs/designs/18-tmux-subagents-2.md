@@ -337,7 +337,7 @@ Every phase is independently shippable: `npm run check` green, no half-finished 
   - Work: Envelope union with TypeBox validation and broker-stamped source; named incoming handlers with durable-before-ack ownership per kind; `cancelSession` → target runtime `ctx.abort()`; plain `session_cancel` tool (live targets; dead targets error); `waitForSession`.
   - Validation: Envelope round-trip and forged-source tests; smoke: cancel a live session's turn from another session.
 
-- [ ] Phase 3: Tmux substrate and visible tmux splits
+- [x] Phase 3: Tmux substrate and visible tmux splits
   - Goal: Tmux helpers exist; direction launches split tmux when `$TMUX` is set. No sub-agent exposure yet.
   - Files: new `extensions/shared/tmux.ts`; `extensions/session-handoff/launch/tmux.ts`; launch resolution; tests.
   - Work: Detection (`$TMUX` before `TERM_PROGRAM`); per-parent session naming; idempotent create/list/verified-kill helpers; `@pi_session_id` stamping and `list-windows -F` queries; direction backend via `split-window`.

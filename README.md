@@ -76,7 +76,7 @@ File filters distinguish read-or-write evidence from write-only evidence:
 
 `/handoff <goal>` starts a focused new session. Give pi a goal, and it will generate a prompt for you to review before kicking it off.
 
-You can start a new session directly in your current one, defer it, or — with Ghostty on macOS — spawn it in a split-pane and continue where you are:
+You can start a new session directly in your current one, defer it, or spawn it in a split pane and continue where you are. Split-pane uses tmux if you're inside tmux, or Ghostty if you're using Ghostty on MacOS:
 
 - `/handoff --left <goal>`
 - `/handoff --right <goal>`
@@ -84,7 +84,7 @@ You can start a new session directly in your current one, defer it, or — with 
 - `/handoff --down <goal>`
 - `/handoff --deferred <goal>`
 
-The direction flags indicate the Ghostty split. `--deferred` creates the child session without launching it and copies its resume command to the clipboard, so it works anywhere.
+The direction flags indicate the split direction. `--deferred` creates the child session without launching it and copies its resume command to the clipboard, so it works anywhere.
 
 By default the child inherits the current model and thinking level. Override per handoff with `--model provider/id[:thinking]`:
 
@@ -101,7 +101,7 @@ If you do nothing, the preview autostarts after a short countdown.
 
 pi-sessions also exposes a `session_handoff` tool so the agent can fork a background session on its own. The current session keeps running while the child gathers context and shows the same review countdown before starting.
 
-If background handoffs ever target the wrong pane, run `/handoff --identify` from the intended source pane to refresh the in-memory Ghostty terminal binding.
+When using Ghostty, if background handoffs ever target the wrong pane, run `/handoff --identify` from the intended source pane to refresh the in-memory terminal binding.
 
 ## Session Messaging
 

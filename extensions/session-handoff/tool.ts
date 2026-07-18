@@ -4,21 +4,14 @@ import { isAbsolute, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { resolveHandoffSource } from "./extract.ts";
-import type { ClipboardStatus } from "./launch/backend.ts";
+import type { ClipboardStatus, HandoffSplitDirection } from "./launch/backend.ts";
 import { createDeferredLaunchBackend } from "./launch/deferred.ts";
-import {
-  createGhosttyLaunchBackend,
-  type HandoffSplitDirection,
-  isGhosttyHandoffAvailable,
-} from "./launch/ghostty.ts";
+import type { SplitLaunchBackend } from "./launch/resolution.ts";
 import { createChildGeneratedHandoffBootstrap } from "./metadata.ts";
 import { formatModelArgument, resolveModelOverride } from "./model.ts";
 import { buildLaunchReceipt } from "./receipt.ts";
 import { prepareHandoffLaunch } from "./spawn.ts";
 import type { HandoffToolDetails } from "./tool-contract.ts";
-
-const NO_IDENTIFIED_TERMINAL_MESSAGE =
-  "No Ghostty source terminal identified. Run /handoff --identify from the intended source pane.";
 
 export const LAUNCH_DIRECTIONS = ["left", "right", "up", "down"] as const;
 export const DEFERRED_LAUNCH = "deferred" as const;
@@ -40,7 +33,7 @@ export async function executeSessionHandoffTool(
   params: HandoffToolParams,
   ctx: ExtensionContext,
   modelRuntime: ModelRuntime,
-  terminalId: string | undefined,
+  splitLaunchBackend: SplitLaunchBackend | undefined,
   copyToClipboardSetting: boolean,
   recordClipboardStatus: (sessionId: string, status: ClipboardStatus) => void,
 ) {
@@ -59,12 +52,11 @@ export async function executeSessionHandoffTool(
   }
 
   const direction = params.launch === DEFERRED_LAUNCH ? undefined : params.launch;
-  const useGhostty = direction !== undefined && isGhosttyHandoffAvailable();
-  const degradedFrom = direction !== undefined && !useGhostty ? direction : undefined;
-
-  if (useGhostty && !terminalId) {
-    throw new Error(NO_IDENTIFIED_TERMINAL_MESSAGE);
-  }
+  const degradedFrom = direction && !splitLaunchBackend ? direction : undefined;
+  const backend =
+    direction && splitLaunchBackend
+      ? splitLaunchBackend.create(direction)
+      : createDeferredLaunchBackend({ copyToClipboard: copyToClipboardSetting });
 
   const targetCwd = resolveHandoffCwd(ctx.cwd, params.cwd);
   if (targetCwd.error) {
@@ -116,10 +108,6 @@ export async function executeSessionHandoffTool(
         requestResponse,
       }),
   });
-  const backend =
-    useGhostty && direction !== undefined
-      ? createGhosttyLaunchBackend(pi, { direction, terminalId })
-      : createDeferredLaunchBackend({ copyToClipboard: copyToClipboardSetting });
   const outcome = await backend.launch({
     cwd: targetCwd.path,
     title,
@@ -136,14 +124,14 @@ export async function executeSessionHandoffTool(
   }
 
   const effectiveLaunch: HandoffLaunchTarget =
-    useGhostty && direction !== undefined ? direction : DEFERRED_LAUNCH;
+    splitLaunchBackend && direction ? direction : DEFERRED_LAUNCH;
   const details: HandoffToolDetails = {
     ...buildLaunchReceipt({
       sessionId: prepared.sessionId,
       title,
       launch: effectiveLaunch,
       resumeCommand: prepared.resumeCommand,
-      backend: effectiveLaunch === DEFERRED_LAUNCH ? undefined : "Ghostty",
+      backend: effectiveLaunch === DEFERRED_LAUNCH ? undefined : backend.name,
       targetCwd: targetCwd.path,
       parentCwd: ctx.cwd,
       childModel: model,

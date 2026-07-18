@@ -3,6 +3,7 @@ import type { LaunchBackend, LaunchInput, LaunchOutcome } from "./backend.ts";
 
 export function createDeferredLaunchBackend(options: { copyToClipboard: boolean }): LaunchBackend {
   return {
+    name: "deferred",
     async launch(input: LaunchInput): Promise<LaunchOutcome> {
       if (!options.copyToClipboard) {
         return { success: true };

@@ -8,6 +8,8 @@ const mockReviewHandoffDraft = vi.fn();
 const mockValidateSplitHandoffPrerequisites = vi.fn();
 const mockPrepareHandoffLaunch = vi.fn();
 const mockCreateGhosttyLaunchBackend = vi.fn();
+const mockCreateTmuxSplitLaunchBackend = vi.fn();
+const mockResolveSplitLaunchBackend = vi.fn();
 const mockLaunch = vi.fn();
 const mockCreateDeferredLaunchBackend = vi.fn();
 const mockDeferredLaunch = vi.fn();
@@ -35,10 +37,18 @@ vi.mock("../extensions/session-handoff/spawn.ts", () => ({
 }));
 
 vi.mock("../extensions/session-handoff/launch/ghostty.ts", () => ({
-  validateSplitHandoffPrerequisites: mockValidateSplitHandoffPrerequisites,
-  isGhosttyHandoffAvailable: vi.fn(() => false),
+  isGhosttyHandoffAvailable: vi.fn(() => true),
   getFocusedGhosttyTerminalId: mockGetFocusedGhosttyTerminalId,
   createGhosttyLaunchBackend: mockCreateGhosttyLaunchBackend,
+}));
+
+vi.mock("../extensions/session-handoff/launch/resolution.ts", () => ({
+  validateSplitHandoffPrerequisites: mockValidateSplitHandoffPrerequisites,
+  resolveSplitLaunchBackend: mockResolveSplitLaunchBackend,
+}));
+
+vi.mock("../extensions/session-handoff/launch/tmux.ts", () => ({
+  createTmuxSplitLaunchBackend: mockCreateTmuxSplitLaunchBackend,
 }));
 
 vi.mock("../extensions/session-handoff/launch/deferred.ts", () => ({
@@ -67,13 +77,25 @@ beforeEach(() => {
     sessionPath: "/tmp/session.jsonl",
   });
   mockReviewHandoffDraft.mockResolvedValue("Approved handoff draft");
-  mockValidateSplitHandoffPrerequisites.mockResolvedValue(undefined);
+  mockValidateSplitHandoffPrerequisites.mockReturnValue(undefined);
   mockPrepareHandoffLaunch.mockImplementation((options: { model?: string }) => ({
     sessionId: "child-session-123",
     resumeCommand: `RESUME child-session-123 ${options.model ?? "inherit"}`,
   }));
   mockLaunch.mockResolvedValue({ success: true });
-  mockCreateGhosttyLaunchBackend.mockReturnValue({ launch: mockLaunch });
+  mockCreateGhosttyLaunchBackend.mockReturnValue({ name: "Ghostty", launch: mockLaunch });
+  mockCreateTmuxSplitLaunchBackend.mockReturnValue({ name: "tmux", launch: mockLaunch });
+  mockResolveSplitLaunchBackend.mockImplementation(
+    (pi: unknown, options: { getTerminalId: () => string | undefined }) => ({
+      name: "Ghostty",
+      identifyTerminalId: (cwd: string) => mockGetFocusedGhosttyTerminalId(pi, cwd),
+      create: (direction: string) =>
+        mockCreateGhosttyLaunchBackend(pi, {
+          direction,
+          terminalId: options.getTerminalId(),
+        }),
+    }),
+  );
   mockDeferredLaunch.mockImplementation(async () => ({
     success: true,
     clipboardStatus: "copied",
@@ -173,6 +195,17 @@ describe("session handoff command", () => {
     expect(mockGenerateHandoffDraft).not.toHaveBeenCalled();
   });
 
+  it("rejects --identify when tmux is the selected backend", async () => {
+    mockResolveSplitLaunchBackend.mockReturnValue({ name: "tmux", create: vi.fn() });
+    const { handler } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--identify", ctx as never);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith("--identify applies to Ghostty splits.", "error");
+    expect(mockGetFocusedGhosttyTerminalId).not.toHaveBeenCalled();
+  });
+
   it("requires conversation context", async () => {
     const { handler } = await getHandoffCommand();
     const ctx = createCommandContext({ hasMessages: false });
@@ -229,7 +262,10 @@ describe("session handoff command", () => {
 
     await handler("--right Finish phase 1", ctx as never);
 
-    expect(mockValidateSplitHandoffPrerequisites).toHaveBeenCalledWith(ctx);
+    expect(mockValidateSplitHandoffPrerequisites).toHaveBeenCalledWith(
+      ctx,
+      expect.objectContaining({ name: "Ghostty" }),
+    );
     expect(mockPrepareHandoffLaunch).toHaveBeenCalledWith(
       expect.objectContaining({
         targetCwd: "/tmp/project",
@@ -244,7 +280,6 @@ describe("session handoff command", () => {
     expect(mockCreateGhosttyLaunchBackend).toHaveBeenCalledWith(pi, {
       direction: "right",
       terminalId: undefined,
-      fallbackToFocusedOnError: true,
     });
     expect(mockLaunch).toHaveBeenCalledWith({
       cwd: "/tmp/project",
@@ -272,8 +307,26 @@ describe("session handoff command", () => {
     });
   });
 
+  it("prefers a tmux split when running inside tmux", async () => {
+    mockResolveSplitLaunchBackend.mockImplementation((pi: unknown) => ({
+      name: "tmux",
+      create: (direction: string) => mockCreateTmuxSplitLaunchBackend(pi, direction),
+    }));
+    const { handler, pi } = await getHandoffCommand();
+    const ctx = createCommandContext();
+
+    await handler("--left Finish phase 1", ctx as never);
+
+    expect(mockCreateTmuxSplitLaunchBackend).toHaveBeenCalledWith(pi, "left");
+    expect(mockCreateGhosttyLaunchBackend).not.toHaveBeenCalled();
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      "pi-sessions.handoff-launch-receipt",
+      expect.objectContaining({ launch: "left", backend: "tmux" }),
+    );
+  });
+
   it("fails loudly when split-pane preflight fails", async () => {
-    mockValidateSplitHandoffPrerequisites.mockResolvedValue(
+    mockValidateSplitHandoffPrerequisites.mockReturnValue(
       "Split handoff requires running inside Ghostty.",
     );
     const { handler } = await getHandoffCommand();

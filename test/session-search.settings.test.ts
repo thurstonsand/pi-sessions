@@ -24,6 +24,28 @@ describe("pi-sessions index settings", () => {
     expect(settings.index.path).toBe(getDefaultIndexPath());
   });
 
+  it("defaults subagents on with a maximum depth of two", () => {
+    const agentDir = testFs.createTempDir();
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    const settings = loadSettings();
+    expect(settings.features.subagents).toBe(true);
+    expect(settings.subagents.maxDepth).toBe(2);
+  });
+
+  it("reads subagent feature and depth settings", () => {
+    const agentDir = testFs.createTempDir();
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    writeFileSync(
+      `${agentDir}/settings.json`,
+      `${JSON.stringify({ sessions: { features: { subagents: false }, subagents: { maxDepth: 4 } } }, null, 2)}\n`,
+    );
+
+    const settings = loadSettings();
+    expect(settings.features.subagents).toBe(false);
+    expect(settings.subagents.maxDepth).toBe(4);
+  });
+
   it("reads an explicit index dir from global settings", () => {
     const agentDir = testFs.createTempDir();
     const dir = testFs.createTempDir();

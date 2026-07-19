@@ -9,6 +9,7 @@ import { installSearch } from "./session-search/install.ts";
 import type { SessionLifecycle } from "./shared/composition.ts";
 import { createSessionModelRuntime, type ModelRuntimeProvider } from "./shared/model-runtime.ts";
 import { loadSettings } from "./shared/settings.ts";
+import { installSubagents } from "./subagents/install.ts";
 
 /**
  * The single advertised entrypoint. It loads settings once, constructs each feature in
@@ -43,8 +44,22 @@ export default function piSessions(pi: ExtensionAPI): void {
   if (messaging) {
     lifecycles.push(messaging);
   }
+  const subagents =
+    settings.features.subagents && messaging
+      ? installSubagents(pi, { settings, messaging })
+      : undefined;
+  if (subagents) {
+    lifecycles.push(subagents);
+  }
   if (settings.features.handoff) {
-    lifecycles.push(installHandoff(pi, { settings, index, getModelRuntime }));
+    lifecycles.push(
+      installHandoff(pi, {
+        settings,
+        index,
+        getModelRuntime,
+        ...(subagents ? { getLaunchTargets: () => subagents.getLaunchTargets() } : {}),
+      }),
+    );
   }
   if (settings.features.search) {
     installSearch(pi, { settings, index, messaging });

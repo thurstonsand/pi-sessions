@@ -245,7 +245,7 @@ export async function runSessionAskAgent(params: {
     description: "Return the final answer for session_ask.",
     promptSnippet: "Provide session ask result",
     promptGuidelines: [
-      "Call provide_results exactly once when you are ready to answer. It is the final tool call and ends the session_ask sub-agent turn.",
+      "Call provide_results exactly once when you are ready to answer. It is the final tool call and ends the session_ask subagent turn.",
     ],
     parameters: PROVIDE_RESULTS_PARAMETERS,
     execute: async (_toolCallId, toolParams: ProvideResultsArgs) => {

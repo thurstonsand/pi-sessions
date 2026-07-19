@@ -83,8 +83,9 @@ You can start a new session directly in your current one, defer it, or spawn it 
 - `/handoff --up <goal>`
 - `/handoff --down <goal>`
 - `/handoff --deferred <goal>`
+- `/handoff --subagent <goal>`
 
-The direction flags indicate the split direction. `--deferred` creates the child session without launching it and copies its resume command to the clipboard, so it works anywhere.
+The direction flags indicate the split direction. `--deferred` creates the child session without launching it and copies its resume command to the clipboard, so it works anywhere. When tmux is installed, `--subagent` starts a detached child automatically for one delegated task.
 
 By default the child inherits the current model and thinking level. Override per handoff with `--model provider/id[:thinking]`:
 
@@ -99,7 +100,7 @@ Flow:
 
 If you do nothing, the preview autostarts after a short countdown.
 
-pi-sessions also exposes a `session_handoff` tool so the agent can fork a background session on its own. The current session keeps running while the child gathers context and shows the same review countdown before starting.
+pi-sessions also exposes a `session_handoff` tool so the agent can fork a background session on its own. Directional and deferred launches use the reviewed handoff flow. When tmux is installed, the agent can instead launch a detached subagent automatically and continue useful work while it runs.
 
 When using Ghostty, if background handoffs ever target the wrong pane, run `/handoff --identify` from the intended source pane to refresh the in-memory terminal binding.
 
@@ -140,6 +141,18 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
 ```
 
 `deferred.copyToClipboard` (default `true`) controls whether deferred handoffs copy the resume command to the clipboard. When off, the resume command is only shown in the tool call.
+
+Subagents are enabled by default and require the handoff and messaging features. Limit recursive delegation depth with `sessions.subagents.maxDepth` (default `2`):
+
+```json
+{
+  "sessions": {
+    "subagents": {
+      "maxDepth": 2
+    }
+  }
+}
+```
 
 ## Session Index
 

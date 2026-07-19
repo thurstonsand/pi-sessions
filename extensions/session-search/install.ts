@@ -2,6 +2,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import type { MessagingHandle } from "../session-messaging/install.ts";
 import type { IndexHandle } from "../shared/composition.ts";
+import { formatError } from "../shared/errors.ts";
 import { stripSearchSnippetMarkers } from "../shared/search-snippet.ts";
 import {
   type SearchSessionResult,
@@ -235,8 +236,4 @@ function validateSearchParams(params: SessionSearchToolParams): string | undefin
 function isValidIsoDateLike(value: string): boolean {
   const date = new Date(value);
   return !Number.isNaN(date.getTime());
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error && error.message.trim() ? error.message : String(error);
 }

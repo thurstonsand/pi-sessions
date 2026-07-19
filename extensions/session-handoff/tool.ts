@@ -4,24 +4,26 @@ import { isAbsolute, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext, ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { resolveHandoffSource } from "./extract.ts";
-import type { ClipboardStatus, HandoffSplitDirection } from "./launch/backend.ts";
-import { createDeferredLaunchBackend } from "./launch/deferred.ts";
-import type { SplitLaunchBackend } from "./launch/resolution.ts";
+import type { ClipboardStatus } from "./launch/backend.ts";
+import { resolveHandoffLaunchTarget } from "./launch-options.ts";
+import {
+  DEFERRED_LAUNCH,
+  type HandoffLaunchTarget,
+  type HandoffLaunchValue,
+} from "./launch-target.ts";
 import { createChildGeneratedHandoffBootstrap } from "./metadata.ts";
 import { formatModelArgument, resolveModelOverride } from "./model.ts";
 import { buildLaunchReceipt } from "./receipt.ts";
 import { prepareHandoffLaunch } from "./spawn.ts";
 import type { HandoffToolDetails } from "./tool-contract.ts";
 
-export const LAUNCH_DIRECTIONS = ["left", "right", "up", "down"] as const;
-export const DEFERRED_LAUNCH = "deferred" as const;
-
-export type HandoffLaunchTarget = HandoffSplitDirection | typeof DEFERRED_LAUNCH;
+export type { HandoffLaunchValue } from "./launch-target.ts";
+export { DEFERRED_LAUNCH, LAUNCH_DIRECTIONS, SUBAGENT_LAUNCH } from "./launch-target.ts";
 
 export interface HandoffToolParams {
   goal: string;
   title: string;
-  launch: HandoffLaunchTarget;
+  launch: HandoffLaunchValue;
   cwd?: string | undefined;
   requestResponse?: boolean | undefined;
   model?: string | undefined;
@@ -33,8 +35,7 @@ export async function executeSessionHandoffTool(
   params: HandoffToolParams,
   ctx: ExtensionContext,
   modelRuntime: ModelRuntime,
-  splitLaunchBackend: SplitLaunchBackend | undefined,
-  copyToClipboardSetting: boolean,
+  launchTargets: readonly HandoffLaunchTarget[],
   recordClipboardStatus: (sessionId: string, status: ClipboardStatus) => void,
 ) {
   const goal = params.goal.trim();
@@ -51,12 +52,7 @@ export async function executeSessionHandoffTool(
     throw new Error("No model selected.");
   }
 
-  const direction = params.launch === DEFERRED_LAUNCH ? undefined : params.launch;
-  const degradedFrom = direction && !splitLaunchBackend ? direction : undefined;
-  const backend =
-    direction && splitLaunchBackend
-      ? splitLaunchBackend.create(direction)
-      : createDeferredLaunchBackend({ copyToClipboard: copyToClipboardSetting });
+  const { target, degradedFrom } = resolveHandoffLaunchTarget(params.launch, launchTargets);
 
   const targetCwd = resolveHandoffCwd(ctx.cwd, params.cwd);
   if (targetCwd.error) {
@@ -80,7 +76,7 @@ export async function executeSessionHandoffTool(
 
   resolveHandoffSource(ctx.sessionManager, sourceLeafId);
 
-  const requestResponse = params.requestResponse ?? false;
+  const requestResponse = params.requestResponse ?? target.requestResponseDefault;
   const override = params.model
     ? resolveModelOverride(modelRuntime, params.model, params.thinkingLevel)
     : undefined;
@@ -106,12 +102,25 @@ export async function executeSessionHandoffTool(
         parentSessionFile,
         sourceLeafId,
         requestResponse,
+        bootstrapMode: target.bootstrapMode,
+      }),
+    prepareChild: (manager, childSessionId) =>
+      target.prepareChild({
+        manager,
+        childSessionId,
+        parentSessionId: ctx.sessionManager.getSessionId(),
+        parentSessionFile,
+        requestResponse,
       }),
   });
-  const outcome = await backend.launch({
-    cwd: targetCwd.path,
+  const outcome = await target.launch({
+    prepared,
+    parentSessionId: ctx.sessionManager.getSessionId(),
     title,
-    resumeCommand: prepared.resumeCommand,
+    goal,
+    requestResponse,
+    model,
+    cwd: targetCwd.path,
   });
 
   if (!outcome.success) {
@@ -123,15 +132,13 @@ export async function executeSessionHandoffTool(
     recordClipboardStatus(prepared.sessionId, outcome.clipboardStatus);
   }
 
-  const effectiveLaunch: HandoffLaunchTarget =
-    splitLaunchBackend && direction ? direction : DEFERRED_LAUNCH;
   const details: HandoffToolDetails = {
     ...buildLaunchReceipt({
       sessionId: prepared.sessionId,
       title,
-      launch: effectiveLaunch,
+      launch: target.value,
       resumeCommand: prepared.resumeCommand,
-      backend: effectiveLaunch === DEFERRED_LAUNCH ? undefined : backend.name,
+      backend: target.value === DEFERRED_LAUNCH ? undefined : outcome.backend,
       targetCwd: targetCwd.path,
       parentCwd: ctx.cwd,
       childModel: model,

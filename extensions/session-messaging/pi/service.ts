@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { formatError } from "../../shared/errors.ts";
 import {
   INCOMING_SESSION_ENVELOPE_EVENT,
   type SessionEnvelopeSendResult,
@@ -10,6 +11,8 @@ import type {
   SessionCancelEnvelope,
   SessionEnvelope,
   SessionMessageEnvelope,
+  SessionSubagentReportEnvelope,
+  TaskReport,
 } from "../../shared/session-broker/protocol.ts";
 import type {
   SessionLineageRelation,
@@ -61,6 +64,16 @@ export type CancelSessionResult =
 
 export type IncomingMessageHandler = (envelope: SessionMessageEnvelope) => Promise<void> | void;
 export type IncomingCancelHandler = (envelope: SessionCancelEnvelope) => Promise<void> | void;
+export type IncomingSubagentReportHandler = (
+  envelope: SessionSubagentReportEnvelope,
+) => Promise<void> | void;
+
+export type SendSubagentReportResult = SessionEnvelopeSendResult;
+
+export interface SendSubagentReportRequest extends TaskReport {
+  target: string;
+  reportId: string;
+}
 
 interface IncomingMessageIndexContext {
   source: ReceivedMessageEndpoint;
@@ -73,6 +86,7 @@ export class SessionMessagingService {
   private relationBySessionId = new Map<string, SessionLineageRelation | undefined>();
   private incomingMessageHandler: IncomingMessageHandler | undefined;
   private incomingCancelHandler: IncomingCancelHandler | undefined;
+  private incomingSubagentReportHandler: IncomingSubagentReportHandler | undefined;
   private readonly connection = new BrokerConnection((envelope) => this.acceptIncoming(envelope));
 
   constructor(indexPath: string) {
@@ -102,6 +116,13 @@ export class SessionMessagingService {
       throw new Error("An incoming cancel handler is already registered.");
     }
     this.incomingCancelHandler = handler;
+  }
+
+  onIncomingSubagentReport(handler: IncomingSubagentReportHandler): void {
+    if (this.incomingSubagentReportHandler) {
+      throw new Error("An incoming subagent report handler is already registered.");
+    }
+    this.incomingSubagentReportHandler = handler;
   }
 
   async listSessions(): Promise<string[]> {
@@ -160,6 +181,22 @@ export class SessionMessagingService {
       target: this.getTargetEndpoint(request.target),
       ...(relation === undefined ? {} : { relation }),
     };
+  }
+
+  async sendSubagentReport(request: SendSubagentReportRequest): Promise<SendSubagentReportResult> {
+    return this.connection.sendEnvelope({
+      target: request.target,
+      envelope: {
+        kind: "subagent_report",
+        reportId: request.reportId,
+        status: request.status,
+        summary: request.summary,
+        ...(request.details ? { details: request.details } : {}),
+        ...(request.references ? { references: request.references } : {}),
+        ...(request.nextSteps ? { nextSteps: request.nextSteps } : {}),
+        sentAt: new Date().toISOString(),
+      },
+    });
   }
 
   async cancelSession(sessionId: string): Promise<CancelSessionResult> {
@@ -253,6 +290,13 @@ export class SessionMessagingService {
             throw new Error("Target session has no incoming cancel handler.");
           }
           await this.incomingCancelHandler(envelope);
+          break;
+        }
+        case "subagent_report": {
+          if (!this.incomingSubagentReportHandler) {
+            throw new Error("Target session has no incoming subagent report handler.");
+          }
+          await this.incomingSubagentReportHandler(envelope);
           break;
         }
       }
@@ -495,8 +539,4 @@ function getRelationMapForSession(
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error && error.message.trim() ? error.message : String(error);
 }

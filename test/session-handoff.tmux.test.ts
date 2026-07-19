@@ -53,7 +53,7 @@ describe("tmux handoff launch", () => {
         title: "Inspect worker",
         resumeCommand: "pi --session-id 'child-1'",
       }),
-    ).resolves.toEqual({ success: true });
+    ).resolves.toEqual({ success: true, backend: "tmux" });
 
     expect(pi.exec).toHaveBeenCalledWith(
       "tmux",

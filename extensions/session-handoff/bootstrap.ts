@@ -146,17 +146,21 @@ async function startChildGeneratedHandoff(
       return;
     }
 
-    const review = await reviewHandoffDraftForSend(ctx.ui, generatedDraft.draft);
-    if (review.action === "prefill") {
-      consumeBootstrap("prefilled");
-      ctx.ui.setEditorText(review.prompt);
-      ctx.ui.notify("Handoff prompt ready in editor.", "info");
-      return;
-    }
-    if (review.action === "cancel") {
-      consumeBootstrap("cancelled");
-      ctx.ui.notify("Cancelled", "info");
-      return;
+    let prompt = generatedDraft.draft;
+    if (bootstrap.bootstrapMode === "review") {
+      const review = await reviewHandoffDraftForSend(ctx.ui, generatedDraft.draft);
+      if (review.action === "prefill") {
+        consumeBootstrap("prefilled");
+        ctx.ui.setEditorText(review.prompt);
+        ctx.ui.notify("Handoff prompt ready in editor.", "info");
+        return;
+      }
+      if (review.action === "cancel") {
+        consumeBootstrap("cancelled");
+        ctx.ui.notify("Cancelled", "info");
+        return;
+      }
+      prompt = review.prompt;
     }
 
     // The tool-provided bootstrap title is authoritative; extraction does not
@@ -164,7 +168,7 @@ async function startChildGeneratedHandoff(
     const metadata = createHandoffSessionMetadata(
       bootstrap.goal,
       generatedDraft.context.nextTask,
-      review.prompt,
+      prompt,
       bootstrap.title,
     );
     if (!getHandoffMetadataFromEntries(ctx.sessionManager.getEntries())) {
@@ -174,7 +178,7 @@ async function startChildGeneratedHandoff(
     const sourceSessionName = sourceSessionManager.getSessionName();
     pi.sendMessage(
       buildHandoffKickoffMessage({
-        prompt: review.prompt,
+        prompt,
         title: metadata.title,
         source: buildHandoffKickoffSource({
           sessionId: sourceSessionManager.getSessionId(),

@@ -1,4 +1,4 @@
-# Tmux Sub-Agents, Revised
+# Tmux Subagents, Revised
 
 ## Status
 
@@ -8,7 +8,7 @@ Supersedes `18-tmux-subagents.md` (whose implementation is discarded; the doc wi
 
 ## Decision Summary
 
-Pi Sessions gains sub-agents: disposable child sessions that carry **exactly one task for their entire life**, run in detached tmux windows while busy, and exist only as session files while dormant. Three structural decisions replace the first design 18: the package advertises **one extension entrypoint** wired by a composition root (deleting cross-extension event seams and process globals), lifecycle observation becomes **trigger-only reconciliation** (deleting the background monitor), and completion becomes an explicit **report** — a dedicated turn-terminating tool whose durable child record is the source of truth and whose parent receipt is durable before acknowledgment.
+Pi Sessions gains subagents: disposable child sessions that carry **exactly one task for their entire life**, run in detached tmux windows while busy, and exist only as session files while dormant. Three structural decisions replace the first design 18: the package advertises **one extension entrypoint** wired by a composition root (deleting cross-extension event seams and process globals), lifecycle observation becomes **trigger-only reconciliation** (deleting the background monitor), and completion becomes an explicit **report** — a dedicated turn-terminating tool whose durable child record is the source of truth and whose parent receipt is durable before acknowledgment.
 
 The central tradeoffs: single-obligation children cannot be re-tasked (launch a new child instead — they are disposable by design); trigger-only reconciliation accepts staleness between interaction points; and the single entrypoint trades per-extension enablement in Pi's extension list for feature toggles in settings. Backwards compatibility is explicitly not a constraint.
 
@@ -16,7 +16,7 @@ The central tradeoffs: single-obligation children cannot be re-tasked (launch a 
 
 The first design 18 was implemented end to end and failed structurally, not superficially. A post-implementation architecture review (conducted against a clean checkout, with an incident-derived threat model) identified the load-bearing mistakes:
 
-- **Cross-extension coordination through event-bus seams.** The "dormant-target resolver" and "cancel-provider" seams let messaging call up into sub-agent logic — a runtime dependency cycle wearing an event-bus costume, with the early-listener/unready-service failure modes that come with it. The `active.ts` process global for sharing one broker connection across jiti module graphs was the same disease in another organ: pi loads each advertised entrypoint in an isolated module graph (`moduleCache: false`), so seven entrypoints forced globals and discovery protocols for what ordinary imports and constructor injection do in one graph.
+- **Cross-extension coordination through event-bus seams.** The "dormant-target resolver" and "cancel-provider" seams let messaging call up into subagent logic — a runtime dependency cycle wearing an event-bus costume, with the early-listener/unready-service failure modes that come with it. The `active.ts` process global for sharing one broker connection across jiti module graphs was the same disease in another organ: pi loads each advertised entrypoint in an isolated module graph (`moduleCache: false`), so seven entrypoints forced globals and discovery protocols for what ordinary imports and constructor injection do in one graph.
 - **A 1-second tmux polling monitor.** It existed to keep derived state warm. Nothing correctness-critical consumes that freshness; every read surface can reconcile on demand.
 - **No obligation semantics.** With completion inferred from ordinary messages, a historical interim message could satisfy a later completion expectation, and `requestResponse` was frozen at bootstrap with nothing to scope it to. Observed bugs followed exactly this shape.
 - **Auto-continue on restore.** Machinery that restarts crashed children at every reconciliation point is a crash loop with extra steps, and required ephemeral retry bookkeeping to bound.
@@ -29,7 +29,7 @@ The surrounding machinery this design composes already exists and survives: hand
 ## Goals
 
 - A parent session delegates focused, disposable work to background children on its own initiative, without occupying the user's terminal.
-- Every advertised capability composes from independently coherent features: handoff and messaging remain fully functional primitives; sub-agents are a composition, not a rewrite.
+- Every advertised capability composes from independently coherent features: handoff and messaging remain fully functional primitives; subagents are a composition, not a rewrite.
 - The user and the agent can always see what was spawned, what is running, and what stopped — after crashes, rewinds, quits, and manual tmux interference.
 - Closing a parent never leaks running workers; resuming it revives exactly the workers the active branch says should exist.
 - A child's report reaches its parent durably, including when the parent is closed at report time.
@@ -37,22 +37,22 @@ The surrounding machinery this design composes already exists and survives: hand
 
 ## Non-Goals
 
-- Re-tasking a child. One task per sub-agent, for life. New work means a new child.
+- Re-tasking a child. One task per subagent, for life. New work means a new child.
 - A synchronous fan-out/join primitive. Parents delegate and continue.
 - Warm idle processes. Wake latency is paid per exchange by design.
 - Automatic restart of crashed or interrupted children. Recovery is explicit (a message wakes them).
 - Managing grandchildren directly. Each session manages one generation; deeper control is delegated recursively.
 - Concurrent parent processes (the same parent session open in two pi processes). The broker's duplicate-registration rejection makes the second process loudly inert; stated, not solved.
-- Non-tmux sub-agent substrates.
+- Non-tmux subagent substrates.
 - Backwards compatibility of any kind: extension lists, settings shape, index schema, and durable entry types may all change; a reindex is assumed.
 
 ## Exposed Shape
 
 ### Vocabulary
 
-- **Sub-agent**: a child session created by a handoff for delegated background work. **Busy** (stamped tmux window exists) or **dormant** (no process; the session file is the sub-agent).
-- **Task**: the single obligation a sub-agent carries from birth — its handoff kickoff. Never replaced.
-- **Report**: a durable child-authored record delivered to the parent via `report_results`. The **first report on the child's active branch satisfies the task obligation**; later reports answer follow-ups.
+- **Subagent**: a child session created by a handoff for delegated background work. **Busy** (stamped tmux window exists) or **dormant** (no process; the session file is the subagent).
+- **Task**: the single obligation a subagent carries from birth — its handoff kickoff. Never replaced.
+- **Report**: a durable child-authored record delivered to the parent via `submit_task_report`. The **first report on the child's active branch satisfies the task obligation**; later reports answer follow-ups.
 - **Steering message**: an ordinary message into a busy child's current turn. Creates no obligation.
 - **Follow-up**: an ordinary message to a dormant completed child (wakes it); the child answers with another report and exits again. Completion never regresses.
 - **Ledger**: writer-scoped lifecycle entries in the parent's session file (launched / cancelled / suspended / closed / report-received). The **desired set** is reconstructed by walking the active branch from the current leaf.
@@ -81,7 +81,7 @@ installAsk(pi, …); installAutoTitle(pi, …); installHooks(pi, …);
 
 The root also owns lifecycle ordering: it subscribes to `session_start`/`session_shutdown` once and drives feature hooks deterministically — broker registration resolves before any reconciliation mutation. A process that fails broker registration (duplicate session) refuses all reconciliation mutation, not merely messaging.
 
-Which tool registrations happen is a root decision: with sub-agents enabled, the composite `session_send_message` (wake-on-send) and `session_cancel` (ownership dispatch) register instead of messaging's plain variants, and they call _down_ into the messaging handle. No upward calls exist anywhere.
+Which tool registrations happen is a root decision: with subagents enabled, the composite `session_send_message` (wake-on-send) and `session_cancel` (ownership dispatch) register instead of messaging's plain variants, and they call _down_ into the messaging handle. No upward calls exist anywhere.
 
 Settings move under `sessions.features` (booleans, default on) and `sessions.subagents` (`maxDepth`, default 2, user-settable).
 
@@ -96,20 +96,20 @@ launch: "left" | "right" | "up" | "down" | "deferred" | "subagent";
 - `requestResponse` defaults to `true` for `launch: "subagent"` only; fire-and-forget must be explicit.
 - Launch failure after child preparation reports the surviving prepared session and its resume command; it never pretends nothing was created.
 - Handoff context anchors to the last settled parent entry, never the in-flight tool-call leaf. The tool is not marked `sequential`.
-- Command and tool paths (`/handoff --subagent`, `launch: "subagent"`) share one launch/bootstrap policy; policy booleans are persisted in the prepared child, never defaulted per path.
+- Command and tool paths (`/handoff --subagent`, `launch: "subagent"`) share one launch/bootstrap policy; launch and bootstrap policy values are persisted in the prepared child, never defaulted per path.
 
-### `report_results` (child-side tool)
+### `submit_task_report` (child-side tool)
 
-Available to sub-agent children for their whole life (identity self-check gates it; see Design Decision 8). Semantics: _report to parent_.
+Available to subagent children for their whole life (identity self-check gates it; see Design Decision 8). Semantics: _report to parent_.
 
-1. Append the durable child report record (`reportId`, `status: done | error`, report body) — the child file is the mailbox of record.
+1. Append the durable child report record (`reportId`, `status: done | blocked | incomplete`, summary, and optional details, references, and next steps) — the child file is the mailbox of record.
 2. Attempt delivery as a typed `subagent_report` envelope. Success is not required.
 3. Terminate the turn (analogous to session-ask's `provide_results`).
 4. Exit at settle (or linger while observed).
 
 The first report on the active branch satisfies the task obligation. Subsequent reports answer follow-ups with identical mechanics. Identical schema whether or not the parent is reachable — delivery is replication of an already-durable record.
 
-### `session_send_message` (composite when sub-agents are enabled)
+### `session_send_message` (composite when subagents are enabled)
 
 Routing, decided before transport:
 
@@ -125,7 +125,7 @@ This is also the agent's recovery surface: the roster shows `interrupted`/`stopp
 session_cancel(sessionId);
 ```
 
-- Owned sub-agent → durable cancellation ledger entry **first**, then live-cancel envelope if broker-registered (covers external resumes), then verified tmux kill. Unverified teardown reports `stopping`, never `stopped`.
+- Owned subagent → durable cancellation ledger entry **first**, then live-cancel envelope if broker-registered (covers external resumes), then verified tmux kill. Unverified teardown reports `stopping`, never `stopped`.
 - Other broker-live session → cancel envelope; the target's runtime calls `ctx.abort()`. Guidance: only against user sessions when the user directs it.
 - Anything else → error; nothing to cancel.
 
@@ -145,11 +145,11 @@ Owned-managed is checked before broker-liveness because aborting a turn does not
 
 Engine contract: relationship and presence planes resolve to session-id sets **outside** the index (relationship from transcript ledger walks — never from indexed classification); the content plane filters and ranks within the intersection (the existing `includeSessionIds` mechanism, promoted from `live:`'s special case to the tool's core).
 
-- `relation: "subagents"` = the transitive closure of writer-scoped sub-agent launch records: the parent's active branch yields owned children; each child's active branch yields grandchildren. Rows carry derived state, depth, and `onActiveBranch`; responses carry scope totals (`matched: 0, total: 6` is distinguishable from `total: 0`).
-- `relationScope: "tree"` widens the ledger walk to all branches (fork copies still excluded by writer scoping) — "sub-agents this session ever launched," for history and forensics.
+- `relation: "subagents"` = the transitive closure of writer-scoped subagent launch records: the parent's active branch yields owned children; each child's active branch yields grandchildren. Rows carry derived state, depth, and `onActiveBranch`; responses carry scope totals (`matched: 0, total: 6` is distinguishable from `total: 0`).
+- `relationScope: "tree"` widens the ledger walk to all branches (fork copies still excluded by writer scoping) — "subagents this session ever launched," for history and forensics.
 - `live: true` with a relation scope means managed runtime liveness: a stamped tmux window counts immediately, before broker registration; an externally resumed broker-live child also counts.
 - Relation-scoped reads trigger reconciliation (freshness over read purity; bounded, single-flight, documented as mutating).
-- `SessionOrigin` gains `subagent` (inferred from the sub-agent marker in handoff metadata). Index schema version bumps; full reindex assumed.
+- `SessionOrigin` gains `subagent` (inferred from the subagent marker in handoff metadata). Index schema version bumps; full reindex assumed.
 
 ### `/handoff` board
 
@@ -157,24 +157,24 @@ Bare `/handoff` opens the **Handoffs** board: **Subagents | History** tabs. Visu
 
 ### Tmux topology
 
-Per-parent tmux session `pi-<parent-id-prefix>` (8+ hex chars) on the default server, created on demand, dying naturally with its last window. One window per busy child, named from the handoff title, stamped with a `@pi_session_id` window option carrying the full child session id. `tmux list-windows -F` over stamped options is the live roster query; window identity is runtime evidence, derived fresh, never persisted. A missing per-parent session is an empty window set, not an error. Sub-agent placement ignores the user's tmux context — always the detached per-parent session; observation is `switch-client` inside tmux, `attach` outside. Resume commands are persisted as exact safely-quoted strings (they encode cwd, session dir, id, model, thinking level — not reconstructable from the file path).
+Per-parent tmux session `pi-<parent-id-prefix>` (8+ hex chars) on the default server, created on demand, dying naturally with its last window. One window per busy child, named from the handoff title, stamped with a `@pi_session_id` window option carrying the full child session id. `tmux list-windows -F` over stamped options is the live roster query; window identity is runtime evidence, derived fresh, never persisted. A missing per-parent session is an empty window set, not an error. Subagent placement ignores the user's tmux context — always the detached per-parent session; observation is `switch-client` inside tmux, `attach` outside. Resume commands are persisted as exact safely-quoted strings (they encode cwd, session dir, id, model, thinking level — not reconstructable from the file path).
 
 ### Durable records
 
 All coordination state is session-file truth. The SQLite index only filters, ranks, and decorates after ownership is resolved from transcripts. Every ledger entry carries the writing session's id (`writerSessionId`); entries written by another session are ignored (fork safety). **Outcome** decisions read the active branch via `SessionManager`, never raw JSONL order.
 
-| Record (customType)                     | File                             | Written by                                                                               | Content / notes                                                                                                                                                                                                                                                                        |
-| --------------------------------------- | -------------------------------- | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pi-sessions.subagent`                  | child (prewritten before launch) | launch target                                                                            | identity: `{childSessionId, ownerSessionId, parentSessionFile, depth}`. Gates all child-side sub-agent behavior only when `childSessionId === currentSessionId` — a fork copies it but fails the self-check and behaves as an ordinary session.                                        |
-| `pi-sessions.subagent_launched`         | parent                           | launch target                                                                            | ownership: `{childSessionId, childSessionFile, title, goal, requestResponse, model?, cwd, resumeCommand, depth}`. The ledger walk's source.                                                                                                                                            |
-| `pi-sessions.subagent_report`           | child                            | `report_results`, **before** delivery                                                    | `{reportId, status: done \| error, report}`. First on active branch = completion.                                                                                                                                                                                                      |
-| `pi-sessions.subagent_report_received`  | parent                           | sub-agents' typed incoming handler (**before** broker ack) or reconciliation (recovered) | `{childSessionId, reportId, status, report, provenance: live \| recovered}`. The only parent record per report; deduped by `reportId` (readers fold duplicates; append-only files cannot check-then-append). `childSessionId` comes from the broker-stamped source, never the payload. |
-| `pi-sessions.subagent_closed`           | child                            | system, at settle                                                                        | obligation closure without a report: `{reason: "no_response_expected" \| "no_report_after_reminder"}`. Lets fire-and-forget complete durably and bounds the reminder policy.                                                                                                           |
-| `pi-sessions.report_reminder`           | child                            | system, at first reportless settle                                                       | durable one-shot marker; no re-reminding after restarts.                                                                                                                                                                                                                               |
-| `pi-sessions.subagent_cancelled`        | parent                           | composite cancel, **before** any kill                                                    | `{childSessionId}`. Idempotent intent; superseded by a later wake message.                                                                                                                                                                                                             |
-| `pi-sessions.subagent_suspended`        | parent                           | shutdown teardown (non-reload reasons)                                                   | `{childSessionIds: [...]}`. Distinguishes expected suspension from a crash; drives auto-restore.                                                                                                                                                                                       |
-| `pi-sessions.subagent_ownership_closed` | parent                           | reconciliation                                                                           | `{childSessionId, reason}`. Closes ownership after confirmed completion/closure discovery.                                                                                                                                                                                             |
-| `pi-sessions.subagent_disowned_notice`  | fork                             | fork's first reconciliation, one-shot                                                    | model-visible note: copied sub-agent records belong to the original session; you own none.                                                                                                                                                                                             |
+| Record (customType)                     | File                             | Written by                                                                              | Content / notes                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------- | -------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pi-sessions.subagent`                  | child (prewritten before launch) | launch target                                                                           | identity: `{childSessionId, ownerSessionId, parentSessionFile, depth, requestResponse}`. Gates all child-side subagent behavior only when `childSessionId === currentSessionId` — a fork copies it but fails the self-check and behaves as an ordinary session.                                                            |
+| `pi-sessions.subagent_launched`         | parent                           | launch target                                                                           | ownership: `{childSessionId, childSessionFile, title, goal, requestResponse, model?, cwd, resumeCommand, depth}`. The ledger walk's source.                                                                                                                                                                                |
+| `pi-sessions.subagent_report`           | child                            | `submit_task_report`, **before** delivery                                               | `{reportId, status: done \| blocked \| incomplete, summary, details?, references?, nextSteps?}`. First on active branch = completion.                                                                                                                                                                                      |
+| `pi-sessions.subagent_report_received`  | parent                           | subagents' typed incoming handler (**before** broker ack) or reconciliation (recovered) | `{childSessionId, reportId, status, summary, details?, references?, nextSteps?, provenance: live \| recovered}`. The only parent record per report; deduped by `reportId` (readers fold duplicates; append-only files cannot check-then-append). `childSessionId` comes from the broker-stamped source, never the payload. |
+| `pi-sessions.subagent_closed`           | child                            | system, at settle                                                                       | obligation closure without a report: `{reason: "no_response_expected" \| "no_report_after_reminder"}`. Lets fire-and-forget complete durably and bounds the reminder policy.                                                                                                                                               |
+| `pi-sessions.report_reminder`           | child                            | system, at first reportless settle                                                      | durable one-shot marker; no re-reminding after restarts.                                                                                                                                                                                                                                                                   |
+| `pi-sessions.subagent_cancelled`        | parent                           | composite cancel, **before** any kill                                                   | `{childSessionId}`. Idempotent intent; superseded by a later wake message.                                                                                                                                                                                                                                                 |
+| `pi-sessions.subagent_suspended`        | parent                           | shutdown teardown (non-reload reasons)                                                  | `{childSessionIds: [...]}`. Distinguishes expected suspension from a crash; drives auto-restore.                                                                                                                                                                                                                           |
+| `pi-sessions.subagent_ownership_closed` | parent                           | reconciliation                                                                          | `{childSessionId, reason}`. Closes ownership after confirmed completion/closure discovery.                                                                                                                                                                                                                                 |
+| `pi-sessions.subagent_disowned_notice`  | fork                             | fork's first reconciliation, one-shot                                                   | model-visible note: copied subagent records belong to the original session; you own none.                                                                                                                                                                                                                                  |
 
 ### Broker envelopes
 
@@ -193,7 +193,7 @@ interface MessagingHandle {
 }
 ```
 
-Handoff accepts injected launch targets (inert data plus a `launch` function whose interface handoff owns); the sub-agents feature returns `{ launchTarget, roster, classify }` for the root to inject into handoff, search, and the board. All ports are constructor parameters created by the root — no registry, no events, no globals.
+Handoff accepts injected launch targets (inert data plus a `launch` function whose interface handoff owns); the subagents feature returns `{ launchTarget, roster, classify }` for the root to inject into handoff, search, and the board. All ports are constructor parameters created by the root — no registry, no events, no globals.
 
 ### Derived states
 
@@ -214,15 +214,15 @@ An unreadable or mid-write child file classifies as unknown, never completed, an
 
 ### 1. One advertised entrypoint, wired by a composition root
 
-Pi loads each advertised entrypoint in an isolated jiti module graph (`moduleCache: false`, verified in pi v0.80.6 `core/extensions/loader.ts`), so multi-entrypoint packages cannot share module state — the first implementation's `Symbol.for` process global and event-bus seams were compensations for that self-inflicted isolation. One entrypoint makes plain imports and constructor injection work everywhere; the composition root makes every composition decision at registration time, in code, once. Composite tools (wake-aware send, ownership-aware cancel) live in the sub-agents feature and call down into the messaging handle — the runtime cycle is not managed; it is gone. Costs accepted: features toggle in settings rather than pi's extension list, and one feature's install failure fails the package loudly (installers construct and validate before registering).
+Pi loads each advertised entrypoint in an isolated jiti module graph (`moduleCache: false`, verified in pi v0.80.6 `core/extensions/loader.ts`), so multi-entrypoint packages cannot share module state — the first implementation's `Symbol.for` process global and event-bus seams were compensations for that self-inflicted isolation. One entrypoint makes plain imports and constructor injection work everywhere; the composition root makes every composition decision at registration time, in code, once. Composite tools (wake-aware send, ownership-aware cancel) live in the subagents feature and call down into the messaging handle — the runtime cycle is not managed; it is gone. Costs accepted: features toggle in settings rather than pi's extension list, and one feature's install failure fails the package loudly (installers construct and validate before registering).
 
-### 2. Sub-agents carry a single obligation for life
+### 2. Subagents carry a single obligation for life
 
 One task, given at birth via the handoff kickoff; one completion obligation; disposable afterward. Steering and follow-ups are ordinary messages; genuinely new work is a new child. This deletes the run/re-tasking machinery a generalized model needs (run minting, per-run response policy, run-scoped cancellation, dispatch envelopes, kickoff replay protocols) while keeping the affordances that matter: correcting a child mid-flight, and asking a finished child for more detail. `requestResponse` fixed at launch is _correct_ under this model, not a limitation.
 
 ### 3. Completion is a report: durable child record, dedicated turn-terminating tool
 
-Only `report_results` means "the task is complete" — interim messages never satisfy the obligation (the observed bug class this kills). The tool's reframe as _report to parent_ also serves follow-ups: every parent-expected answer uses the same durable-record → deliver → terminate-turn → exit mechanics, so the child has one uniform instruction and the parent-unavailable flow needs no special schema. The child file is the mailbox of record; broker delivery is a latency optimization; every recovery path reduces to reading a JSONL whose path is already durable. Parent acceptance implies parent durability: the typed handler appends the receipt before the broker ack, so a child that observes success can exit safely.
+Only `submit_task_report` means "the task has reached a terminal state" — interim messages never satisfy the obligation (the observed bug class this kills). The tool's reframe as _report to parent_ also serves follow-ups: every parent-expected answer uses the same durable-record → deliver → terminate-turn → exit mechanics, so the child has one uniform instruction and the parent-unavailable flow needs no special schema. The child file is the mailbox of record; broker delivery is a latency optimization; every recovery path reduces to reading a JSONL whose path is already durable. Parent acceptance implies parent durability: the typed handler appends the receipt before the broker ack, so a child that observes success can exit safely.
 
 ### 4. Dormant by default; exit at settle; linger while observed
 
@@ -242,7 +242,7 @@ Restoring a deliberately suspended worker honors recorded intent; restarting a c
 
 ### 8. Forks are disowned loudly, in both planes
 
-Structure already agrees: in the index, a fork is a _sibling_ of the original's children, never their ancestor. Physically copied ledger entries fail writer scoping, and the copied identity record fails the child-side self-check, so a forked parent owns nothing and a forked child exposes no sub-agent behavior. Because the forked _model_ can still see the copied history in context, the fork's first reconciliation appends a one-shot model-visible notice that those sub-agents belong to the original session.
+Structure already agrees: in the index, a fork is a _sibling_ of the original's children, never their ancestor. Physically copied ledger entries fail writer scoping, and the copied identity record fails the child-side self-check, so a forked parent owns nothing and a forked child exposes no subagent behavior. Because the forked _model_ can still see the copied history in context, the fork's first reconciliation appends a one-shot model-visible notice that those subagents belong to the original session.
 
 ### 9. Cancellation is idempotent convergence, not a tombstone
 
@@ -287,7 +287,7 @@ Tool descriptions state capabilities (launch values, `requestResponse` semantics
 ### Generalized run model (repeatable tasking per child)
 
 - **Status:** Rejected
-- **Decision:** Sub-agents are single-obligation and disposable; the run machinery (minting rules, per-run response policy, dispatch envelopes, run-scoped cancellation, kickoff replay) solves re-tasking, which is a non-goal.
+- **Decision:** Subagents are single-obligation and disposable; the run machinery (minting rules, per-run response policy, dispatch envelopes, run-scoped cancellation, kickoff replay) solves re-tasking, which is a non-goal.
 - **Discussion:** The architecture review's strongest draft was built on runs. It was internally sound but generalized past the product: the affordances users actually need (steering, follow-ups, restart-to-continue) all fit inside one obligation. The report model retains the delivery guarantees runs provided.
 
 ### Multiple advertised entrypoints with event-bus seams (first design 18, as implemented)
@@ -303,7 +303,7 @@ Tool descriptions state capabilities (launch values, `requestResponse` semantics
 ### Ordinary-message replies for follow-ups
 
 - **Status:** Rejected
-- **Decision:** Every parent-expected answer goes through `report_results`. Ordinary replies lack a recovery marker (sent records append only on successful delivery — precisely the failing case), a turn-termination signal, and a uniform child instruction.
+- **Decision:** Every parent-expected answer goes through `submit_task_report`. Ordinary replies lack a recovery marker (sent records append only on successful delivery — precisely the failing case), a turn-termination signal, and a uniform child instruction.
 
 ### Dedicated roster tool / `kind: "my-subagents"` enum value
 
@@ -338,13 +338,13 @@ Every phase is independently shippable: `npm run check` green, no half-finished 
   - Validation: Envelope round-trip and forged-source tests; smoke: cancel a live session's turn from another session.
 
 - [x] Phase 3: Tmux substrate and visible tmux splits
-  - Goal: Tmux helpers exist; direction launches split tmux when `$TMUX` is set. No sub-agent exposure yet.
+  - Goal: Tmux helpers exist; direction launches split tmux when `$TMUX` is set. No subagent exposure yet.
   - Files: new `extensions/shared/tmux.ts`; `extensions/session-handoff/launch/tmux.ts`; launch resolution; tests.
   - Work: Detection (`$TMUX` before `TERM_PROGRAM`); per-parent session naming; idempotent create/list/verified-kill helpers; `@pi_session_id` stamping and `list-windows -F` queries; direction backend via `split-window`.
   - Validation: Faked-exec unit tests; scripted probe against real tmux (stamping, SIGHUP delivery, session-dies-with-last-window); smoke: `/handoff --right` inside tmux.
 
-- [ ] Phase 4: Sub-agent launch and the happy path
-  - Goal: `launch: "subagent"` end to end: spawn detached, kickoff, `report_results`, receipt, exit.
+- [x] Phase 4: Subagent launch and the happy path
+  - Goal: `launch: "subagent"` end to end: spawn detached, kickoff, `submit_task_report`, receipt, exit.
   - Files: new `extensions/subagents/` feature (identity, ledger, report tool, child lifecycle, launch target); handoff schema gating (tmux present, depth < maxDepth, registered at `session_start`); root wiring; tests.
   - Work: Identity record prewritten; `subagent_launched` ledger entry; `subagent_report` durable-before-delivery; `subagent_report` envelope kind with parent receipt durable-before-ack; turn termination; exit at settle; linger while a tmux client is attached; `requestResponse` default true for this launch value; launch-failure output names the surviving prepared session.
   - Validation: Ledger/identity tests including fork self-check failure; smoke: delegate, watch the window, receive the report, `tmux ls` empty afterward.
@@ -382,5 +382,5 @@ Every phase is independently shippable: `npm run check` green, no half-finished 
 - [ ] Phase 10: Documentation and end-to-end evidence
   - Goal: Docs match shipped behavior; the whole system demonstrated.
   - Files: `README.md`, `CHANGELOG.md`, `CONTEXT.md` (vocabulary from Exposed Shape), `DEV.md` project structure, this doc's checkboxes; delete `18-tmux-subagents.md` and drop this file's `-2` suffix.
-  - Work: update-docs pass; scripted end-to-end: fan out two sub-agents, steer one, observe via attach, quit mid-work, resume, watch suspended restore + report recovery + reminder, follow-up on a completed child, cancel the other, verify the board reflects every state.
+  - Work: update-docs pass; scripted end-to-end: fan out two subagents, steer one, observe via attach, quit mid-work, resume, watch suspended restore + report recovery + reminder, follow-up on a completed child, cancel the other, verify the board reflects every state.
   - Validation: Full `npm run check`; the scripted scenario passes.

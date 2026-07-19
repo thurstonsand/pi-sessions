@@ -1,10 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type {
-  HandoffSplitDirection,
-  LaunchBackend,
-  LaunchInput,
-  LaunchOutcome,
-} from "./backend.ts";
+import type { HandoffLaunchTargetOutcome } from "../launch-target.ts";
+import type { HandoffSplitDirection, LaunchBackend, LaunchInput } from "./backend.ts";
 import { escapeAppleScriptString, shellQuote } from "./shell.ts";
 
 const GHOSTTY_MACOS_ONLY_MESSAGE = "Split handoff currently supports Ghostty on macOS only.";
@@ -50,7 +46,7 @@ export function createGhosttyLaunchBackend(
 ): LaunchBackend {
   return {
     name: "Ghostty",
-    async launch(input: LaunchInput): Promise<LaunchOutcome> {
+    async launch(input: LaunchInput): Promise<HandoffLaunchTargetOutcome> {
       const first = await runGhosttySplit(pi, config, config.terminalId, input);
       if (first.success || !config.terminalId) {
         return first;
@@ -66,7 +62,7 @@ async function runGhosttySplit(
   config: GhosttyLaunchConfig,
   terminalId: string | undefined,
   input: LaunchInput,
-): Promise<LaunchOutcome> {
+): Promise<HandoffLaunchTargetOutcome> {
   const escapedCwd = escapeAppleScriptString(input.cwd);
   const escapedCommand = escapeAppleScriptString(buildGhosttyShellCommand(input.resumeCommand));
   const targetTerminalLine = terminalId
@@ -87,7 +83,7 @@ async function runGhosttySplit(
   });
 
   if (result.code === 0) {
-    return { success: true };
+    return { success: true, backend: "Ghostty" };
   }
 
   const details = `${result.stderr || result.stdout}`.trim() || `exit code ${result.code}`;

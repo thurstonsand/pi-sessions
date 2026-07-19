@@ -26,7 +26,7 @@ describe("deferred launch backend", () => {
     });
 
     expect(mockCopyToClipboard).toHaveBeenCalledWith("RESUME child-1");
-    expect(outcome).toEqual({ success: true, clipboardStatus: "copied" });
+    expect(outcome).toEqual({ success: true, backend: "deferred", clipboardStatus: "copied" });
   });
 
   it("skips the clipboard when copying is disabled", async () => {
@@ -39,7 +39,7 @@ describe("deferred launch backend", () => {
     });
 
     expect(mockCopyToClipboard).not.toHaveBeenCalled();
-    expect(outcome).toEqual({ success: true });
+    expect(outcome).toEqual({ success: true, backend: "deferred" });
   });
 
   it("reports clipboard failure without failing the launch", async () => {
@@ -52,6 +52,6 @@ describe("deferred launch backend", () => {
       resumeCommand: "RESUME child-1",
     });
 
-    expect(outcome).toEqual({ success: true, clipboardStatus: "failed" });
+    expect(outcome).toEqual({ success: true, backend: "deferred", clipboardStatus: "failed" });
   });
 });

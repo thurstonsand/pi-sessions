@@ -2,6 +2,7 @@ import type { ExecResult } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import {
   createTmuxWindow,
+  hasAttachedTmuxClients,
   isInsideTmux,
   killTmuxSession,
   killTmuxWindow,
@@ -35,6 +36,10 @@ describe("tmux substrate", () => {
     const executor = fakeExecutor(
       ok("@1\tWorker one\tchild-1\n@2\tordinary shell\t\n@3\tWorker two\tchild-2\n"),
       missing(),
+      {
+        ...missing(),
+        stderr: "error connecting to /tmp/private/tmux-501/default (No such file or directory)",
+      },
     );
 
     await expect(listTmuxWindows(executor, "pi-deadbeef")).resolves.toEqual([
@@ -42,6 +47,20 @@ describe("tmux substrate", () => {
       { windowId: "@3", name: "Worker two", piSessionId: "child-2" },
     ]);
     await expect(listTmuxWindows(executor, "pi-deadbeef")).resolves.toEqual([]);
+    await expect(listTmuxWindows(executor, "pi-deadbeef")).resolves.toEqual([]);
+  });
+
+  it("detects attached clients for a managed tmux session", async () => {
+    const executor = fakeExecutor(ok("/dev/ttys001\n"), ok());
+
+    await expect(hasAttachedTmuxClients(executor, "pi-88171ce49021")).resolves.toBe(true);
+    await expect(hasAttachedTmuxClients(executor, "pi-88171ce49021")).resolves.toBe(false);
+    expect(executor.exec).toHaveBeenNthCalledWith(
+      1,
+      "tmux",
+      ["list-clients", "-t", "pi-88171ce49021", "-F", "#{client_name}"],
+      expect.anything(),
+    );
   });
 
   it("creates and stamps the first window in a detached session", async () => {

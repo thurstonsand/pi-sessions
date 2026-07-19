@@ -22,6 +22,7 @@ export function prepareHandoffLaunch(options: {
   title: string;
   model: string | undefined;
   buildBootstrap: (sessionId: string) => HandoffBootstrap;
+  prepareChild?: ((manager: SessionManager, sessionId: string) => void) | undefined;
 }): PreparedHandoff {
   // Same-cwd children stay in the parent's session directory, preserving a
   // deliberate nondefault dir. Cross-cwd children live with their target
@@ -37,6 +38,7 @@ export function prepareHandoffLaunch(options: {
     HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
     options.buildBootstrap(manager.getSessionId()),
   );
+  options.prepareChild?.(manager, manager.getSessionId());
   flushPreparedSession(manager);
 
   const sessionFile = manager.getSessionFile();

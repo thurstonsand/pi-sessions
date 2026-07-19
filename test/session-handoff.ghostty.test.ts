@@ -77,7 +77,7 @@ describe("ghostty launch backend", () => {
       resumeCommand: resumeCommand("child-session-123"),
     });
 
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({ success: true, backend: "Ghostty" });
     expect(pi.exec).toHaveBeenCalledWith("/usr/bin/osascript", ["-e", expect.any(String)], {
       cwd: "/tmp/project",
       timeout: 15_000,
@@ -138,7 +138,7 @@ describe("ghostty launch backend", () => {
       resumeCommand: resumeCommand("child-session-123"),
     });
 
-    expect(result).toEqual({ success: true });
+    expect(result).toEqual({ success: true, backend: "Ghostty" });
     expect(pi.exec).toHaveBeenCalledTimes(2);
     const secondScript = (pi.exec as ReturnType<typeof vi.fn>).mock.calls[1]?.[1] as string[];
     expect(secondScript[1]).toContain("focused terminal of selected tab of front window");

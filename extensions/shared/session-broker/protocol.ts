@@ -1,5 +1,57 @@
 import { type Static, Type } from "typebox";
 
+export const TASK_REPORT_REFERENCE_SCHEMA = Type.Object({
+  reference: Type.String({
+    description:
+      "A precise reference such as a file path and line range, symbol name, command, URL, session id, or external artifact.",
+  }),
+  description: Type.Optional(
+    Type.String({
+      description: "Why this reference matters or what evidence the parent should take from it.",
+    }),
+  ),
+});
+
+export const TASK_REPORT_SCHEMA = Type.Object({
+  status: Type.Union(
+    [
+      Type.Literal("done", {
+        description: "The delegated task or requested follow-up is complete.",
+      }),
+      Type.Literal("blocked", {
+        description:
+          "The task cannot continue without a specific decision, clarification, permission, dependency, or other action outside the scope of the task.",
+      }),
+      Type.Literal("incomplete", {
+        description:
+          "Useful work was performed, but the requested result could not be completed and it's uncertain what should be done to reach completion.",
+      }),
+    ],
+    { description: "The subagent's assessment of the task at the end of this turn." },
+  ),
+  summary: Type.String({
+    description:
+      "A concise, 3-4 sentence self-contained account of the outcome and its most important evidence.",
+  }),
+  details: Type.Optional(
+    Type.String({
+      description:
+        "Optional supporting context such as reasoning, implementation notes, validation performed, limitations, unexpected behavior or roadblocks, or failed approaches.",
+    }),
+  ),
+  references: Type.Optional(
+    Type.Array(TASK_REPORT_REFERENCE_SCHEMA, {
+      description: "Supporting material for the report.",
+    }),
+  ),
+  nextSteps: Type.Optional(
+    Type.Array(Type.String(), {
+      description:
+        "Optional concrete actions that would extend or build on the state of the work. If blocked or incomplete, call out specifically what is causing the early return.",
+    }),
+  ),
+});
+
 const OUTBOUND_MESSAGE_ENVELOPE_SCHEMA = Type.Object({
   kind: Type.Literal("message"),
   messageId: Type.String(),
@@ -13,10 +65,19 @@ const OUTBOUND_CANCEL_ENVELOPE_SCHEMA = Type.Object({
   cancelId: Type.String(),
   sentAt: Type.String(),
 });
+const OUTBOUND_SUBAGENT_REPORT_ENVELOPE_SCHEMA = Type.Intersect([
+  Type.Object({
+    kind: Type.Literal("subagent_report"),
+    reportId: Type.String(),
+    sentAt: Type.String(),
+  }),
+  TASK_REPORT_SCHEMA,
+]);
 
 export const OUTBOUND_SESSION_ENVELOPE_SCHEMA = Type.Union([
   OUTBOUND_MESSAGE_ENVELOPE_SCHEMA,
   OUTBOUND_CANCEL_ENVELOPE_SCHEMA,
+  OUTBOUND_SUBAGENT_REPORT_ENVELOPE_SCHEMA,
 ]);
 
 export const SESSION_MESSAGE_ENVELOPE_SCHEMA = Type.Object({
@@ -36,10 +97,21 @@ export const SESSION_CANCEL_ENVELOPE_SCHEMA = Type.Object({
   target: Type.String(),
   sentAt: Type.String(),
 });
+export const SESSION_SUBAGENT_REPORT_ENVELOPE_SCHEMA = Type.Intersect([
+  Type.Object({
+    kind: Type.Literal("subagent_report"),
+    reportId: Type.String(),
+    source: Type.String(),
+    target: Type.String(),
+    sentAt: Type.String(),
+  }),
+  TASK_REPORT_SCHEMA,
+]);
 
 export const SESSION_ENVELOPE_SCHEMA = Type.Union([
   SESSION_MESSAGE_ENVELOPE_SCHEMA,
   SESSION_CANCEL_ENVELOPE_SCHEMA,
+  SESSION_SUBAGENT_REPORT_ENVELOPE_SCHEMA,
 ]);
 
 const REGISTER_CLIENT_FRAME_SCHEMA = Type.Object({
@@ -112,11 +184,17 @@ export const BROKER_FRAME_SCHEMA = Type.Union([
   ERROR_BROKER_FRAME_SCHEMA,
 ]);
 
+export type TaskReportReference = Static<typeof TASK_REPORT_REFERENCE_SCHEMA>;
+export type TaskReport = Static<typeof TASK_REPORT_SCHEMA>;
 export type OutboundSessionMessageEnvelope = Static<typeof OUTBOUND_MESSAGE_ENVELOPE_SCHEMA>;
 export type OutboundSessionCancelEnvelope = Static<typeof OUTBOUND_CANCEL_ENVELOPE_SCHEMA>;
+export type OutboundSubagentReportEnvelope = Static<
+  typeof OUTBOUND_SUBAGENT_REPORT_ENVELOPE_SCHEMA
+>;
 export type OutboundSessionEnvelope = Static<typeof OUTBOUND_SESSION_ENVELOPE_SCHEMA>;
 export type SessionMessageEnvelope = Static<typeof SESSION_MESSAGE_ENVELOPE_SCHEMA>;
 export type SessionCancelEnvelope = Static<typeof SESSION_CANCEL_ENVELOPE_SCHEMA>;
+export type SessionSubagentReportEnvelope = Static<typeof SESSION_SUBAGENT_REPORT_ENVELOPE_SCHEMA>;
 export type SessionEnvelope = Static<typeof SESSION_ENVELOPE_SCHEMA>;
 export type SessionMessagingSendClientFrame = Static<typeof SEND_CLIENT_FRAME_SCHEMA>;
 export type SessionMessagingIncomingAckClientFrame = Static<

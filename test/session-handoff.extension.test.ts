@@ -71,6 +71,7 @@ beforeEach(() => {
   );
   mockDeferredLaunch.mockImplementation(async () => ({
     success: true,
+    backend: "deferred",
     clipboardStatus: "copied",
   }));
   mockCreateDeferredLaunchBackend.mockReturnValue({ launch: mockDeferredLaunch });
@@ -245,7 +246,49 @@ describe("session handoff extension", () => {
     );
 
     const registerTool = pi.registerTool as ReturnType<typeof vi.fn>;
-    expect(launchValues(registerTool.mock.calls.at(-1)?.[0])).toEqual(["deferred"]);
+    const definition = registerTool.mock.calls.at(-1)?.[0];
+    expect(launchValues(definition)).toEqual(["deferred"]);
+    expect(promptGuidelines(definition)).toEqual([
+      "Use session_handoff directional or deferred launches only when the user requests one.",
+    ]);
+  });
+
+  it("offers an injected subagent target and defaults its response request to true", async () => {
+    const launch = vi.fn().mockResolvedValue({ success: true, backend: "tmux" });
+    const target = {
+      value: "subagent" as const,
+      description: "Detached subagent launch.",
+      requestResponseDefault: true,
+      bootstrapMode: "automatic" as const,
+      prepareChild: vi.fn(),
+      launch,
+    };
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi, [target]);
+
+    const result = await runTool(pi, handlers, {
+      goal: "Investigate it",
+      title: "Investigate",
+      launch: "subagent",
+    });
+
+    const definition = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
+    expect(launchValues(definition)).toContain("subagent");
+    expect(promptGuidelines(definition)).toContain(
+      'Use session_handoff with launch: "subagent" for a concrete, bounded task that can proceed independently while useful work continues in the current session.',
+    );
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({ requestResponse: true }));
+    const preparation = mockPrepareHandoffLaunch.mock.calls.at(-1)?.[0] as {
+      buildBootstrap: (sessionId: string) => unknown;
+    };
+    expect(preparation.buildBootstrap("child-session-999")).toMatchObject({
+      requestResponse: true,
+      bootstrapMode: "automatic",
+    });
+    expect(result.details).toMatchObject({ launch: "subagent", backend: "tmux" });
+    expect(result.content[0]?.text).toContain('"requestResponse": true');
   });
 
   it("runs a deferred handoff, copies the resume command, and reports it", async () => {
@@ -261,7 +304,6 @@ describe("session handoff extension", () => {
     });
 
     expect(mockCreateDeferredLaunchBackend).toHaveBeenCalledWith({ copyToClipboard: true });
-    expect(mockCreateGhosttyLaunchBackend).not.toHaveBeenCalled();
     expect(result.details).toMatchObject({
       launch: "deferred",
       resumeCommand: "RESUME child-session-999 openai/gpt-5.4",
@@ -273,6 +315,7 @@ describe("session handoff extension", () => {
     };
     expect(launchOptions.buildBootstrap("child-session-999")).toMatchObject({
       sourceLeafId: "user-1",
+      bootstrapMode: "review",
     });
   });
 
@@ -296,7 +339,7 @@ describe("session handoff extension", () => {
   });
 
   it("routes tool splits through tmux before Ghostty", async () => {
-    const mockTmuxLaunch = vi.fn().mockResolvedValue({ success: true });
+    const mockTmuxLaunch = vi.fn().mockResolvedValue({ success: true, backend: "tmux" });
     mockResolveSplitLaunchBackend.mockImplementation((pi: unknown) => ({
       name: "tmux",
       create: (direction: string) => mockCreateTmuxSplitLaunchBackend(pi, direction),
@@ -445,6 +488,7 @@ describe("session handoff extension", () => {
 function installHandoffAndWire(
   installHandoff: typeof import("../extensions/session-handoff/install.ts").installHandoff,
   pi: ReturnType<typeof createPiApi>,
+  additionalTargets: readonly import("../extensions/session-handoff/launch-target.ts").HandoffLaunchTarget[] = [],
 ): void {
   const settings = mockLoadSettings() as { index: { path: string } };
   const lifecycle = installHandoff(pi as never, {
@@ -455,6 +499,7 @@ function installHandoffAndWire(
         all: modelRegistry.getAll(),
         available: modelRegistry.getAvailable(),
       }) as never,
+    getLaunchTargets: () => additionalTargets,
   });
   if (lifecycle.onSessionStart) {
     pi.on("session_start", lifecycle.onSessionStart as never);
@@ -486,6 +531,10 @@ function createPiApi(
       handlers.set(event, handler);
     },
   };
+}
+
+function promptGuidelines(definition: unknown): string[] {
+  return (definition as { promptGuidelines: string[] }).promptGuidelines;
 }
 
 function launchDescription(definition: unknown): string {
@@ -529,6 +578,7 @@ function createToolExecuteContext(options?: { availableModels?: unknown[] }) {
       available: (options?.availableModels ?? []) as never,
     }),
     sessionManager: {
+      getSessionId: () => "tool-session",
       getSessionFile: () => "/tmp/parent.jsonl",
       getSessionDir: () => "/tmp/sessions",
       getLeafId: () => "assistant-1",

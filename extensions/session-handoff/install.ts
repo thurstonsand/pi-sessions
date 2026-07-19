@@ -8,13 +8,13 @@ import type {
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { IndexHandle, SessionLifecycle } from "../shared/composition.ts";
-import { formatAvailableModelList } from "../shared/model-resolution.ts";
 import type { ModelRuntimeProvider } from "../shared/model-runtime.ts";
 import { isTuiMode } from "../shared/pi-mode.ts";
 import type { SessionSettings } from "../shared/settings.ts";
 import { THINKING_LEVELS } from "../shared/thinking-levels.ts";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
 import { consumePendingHandoffBootstrap } from "./bootstrap.ts";
+import { parseHandoffCommandArgs } from "./command.ts";
 import { getHandoffModelCompletions } from "./completions.ts";
 import {
   generateHandoffDraftFromSessionManager,
@@ -33,9 +33,10 @@ import type { ClipboardStatus } from "./launch/backend.ts";
 import { createDeferredLaunchBackend } from "./launch/deferred.ts";
 import {
   resolveSplitLaunchBackend,
-  type SplitLaunchBackend,
   validateSplitHandoffPrerequisites,
 } from "./launch/resolution.ts";
+import { createHandoffLaunchTargets } from "./launch-options.ts";
+import type { HandoffLaunchTarget, HandoffLaunchValue } from "./launch-target.ts";
 import {
   createHandoffBootstrap,
   createHandoffSessionMetadata,
@@ -51,40 +52,16 @@ import {
 } from "./receipt.ts";
 import { reviewHandoffDraft } from "./review.ts";
 import { prepareHandoffLaunch } from "./spawn.ts";
-import {
-  DEFERRED_LAUNCH,
-  executeSessionHandoffTool,
-  type HandoffLaunchTarget,
-  type HandoffToolParams,
-  LAUNCH_DIRECTIONS,
-} from "./tool.ts";
+import { DEFERRED_LAUNCH, executeSessionHandoffTool, type HandoffToolParams } from "./tool.ts";
 import { HANDOFF_TOOL_DETAILS_SCHEMA } from "./tool-contract.ts";
 import { HandoffToolComponent } from "./tool-renderer.ts";
+import {
+  buildHandoffLaunchSchema,
+  buildHandoffModelDescription,
+  buildHandoffPromptGuidelines,
+} from "./tool-schema.ts";
 import { buildHandoffToolView } from "./tool-view-model.ts";
 import { formatHandoffError, runHandoffTaskWithLoader } from "./ui.ts";
-
-const HANDOFF_USAGE =
-  "Usage: /handoff [--left|--right|--up|--down|--deferred] <goal for new thread>";
-function handoffLaunchSchema(splitBackend: SplitLaunchBackend | undefined) {
-  const values: HandoffLaunchTarget[] = splitBackend
-    ? [...LAUNCH_DIRECTIONS, DEFERRED_LAUNCH]
-    : [DEFERRED_LAUNCH];
-  const description = splitBackend
-    ? `Where to launch the child session. 'deferred' creates the session and returns the resume command without opening anything; direction values open a ${splitBackend.name} split. If the user does not make it clear which launch target to use, ask for clarification.`
-    : "Where to launch the child session. 'deferred' creates the session and returns the resume command without opening anything.";
-  return Type.Union(
-    values.map((value) => Type.Literal(value)),
-    { description },
-  );
-}
-
-function handoffModelDescription(models: readonly Model<Api>[]): string {
-  const base =
-    "Model for the child session as 'provider/model-id'. Defaults to the current session's model. Only override when the task clearly warrants a different model.";
-  return models.length === 0
-    ? `${base} No configured models are listed; leave blank to use the current session's model.`
-    : `${base} Available models: ${formatAvailableModelList(models)}.`;
-}
 
 interface HandoffToolRendererState {
   callComponent?: HandoffToolComponent | undefined;
@@ -101,6 +78,7 @@ export function installHandoff(
     settings: SessionSettings;
     index: IndexHandle;
     getModelRuntime: ModelRuntimeProvider;
+    getLaunchTargets?: (() => readonly HandoffLaunchTarget[]) | undefined;
   },
 ): SessionLifecycle {
   const { settings } = deps;
@@ -120,47 +98,39 @@ export function installHandoff(
 
   function registerHandoffTool(
     models: readonly Model<Api>[],
-    splitBackend: SplitLaunchBackend | undefined,
+    launchTargets: readonly HandoffLaunchTarget[],
   ): void {
     pi.registerTool({
       name: "session_handoff",
       label: "Session Handoff",
-      description:
-        "Start a new background Pi session with directed instructions based on current work. The current session continues after launch.",
+      description: "Start a new Pi session with a self-contained task.",
       promptSnippet:
-        "Start a background pi session in a terminal split based on the current session",
-      promptGuidelines: [
-        "Use session_handoff only when it is clear the work should be forked to a new context.",
-        "Reach for session_handoff by direction of the user, not as an unsolicited default.",
-        "session_handoff should only request a response when there is a specific ask-and-response expectation: the user asked for a report back, or this session needs the child result to continue. Leave it off by default and for independent background work.",
-        "session_handoff can only fork a background session; to replace the current session, tell the user to run /handoff instead.",
-      ],
-      executionMode: "sequential",
+        "Delegate bounded work to a background subagent or hand off context to another Pi session",
+      promptGuidelines: buildHandoffPromptGuidelines(launchTargets),
       parameters: Type.Object({
         goal: Type.String({
           description:
-            "Goal for the new session. Capture enough detail to encompass the ask and any directions the next session should consider.",
+            "Self-contained briefing that explains the objective, relevant context, constraints, and expected result.",
         }),
         title: Type.String({
           description:
             "Short display title for the child session, 64 characters or less. Summarize the mission; do not repeat the full goal.",
         }),
-        launch: handoffLaunchSchema(splitBackend),
+        launch: buildHandoffLaunchSchema(launchTargets),
         cwd: Type.Optional(
           Type.String({
-            description:
-              "Optional target working directory. Relative paths resolve from the current session cwd.",
+            description: "Optional target working directory (defaults to current).",
           }),
         ),
         requestResponse: Type.Optional(
           Type.Boolean({
             description:
-              "Whether the child session should report completion/results of its task back to this session.",
+              "Whether the child session should report completion/results of its task back to this session. Defaults to true for subagent launches and false otherwise.",
           }),
         ),
         model: Type.Optional(
           Type.String({
-            description: handoffModelDescription(models),
+            description: buildHandoffModelDescription(models),
           }),
         ),
         thinkingLevel: Type.Optional(
@@ -168,7 +138,7 @@ export function installHandoff(
             THINKING_LEVELS.map((level) => Type.Literal(level)),
             {
               description:
-                "Thinking level for the child session. Defaults to the current session's level, which is almost always correct. Override only when the user requests it.",
+                "Thinking level for the child session. For directional or deferred, override only when the user requests it.",
             },
           ),
         ),
@@ -206,8 +176,7 @@ export function installHandoff(
           params,
           ctx,
           modelRuntime,
-          splitBackend,
-          settings.handoff.deferred.copyToClipboard,
+          launchTargets,
           (sessionId, status) => clipboardStatusBySessionId.set(sessionId, status),
         );
       },
@@ -232,7 +201,7 @@ export function installHandoff(
 
       if (parsedArgs.kind === "identify") {
         if (!splitBackend?.identifyTerminalId) {
-          ctx.ui.notify("--identify applies only to Ghostty splits.", "error");
+          ctx.ui.notify("--identify applies to Ghostty splits.", "error");
           return;
         }
         const terminalId = await splitBackend.identifyTerminalId(ctx.cwd);
@@ -358,7 +327,7 @@ export function installHandoff(
             createHandoffBootstrap(sessionId, handoffMetadata, kickoffSource),
         });
 
-        const appendLaunchReceipt = (launch: HandoffLaunchTarget, backend?: string): void => {
+        const appendLaunchReceipt = (launch: HandoffLaunchValue, backend?: string): void => {
           pi.appendEntry(
             HANDOFF_LAUNCH_RECEIPT_CUSTOM_TYPE,
             buildLaunchReceipt({
@@ -470,7 +439,15 @@ export function installHandoff(
   return {
     async onSessionStart(_event, ctx) {
       modelSnapshot = ctx.modelRegistry.getAvailable();
-      registerHandoffTool(modelSnapshot, splitBackend);
+      registerHandoffTool(
+        modelSnapshot,
+        createHandoffLaunchTargets({
+          pi,
+          splitBackend,
+          copyDeferredToClipboard: settings.handoff.deferred.copyToClipboard,
+          additionalTargets: deps.getLaunchTargets?.() ?? [],
+        }),
+      );
 
       await consumePendingHandoffBootstrap(pi, ctx, deps.getModelRuntime, pi.getThinkingLevel());
     },
@@ -508,7 +485,9 @@ function startHandoffPromptAfterSessionRender(
   setImmediate(() => {
     void (async () => {
       try {
-        await ctx.sendMessage(buildHandoffKickoffMessage(kickoff), { triggerTurn: true });
+        await ctx.sendMessage(buildHandoffKickoffMessage(kickoff), {
+          triggerTurn: true,
+        });
       } catch (error) {
         ctx.ui.notify(formatHandoffError(error), "error");
       }
@@ -518,81 +497,4 @@ function startHandoffPromptAfterSessionRender(
 
 function getFirstText(result: { content: Array<{ type: string; text?: string }> }): string {
   return result.content.find((item) => item.type === "text")?.text ?? "";
-}
-
-function parseHandoffCommandArgs(args: string):
-  | { kind: "identify" }
-  | {
-      kind: "ok";
-      goal: string;
-      launch?: HandoffLaunchTarget | undefined;
-      model?: string | undefined;
-    }
-  | { kind: "error"; message: string } {
-  const tokens = args
-    .trim()
-    .split(/\s+/)
-    .filter((token) => token.length > 0);
-
-  if (tokens.includes("--identify")) {
-    return { kind: "identify" };
-  }
-
-  if (tokens.length === 0) {
-    return { kind: "error", message: HANDOFF_USAGE };
-  }
-
-  const launchFlags = new Map<string, HandoffLaunchTarget>([
-    ["--left", "left"],
-    ["--right", "right"],
-    ["--up", "up"],
-    ["--down", "down"],
-    ["--deferred", DEFERRED_LAUNCH],
-  ]);
-
-  let launch: HandoffLaunchTarget | undefined;
-  let model: string | undefined;
-  const goalTokens: string[] = [];
-
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i] as string;
-
-    if (token === "--model") {
-      const value = tokens[i + 1];
-      if (!value) {
-        return { kind: "error", message: HANDOFF_USAGE };
-      }
-
-      model = value;
-      i++;
-      continue;
-    }
-
-    const target = launchFlags.get(token);
-    if (!target) {
-      goalTokens.push(token);
-      continue;
-    }
-
-    if (launch) {
-      return {
-        kind: "error",
-        message: "Use only one launch target: --left, --right, --up, --down, or --deferred.",
-      };
-    }
-
-    launch = target;
-  }
-
-  const goal = goalTokens.join(" ").trim();
-  if (!goal) {
-    return { kind: "error", message: HANDOFF_USAGE };
-  }
-
-  return {
-    kind: "ok",
-    goal,
-    launch,
-    model,
-  };
 }

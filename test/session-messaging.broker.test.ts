@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 
 let cleanupDir: string | undefined;
 
@@ -68,6 +68,49 @@ test("broker lists session ids and routes messages after target acknowledgement"
   } finally {
     source.disconnect();
     target.disconnect();
+  }
+});
+
+test("broker routes typed subagent reports with stamped identity", async () => {
+  const { spawnSessionMessagingBrokerIfNeeded } = await import(
+    "../extensions/session-messaging/broker/spawn.ts"
+  );
+  const { SessionMessagingService } = await import("../extensions/session-messaging/pi/service.ts");
+  const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
+
+  await spawnSessionMessagingBrokerIfNeeded();
+  const parent = new SessionMessagingService(join(cleanupDir ?? tmpdir(), "reports.sqlite"));
+  const child = new SessionMessagingClient();
+  const handler = vi.fn();
+  parent.onIncomingSubagentReport(handler);
+  try {
+    await parent.start({ sessionManager: { getSessionId: () => "report-parent" } } as never);
+    await child.connect("report-child");
+
+    await expect(
+      child.sendEnvelope({
+        target: "report-parent",
+        envelope: {
+          kind: "subagent_report",
+          reportId: "report-1",
+          status: "done",
+          summary: "All checks pass.",
+          sentAt: "2026-03-25T00:00:00.000Z",
+        },
+      }),
+    ).resolves.toMatchObject({ delivered: true });
+    expect(handler).toHaveBeenCalledWith({
+      kind: "subagent_report",
+      reportId: "report-1",
+      source: "report-child",
+      target: "report-parent",
+      status: "done",
+      summary: "All checks pass.",
+      sentAt: "2026-03-25T00:00:00.000Z",
+    });
+  } finally {
+    child.disconnect();
+    parent.stop();
   }
 });
 

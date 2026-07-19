@@ -10,20 +10,25 @@ import {
   type CancelSessionResult,
   type IncomingCancelHandler,
   type IncomingMessageHandler,
+  type IncomingSubagentReportHandler,
   type SendMessageRequest,
   type SendMessageResult,
+  type SendSubagentReportRequest,
+  type SendSubagentReportResult,
   SessionMessagingService,
 } from "./pi/service.ts";
 import { createSessionCancelTool, createSessionSendMessageTool } from "./pi/tools.ts";
 
-/** The live surface the messaging feature exposes to other features (search, sub-agents). */
+/** The live surface the messaging feature exposes to other features (search, subagents). */
 export interface MessagingHandle {
   sendMessage(request: SendMessageRequest): Promise<SendMessageResult>;
+  sendSubagentReport(request: SendSubagentReportRequest): Promise<SendSubagentReportResult>;
   cancelSession(sessionId: string): Promise<CancelSessionResult>;
   listSessions(): Promise<string[]>;
   waitForSession(sessionId: string, timeoutMs: number): Promise<boolean>;
   onIncomingMessage(handler: IncomingMessageHandler): void;
   onIncomingCancel(handler: IncomingCancelHandler): void;
+  onIncomingSubagentReport(handler: IncomingSubagentReportHandler): void;
 }
 
 export function installMessaging(
@@ -46,11 +51,13 @@ export function installMessaging(
 
   return {
     sendMessage: (request) => service.sendMessage(request),
+    sendSubagentReport: (request) => service.sendSubagentReport(request),
     cancelSession: (sessionId) => service.cancelSession(sessionId),
     listSessions: () => service.listSessions(),
     waitForSession: (sessionId, timeoutMs) => service.waitForSession(sessionId, timeoutMs),
     onIncomingMessage: (handler) => service.onIncomingMessage(handler),
     onIncomingCancel: (handler) => service.onIncomingCancel(handler),
+    onIncomingSubagentReport: (handler) => service.onIncomingSubagentReport(handler),
     async onSessionStart(_event, ctx) {
       incomingRuntime.bindContext(ctx);
       incomingRuntime.replayPending(ctx);

@@ -63,6 +63,24 @@ export async function listTmuxWindows(
     .filter((window): window is TmuxWindow => window !== undefined);
 }
 
+export async function hasAttachedTmuxClients(
+  executor: TmuxExecutor,
+  tmuxSession: string,
+): Promise<boolean> {
+  const result = await executor.exec(
+    TMUX_COMMAND,
+    ["list-clients", "-t", tmuxSession, "-F", "#{client_name}"],
+    { timeout: TMUX_TIMEOUT_MS },
+  );
+  if (result.code !== 0) {
+    if (isMissingSession(result)) {
+      return false;
+    }
+    throw tmuxError("list attached clients", result);
+  }
+  return result.stdout.split("\n").some((line) => line.trim().length > 0);
+}
+
 export async function createTmuxWindow(
   executor: TmuxExecutor,
   options: CreateTmuxWindowOptions,
@@ -176,7 +194,7 @@ function parseWindow(line: string): TmuxWindow | undefined {
 }
 
 function isMissingSession(result: ExecResult): boolean {
-  return /can't find session|no server running|failed to connect to server/i.test(
+  return /can't find session|no server running|failed to connect to server|error connecting to .*no such file/i.test(
     `${result.stderr}\n${result.stdout}`,
   );
 }

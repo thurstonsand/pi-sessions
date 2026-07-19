@@ -40,6 +40,7 @@ export const CHILD_GENERATED_HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
   parentSessionFile: Type.String(),
   sourceLeafId: Type.String(),
   requestResponse: Type.Optional(Type.Boolean()),
+  bootstrapMode: Type.Union([Type.Literal("review"), Type.Literal("automatic")]),
 });
 
 export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Union([
@@ -106,6 +107,7 @@ export function createChildGeneratedHandoffBootstrap(options: {
   parentSessionFile: string;
   sourceLeafId: string;
   requestResponse?: boolean | undefined;
+  bootstrapMode?: "review" | "automatic" | undefined;
 }): ChildGeneratedHandoffBootstrap {
   return {
     mode: "generate",
@@ -115,6 +117,7 @@ export function createChildGeneratedHandoffBootstrap(options: {
     parentSessionFile: options.parentSessionFile,
     sourceLeafId: options.sourceLeafId,
     ...(options.requestResponse === undefined ? {} : { requestResponse: options.requestResponse }),
+    bootstrapMode: options.bootstrapMode ?? "review",
   };
 }
 

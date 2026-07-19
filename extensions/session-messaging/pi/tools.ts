@@ -1,5 +1,6 @@
 import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
+import { formatError } from "../../shared/errors.ts";
 import { ExpandableContentLayout } from "../../shared/rendering/expandable-content-layout.ts";
 import { safeParseTypeBoxValue } from "../../shared/typebox.ts";
 import {
@@ -146,8 +147,4 @@ function parseSessionTarget(raw: string, toolName: string): string {
 
 function getFirstText(result: { content: Array<{ type: string; text?: string }> }): string {
   return result.content.find((item) => item.type === "text")?.text ?? "";
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error && error.message.trim() ? error.message : String(error);
 }

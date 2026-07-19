@@ -1,3 +1,5 @@
+import type { HandoffLaunchTargetOutcome } from "../launch-target.ts";
+
 export type HandoffSplitDirection = "left" | "right" | "up" | "down";
 
 export interface LaunchInput {
@@ -8,11 +10,7 @@ export interface LaunchInput {
 
 export type ClipboardStatus = "copied" | "failed";
 
-export type LaunchOutcome =
-  | { success: true; clipboardStatus?: ClipboardStatus | undefined }
-  | { success: false; error: string };
-
 export interface LaunchBackend {
   name: string;
-  launch(input: LaunchInput): Promise<LaunchOutcome>;
+  launch(input: LaunchInput): Promise<HandoffLaunchTargetOutcome>;
 }

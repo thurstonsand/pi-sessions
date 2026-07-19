@@ -1,10 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type {
-  HandoffSplitDirection,
-  LaunchBackend,
-  LaunchInput,
-  LaunchOutcome,
-} from "./backend.ts";
+import type { HandoffSplitDirection, LaunchBackend, LaunchInput } from "./backend.ts";
 
 const TMUX_SPLIT_TIMEOUT_MS = 15_000;
 
@@ -14,13 +9,13 @@ export function createTmuxSplitLaunchBackend(
 ): LaunchBackend {
   return {
     name: "tmux",
-    async launch(input: LaunchInput): Promise<LaunchOutcome> {
+    async launch(input: LaunchInput) {
       const result = await pi.exec("tmux", splitArgs(direction, input), {
         cwd: input.cwd,
         timeout: TMUX_SPLIT_TIMEOUT_MS,
       });
       if (result.code === 0) {
-        return { success: true };
+        return { success: true, backend: "tmux" as const };
       }
 
       const details = `${result.stderr || result.stdout}`.trim() || `exit code ${result.code}`;

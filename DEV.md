@@ -48,5 +48,5 @@ No build/compile step — The pi framework loads extensions directly from TypeSc
 - **Session messaging**: `extensions/session-messaging/install.ts`; broker/client/runtime logic at `extensions/session-messaging/`.
 - **Session reference picker**: `extensions/session-handoff/install.ts`; core logic at `extensions/session-handoff/picker.ts` and `extensions/session-handoff/query.ts`.
 - **Session auto-title**: `extensions/session-auto-title/install.ts`; core logic at `extensions/session-auto-title/`.
-- **Subagents**: `extensions/subagents/install.ts`; identity, ownership ledger, tmux launch target, and task reporting at `extensions/subagents/`.
+- **Subagents**: `extensions/subagents/install.ts`; identity, ownership ledger, tmux launch and wake behavior, task reporting, classification, and lifecycle reconciliation at `extensions/subagents/`.
 - **Shared utilities**: no primary entrypoint; core logic at `extensions/shared/`.

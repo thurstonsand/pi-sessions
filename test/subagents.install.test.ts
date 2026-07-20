@@ -80,6 +80,35 @@ describe("subagent installation", () => {
     );
   });
 
+  it("skips reconciliation when a plain session settles without subagent history", async () => {
+    const listSessions = vi.fn(async () => []);
+    const deps = createDeps(2, undefined, listSessions);
+    const { pi, handlers } = createPi({ tmuxInstalled: true });
+    const handle = installSubagents(pi as never, deps);
+    const ctx = createContext(parentId, []);
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    pi.exec.mockClear();
+    listSessions.mockClear();
+
+    await handlers.get("agent_settled")?.({}, ctx);
+
+    expect(pi.exec).not.toHaveBeenCalled();
+    expect(listSessions).not.toHaveBeenCalled();
+  });
+
+  it("does not reconcile ordinary sends to unrelated sessions", async () => {
+    const deps = createDeps(2);
+    const { pi } = createPi({ tmuxInstalled: true });
+    const handle = installSubagents(pi as never, deps);
+    const ctx = createContext(parentId, []);
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    pi.exec.mockClear();
+
+    await handle.sendMessage({ target: "unrelated", body: "hello" });
+
+    expect(pi.exec).not.toHaveBeenCalled();
+  });
+
   it("gives fire-and-forget children scope guidance without report instructions", async () => {
     const { pi, handlers } = createPi({ tmuxInstalled: true });
     const handle = installSubagents(pi as never, createDeps(2));
@@ -112,10 +141,65 @@ describe("subagent installation", () => {
   it("exits a settled child immediately when nobody is observing its tmux session", async () => {
     const { pi, handlers } = createPi({ tmuxInstalled: true, attachedResponses: [false] });
     const handle = installSubagents(pi as never, createDeps(2));
-    const ctx = createContext(childId, childEntries(1));
+    const ctx = createContext(childId, childEntries(1, false));
     await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
 
     await handlers.get("agent_settled")?.({}, ctx);
+    expect(ctx.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("exits after a response-requested child submits a report", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true, attachedResponses: [false] });
+    const entries = childEntries(1, true);
+    const handle = installSubagents(pi as never, createDeps(2));
+    const ctx = createContext(childId, entries);
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    await handlers.get("agent_start")?.({}, ctx);
+    entries.push({
+      type: "custom",
+      id: "report",
+      parentId: "identity",
+      customType: "pi-sessions.subagent_report",
+      data: { reportId: "report-1", status: "done", summary: "Complete." },
+    } as never);
+
+    await handlers.get("agent_settled")?.({}, ctx);
+
+    expect(ctx.shutdown).toHaveBeenCalledOnce();
+    expect(pi.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ customType: "pi-sessions.report_reminder_message" }),
+      expect.anything(),
+    );
+  });
+
+  it("reminds a response-requested child once before closing it reportless", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true, attachedResponses: [false] });
+    const entries = childEntries(1, true);
+    pi.sendMessage.mockImplementation((message: { customType: string; content: string }) => {
+      entries.push({
+        type: "custom_message",
+        id: `entry-${entries.length}`,
+        parentId: entries.at(-1)?.id ?? null,
+        customType: message.customType,
+        content: message.content,
+        display: true,
+      } as never);
+    });
+    const handle = installSubagents(pi as never, createDeps(2));
+    const ctx = createContext(childId, entries);
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ customType: "pi-sessions.report_reminder_message" }),
+      { triggerTurn: true },
+    );
+    expect(ctx.shutdown).not.toHaveBeenCalled();
+
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(pi.appendEntry).toHaveBeenCalledWith("pi-sessions.subagent_closed", {
+      reason: "no_report_after_reminder",
+    });
     expect(ctx.shutdown).toHaveBeenCalledOnce();
   });
 
@@ -126,7 +210,7 @@ describe("subagent installation", () => {
       attachedResponses: [true, false],
     });
     const handle = installSubagents(pi as never, createDeps(2));
-    const ctx = createContext(childId, childEntries(1));
+    const ctx = createContext(childId, childEntries(1, false));
     await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
 
     await handlers.get("agent_settled")?.({}, ctx);
@@ -139,6 +223,7 @@ describe("subagent installation", () => {
 function createDeps(
   maxDepth: number,
   captureIncoming?: ((handler: (envelope: unknown) => void) => void) | undefined,
+  listSessions = vi.fn(async () => []),
 ) {
   return {
     settings: { subagents: { maxDepth } },
@@ -146,6 +231,12 @@ function createDeps(
     messaging: {
       onIncomingSubagentReport: vi.fn((handler) => captureIncoming?.(handler)),
       sendSubagentReport: vi.fn(),
+      sendMessage: vi.fn(async () => ({
+        delivered: false,
+        messageId: "message-1",
+        reason: "no_session",
+      })),
+      listSessions,
     },
   } as never;
 }

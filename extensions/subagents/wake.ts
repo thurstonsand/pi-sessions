@@ -23,6 +23,12 @@ interface WakeMessaging {
   waitForSession(sessionId: string, timeoutMs: number): Promise<boolean>;
 }
 
+export interface SubagentMessageRouterOptions {
+  readyTimeoutMs?: number;
+  onMaterialize?(launch: SubagentLaunched): void;
+  afterOwnedSend?(): Promise<void> | void;
+}
+
 export class SubagentMessageRouter {
   private readonly wakeBySessionId = new Map<string, Promise<void>>();
 
@@ -31,7 +37,7 @@ export class SubagentMessageRouter {
     private readonly messaging: WakeMessaging,
     private readonly getParent: () => WakeParentSession | undefined,
     private readonly isCurrent: (epoch: number) => boolean,
-    private readonly readyTimeoutMs = SESSION_READY_TIMEOUT_MS,
+    private readonly options: SubagentMessageRouterOptions = {},
   ) {}
 
   async sendMessage(request: SendMessageRequest): Promise<SendMessageResult> {
@@ -52,14 +58,18 @@ export class SubagentMessageRouter {
       return failedLiveSend ?? this.messaging.sendMessage(request);
     }
 
-    await this.wake(parent, launch);
-    const result = await this.sendOwned(parent, request);
-    if (result.delivered || !isTargetDeparture(result)) {
-      return result;
-    }
+    try {
+      await this.wake(parent, launch);
+      const result = await this.sendOwned(parent, request);
+      if (result.delivered || !isTargetDeparture(result)) {
+        return result;
+      }
 
-    await this.wake(parent, launch);
-    return this.sendOwned(parent, request);
+      await this.wake(parent, launch);
+      return this.sendOwned(parent, request);
+    } finally {
+      await this.options.afterOwnedSend?.();
+    }
   }
 
   private async wake(parent: WakeParentSession, launch: SubagentLaunched): Promise<void> {
@@ -90,7 +100,12 @@ export class SubagentMessageRouter {
     if (!hasWindow) {
       await this.createWindow(parent, launch, tmuxSession);
     }
-    if (await this.messaging.waitForSession(launch.childSessionId, this.readyTimeoutMs)) {
+    if (
+      await this.messaging.waitForSession(
+        launch.childSessionId,
+        this.options.readyTimeoutMs ?? SESSION_READY_TIMEOUT_MS,
+      )
+    ) {
       return;
     }
 
@@ -103,7 +118,12 @@ export class SubagentMessageRouter {
     }
 
     await this.createWindow(parent, launch, tmuxSession);
-    if (!(await this.messaging.waitForSession(launch.childSessionId, this.readyTimeoutMs))) {
+    if (
+      !(await this.messaging.waitForSession(
+        launch.childSessionId,
+        this.options.readyTimeoutMs ?? SESSION_READY_TIMEOUT_MS,
+      ))
+    ) {
       throw new Error(
         `Subagent ${launch.childSessionId} was restarted but did not register for messaging.`,
       );
@@ -119,6 +139,7 @@ export class SubagentMessageRouter {
       return;
     }
     this.requireCurrent(parent);
+    this.options.onMaterialize?.(launch);
     await createTmuxWindow(this.executor, {
       tmuxSession,
       name: launch.title,

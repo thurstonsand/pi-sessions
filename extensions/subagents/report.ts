@@ -8,8 +8,7 @@ import {
 } from "../shared/session-broker/protocol.ts";
 import type { SubagentIdentity } from "./identity.ts";
 import {
-  findOwnedSubagentLaunch,
-  hasReceivedSubagentReport,
+  collectParentLedger,
   SUBAGENT_REPORT_CUSTOM_TYPE,
   type SubagentReport,
   type SubagentReportReceived,
@@ -101,12 +100,12 @@ export function buildIncomingSubagentReport(
   envelope: SessionSubagentReportEnvelope,
 ): IncomingSubagentReport | undefined {
   const ownerSessionId = session.sessionId;
-  const branch = session.getBranch();
-  const launch = findOwnedSubagentLaunch(branch, ownerSessionId, envelope.source);
+  const ledger = collectParentLedger(session.getBranch(), ownerSessionId);
+  const launch = ledger.launches.find((candidate) => candidate.childSessionId === envelope.source);
   if (!launch) {
     throw new Error("Report source is not an owned subagent on the active branch.");
   }
-  if (hasReceivedSubagentReport(branch, ownerSessionId, envelope.reportId)) {
+  if (ledger.receivedReportIds.has(envelope.reportId)) {
     return undefined;
   }
 

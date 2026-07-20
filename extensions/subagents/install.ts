@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { HandoffLaunchTarget } from "../session-handoff/launch-target.ts";
 import type {
   MessagingHandle,
@@ -10,7 +10,15 @@ import type { SessionSettings } from "../shared/settings.ts";
 import { hasAttachedTmuxClients, isTmuxInstalled, tmuxSessionName } from "../shared/tmux.ts";
 import { findSubagentIdentity, type SubagentIdentity } from "./identity.ts";
 import { createSubagentLaunchTarget, type SubagentLaunchState } from "./launch-target.ts";
-import { SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE } from "./ledger.ts";
+import {
+  getChildSubagentLifecycle,
+  hasSubagentLaunchEntries,
+  SUBAGENT_CLOSED_CUSTOM_TYPE,
+  SUBAGENT_LAUNCHED_CUSTOM_TYPE,
+  SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
+  SUBAGENT_REPORT_REMINDER_MESSAGE_CUSTOM_TYPE,
+} from "./ledger.ts";
+import { openReconcileSession, SubagentReconciler } from "./reconcile.ts";
 import {
   buildIncomingSubagentReport,
   createSubmitTaskReportTool,
@@ -31,6 +39,7 @@ interface ParentSessionState extends SubagentParentSession {
 interface ChildSessionState {
   identity: SubagentIdentity;
   requestResponse: boolean;
+  reportsAtTurnStart: number;
 }
 
 interface CurrentSubagentSession {
@@ -59,14 +68,25 @@ export function installSubagents(
       lingerTimer = undefined;
     }
   };
+  const reconciler = new SubagentReconciler({
+    executor: pi,
+    messaging: deps.messaging,
+    getParent: () => current?.parent,
+    isCurrent: isCurrentSession,
+    openSession: openReconcileSession,
+  });
   const messageRouter = new SubagentMessageRouter(
     pi,
     deps.messaging,
     () => current?.parent,
     isCurrentSession,
+    {
+      onMaterialize: (launch) => pi.appendEntry(SUBAGENT_LAUNCHED_CUSTOM_TYPE, launch),
+      afterOwnedSend: () => reconciler.reconcile(),
+    },
   );
 
-  deps.messaging.onIncomingSubagentReport((envelope) => {
+  deps.messaging.onIncomingSubagentReport(async (envelope) => {
     const parent = current?.parent;
     if (!parent) {
       throw new Error("Target session is not ready to receive subagent reports.");
@@ -85,6 +105,7 @@ export function installSubagents(
       },
       incoming.delivery,
     );
+    await reconciler.reconcile();
   });
 
   pi.on("before_agent_start", (event) => {
@@ -102,28 +123,45 @@ You are working as a subagent on one task delegated by a parent session. The han
     };
   });
 
-  pi.on("agent_start", () => {
+  pi.on("agent_start", (_event, ctx) => {
     clearLinger();
+    if (current?.child) {
+      current.child.reportsAtTurnStart = countReports(ctx.sessionManager.getBranch());
+    }
   });
 
   pi.on("agent_settled", async (_event, ctx) => {
     const session = current;
-    if (!session?.child || session.parent.sessionId !== ctx.sessionManager.getSessionId()) {
+    if (!session || session.parent.sessionId !== ctx.sessionManager.getSessionId()) {
       return;
     }
-    if (ctx.hasPendingMessages()) {
+    if (hasSubagentLaunchEntries(session.parent.getBranch())) {
+      await reconciler.reconcile();
+    }
+    if (session.child) {
+      if (ctx.hasPendingMessages()) {
+        return;
+      }
+      const shouldExit = settleChild(pi, session.child, ctx.sessionManager.getBranch());
+      if (!shouldExit) {
+        return;
+      }
+      await exitWhenUnobserved(
+        pi,
+        session.parent,
+        session.child.identity,
+        isCurrentSession,
+        (timer) => {
+          clearLinger();
+          lingerTimer = timer;
+        },
+      );
       return;
     }
-    await exitWhenUnobserved(
-      pi,
-      session.parent,
-      session.child.identity,
-      isCurrentSession,
-      (timer) => {
-        clearLinger();
-        lingerTimer = timer;
-      },
-    );
+  });
+
+  pi.on("session_tree", async () => {
+    await reconciler.reconcileAndRestoreSuspended();
   });
 
   return {
@@ -151,9 +189,18 @@ You are working as a subagent on one task delegated by a parent session. The han
         launchState: { sessionId, depth: identity?.depth ?? 0, epoch },
         tmuxInstalled: await isTmuxInstalled(pi, ctx.cwd),
       };
+      reconciler.beginSession();
       current = {
         parent,
-        ...(identity ? { child: { identity, requestResponse: identity.requestResponse } } : {}),
+        ...(identity
+          ? {
+              child: {
+                identity,
+                requestResponse: identity.requestResponse,
+                reportsAtTurnStart: countReports(sessionManager.getBranch()),
+              },
+            }
+          : {}),
       };
       if (identity) {
         pi.registerTool(
@@ -165,13 +212,57 @@ You are working as a subagent on one task delegated by a parent session. The han
           }),
         );
       }
+      if (_event.reason === "reload") {
+        await reconciler.reconcile();
+      } else {
+        await reconciler.reconcileAndRestoreSuspended();
+      }
     },
-    onSessionShutdown() {
+    async onSessionShutdown(event) {
       clearLinger();
+      if (current && event.reason !== "reload") {
+        await reconciler.suspendForShutdown();
+      }
       epoch += 1;
       current = undefined;
     },
   };
+}
+
+function settleChild(
+  pi: ExtensionAPI,
+  child: ChildSessionState,
+  branch: readonly SessionEntry[],
+): boolean {
+  const lifecycle = getChildSubagentLifecycle(branch);
+  const reports = lifecycle.reports.length;
+  if (reports > child.reportsAtTurnStart) {
+    return true;
+  }
+  if (!child.requestResponse) {
+    pi.appendEntry(SUBAGENT_CLOSED_CUSTOM_TYPE, { reason: "no_response_expected" });
+    return true;
+  }
+
+  if (lifecycle.hasReminder) {
+    pi.appendEntry(SUBAGENT_CLOSED_CUSTOM_TYPE, { reason: "no_report_after_reminder" });
+    return true;
+  }
+
+  pi.sendMessage(
+    {
+      customType: SUBAGENT_REPORT_REMINDER_MESSAGE_CUSTOM_TYPE,
+      content:
+        "[system] Your delegated turn settled without a task report. Call submit_task_report now with done, blocked, or incomplete status.",
+      display: true,
+    },
+    { triggerTurn: true },
+  );
+  return false;
+}
+
+function countReports(branch: readonly SessionEntry[]): number {
+  return getChildSubagentLifecycle(branch).reports.length;
 }
 
 async function exitWhenUnobserved(

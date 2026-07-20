@@ -55,16 +55,18 @@ describe("subagent wake-on-send", () => {
     expect(messaging.sendMessage).toHaveBeenCalledTimes(2);
   });
 
-  it("materializes a dormant owned child and waits for registration before sending", async () => {
+  it("materializes a dormant owned child and reconciles after sending", async () => {
     const tmux = createTmux(false);
     const messaging = createMessaging({ waits: [true] });
-    const router = createRouter(tmux, messaging);
+    const afterOwnedSend = vi.fn();
+    const router = createRouter(tmux, messaging, afterOwnedSend);
 
     await expect(router.sendMessage(request)).resolves.toMatchObject({ delivered: true });
 
     expect(tmux.created()).toBe(1);
     expect(messaging.waitForSession).toHaveBeenCalledWith(childId, 25);
     expect(messaging.sendMessage).toHaveBeenCalledWith(request);
+    expect(afterOwnedSend).toHaveBeenCalledOnce();
   });
 
   it("replaces a window that never registered, then delivers the message", async () => {
@@ -126,6 +128,7 @@ describe("subagent wake-on-send", () => {
 function createRouter(
   tmux: ReturnType<typeof createTmux>,
   messaging: ReturnType<typeof createMessaging>,
+  afterOwnedSend?: () => void,
 ) {
   const parent = {
     sessionId: parentId,
@@ -137,7 +140,7 @@ function createRouter(
     messaging,
     () => parent as never,
     (epoch) => epoch === 4,
-    25,
+    { readyTimeoutMs: 25, ...(afterOwnedSend ? { afterOwnedSend } : {}) },
   );
 }
 

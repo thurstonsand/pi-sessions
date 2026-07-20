@@ -383,6 +383,7 @@ test("broker requires exact target session ids", async () => {
 
     expect(result).toMatchObject({
       delivered: false,
+      reason: "no_session",
       error: "No live session found for id: exact",
     });
   } finally {
@@ -443,6 +444,7 @@ test("broker fails pending sends when target disconnects before acknowledgement"
 
     expect(result).toMatchObject({
       delivered: false,
+      reason: "disconnected",
       error: "Target disconnected before accepting the envelope.",
     });
   } finally {

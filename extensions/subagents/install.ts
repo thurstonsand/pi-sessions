@@ -1,6 +1,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { HandoffLaunchTarget } from "../session-handoff/launch-target.ts";
-import type { MessagingHandle } from "../session-messaging/install.ts";
+import type {
+  MessagingHandle,
+  SendMessageRequest,
+  SendMessageResult,
+} from "../session-messaging/install.ts";
 import type { SessionLifecycle } from "../shared/composition.ts";
 import type { SessionSettings } from "../shared/settings.ts";
 import { hasAttachedTmuxClients, isTmuxInstalled, tmuxSessionName } from "../shared/tmux.ts";
@@ -13,6 +17,7 @@ import {
   SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
   type SubagentParentSession,
 } from "./report.ts";
+import { SubagentMessageRouter } from "./wake.ts";
 
 const LINGER_POLL_MS = 1_000;
 
@@ -35,6 +40,7 @@ interface CurrentSubagentSession {
 
 export interface SubagentsHandle extends SessionLifecycle {
   getLaunchTargets(): readonly HandoffLaunchTarget[];
+  sendMessage(request: SendMessageRequest): Promise<SendMessageResult>;
 }
 
 export function installSubagents(
@@ -53,6 +59,12 @@ export function installSubagents(
       lingerTimer = undefined;
     }
   };
+  const messageRouter = new SubagentMessageRouter(
+    pi,
+    deps.messaging,
+    () => current?.parent,
+    isCurrentSession,
+  );
 
   deps.messaging.onIncomingSubagentReport((envelope) => {
     const parent = current?.parent;
@@ -115,6 +127,7 @@ You are working as a subagent on one task delegated by a parent session. The han
   });
 
   return {
+    sendMessage: (request) => messageRouter.sendMessage(request),
     getLaunchTargets() {
       const parent = current?.parent;
       if (!parent?.tmuxInstalled || parent.launchState.depth >= deps.settings.subagents.maxDepth) {

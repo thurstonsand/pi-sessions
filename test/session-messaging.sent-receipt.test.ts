@@ -21,10 +21,10 @@ const details = {
 };
 
 function getTool() {
-  return createSessionSendMessageTool({
+  return createSessionSendMessageTool({ sendMessage: vi.fn() } as never, {
+    wakeCapable: false,
     getCachedRelationTo: vi.fn(() => "child"),
-    sendMessage: vi.fn(),
-  } as never) as {
+  }) as {
     renderCall: (
       args: unknown,
       theme: unknown,

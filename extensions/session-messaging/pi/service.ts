@@ -10,6 +10,7 @@ import type {
   OutboundSessionEnvelope,
   SessionCancelEnvelope,
   SessionEnvelope,
+  SessionEnvelopeSendFailureReason,
   SessionMessageEnvelope,
   SessionSubagentReportEnvelope,
   TaskReport,
@@ -40,6 +41,7 @@ export type SendMessageResult =
   | {
       messageId: string;
       delivered: false;
+      reason?: SessionEnvelopeSendFailureReason | undefined;
       error?: string | undefined;
     }
   | {
@@ -171,6 +173,7 @@ export class SessionMessagingService {
       return {
         messageId,
         delivered: false,
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
         ...(result.error === undefined ? {} : { error: result.error }),
       };
     }

@@ -156,10 +156,16 @@ const INCOMING_BROKER_FRAME_SCHEMA = Type.Object({
   requestId: Type.String(),
   envelope: SESSION_ENVELOPE_SCHEMA,
 });
+export const SESSION_ENVELOPE_SEND_FAILURE_REASON_SCHEMA = Type.Union([
+  Type.Literal("no_session"),
+  Type.Literal("disconnected"),
+]);
+
 const SEND_RESULT_BROKER_FRAME_SCHEMA = Type.Object({
   type: Type.Literal("send_result"),
   requestId: Type.String(),
   delivered: Type.Boolean(),
+  reason: Type.Optional(SESSION_ENVELOPE_SEND_FAILURE_REASON_SCHEMA),
   error: Type.Optional(Type.String()),
 });
 const ERROR_BROKER_FRAME_SCHEMA = Type.Object({
@@ -184,6 +190,9 @@ export const BROKER_FRAME_SCHEMA = Type.Union([
   ERROR_BROKER_FRAME_SCHEMA,
 ]);
 
+export type SessionEnvelopeSendFailureReason = Static<
+  typeof SESSION_ENVELOPE_SEND_FAILURE_REASON_SCHEMA
+>;
 export type TaskReportReference = Static<typeof TASK_REPORT_REFERENCE_SCHEMA>;
 export type TaskReport = Static<typeof TASK_REPORT_SCHEMA>;
 export type OutboundSessionMessageEnvelope = Static<typeof OUTBOUND_MESSAGE_ENVELOPE_SCHEMA>;

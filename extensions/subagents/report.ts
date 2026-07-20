@@ -79,7 +79,7 @@ export function createSubmitTaskReportTool(
           ...durableReport,
         });
         delivered = result.delivered;
-        deliveryError = result.error;
+        deliveryError = result.delivered ? undefined : result.error;
       } catch (error) {
         deliveryError = formatError(error);
       }

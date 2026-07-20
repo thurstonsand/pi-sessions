@@ -23,6 +23,7 @@ function createMessagingHandle(
     cancelSession: vi.fn(),
     listSessions: vi.fn(),
     waitForSession: vi.fn(),
+    getCachedRelationTo: vi.fn(),
     onIncomingMessage: vi.fn(),
     onIncomingCancel: vi.fn(),
     onIncomingSubagentReport: vi.fn(),

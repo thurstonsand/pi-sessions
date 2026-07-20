@@ -349,7 +349,7 @@ Every phase is independently shippable: `npm run check` green, no half-finished 
   - Work: Identity record prewritten; `subagent_launched` ledger entry; `subagent_report` durable-before-delivery; `subagent_report` envelope kind with parent receipt durable-before-ack; turn termination; exit at settle; linger while a tmux client is attached; `requestResponse` default true for this launch value; launch-failure output names the surviving prepared session.
   - Validation: Ledger/identity tests including fork self-check failure; smoke: delegate, watch the window, receive the report, `tmux ls` empty afterward.
 
-- [ ] Phase 5: Wake-on-send and follow-ups
+- [x] Phase 5: Wake-on-send and follow-ups
   - Goal: Messaging a dormant owned child materializes it and delivers; follow-up answers arrive as reports.
   - Files: composite `session_send_message` in `extensions/subagents/`; root registration choice; tests.
   - Work: Routing (live → send; owned dormant → respawn, bounded broker wait, verified kill-and-respawn once, send; dead unknown → error); wake supersedes cancellation; steering vs follow-up needs no transport distinction; report tool serves follow-up answers identically.

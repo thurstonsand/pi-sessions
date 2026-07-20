@@ -14,21 +14,50 @@ import {
 } from "./message-contracts.ts";
 import { buildSendMessagePresentation } from "./send-message-presenter.ts";
 import { buildDeliveredMessageView, buildSendingMessageView } from "./send-message-view-model.ts";
-import type { SessionMessagingService } from "./service.ts";
+import type { CancelSessionResult, SendMessageRequest, SendMessageResult } from "./service.ts";
+
+interface SendMessageService {
+  sendMessage(request: SendMessageRequest): Promise<SendMessageResult>;
+}
+
+interface CancelSessionService {
+  cancelSession(sessionId: string): Promise<CancelSessionResult>;
+}
+
+export interface SessionSendMessageToolOptions {
+  wakeCapable: boolean;
+  getCachedRelationTo(sessionId: string | undefined): string | undefined;
+}
 
 interface SendMessageRendererState {
   callComponent?: ExpandableContentLayout | undefined;
 }
 
-export function createSessionSendMessageTool(service: SessionMessagingService): ToolDefinition {
+export function createSessionSendMessageTool(
+  service: SendMessageService,
+  options: SessionSendMessageToolOptions,
+): ToolDefinition {
+  const description = options.wakeCapable
+    ? "Send a message to another live pi session or a subagent."
+    : "Send a message to another live pi session.";
+  const promptSnippet = options.wakeCapable
+    ? "Send a message to another pi session or a subagent"
+    : "Send a message to another live pi session";
+  const promptGuidelines = options.wakeCapable
+    ? [
+        "Use session_search with live: true to discover live sessions.",
+        "It is always possible to session_send_message to an owned subagent",
+      ]
+    : [
+        "Before session_send_message, use session_search with live: true to list all live sessions and find the target.",
+      ];
+
   return defineTool({
     name: "session_send_message",
     label: "Send Message to Session",
-    description: "Send a message to another live pi session",
-    promptSnippet: "Send a message to another live pi session",
-    promptGuidelines: [
-      "Before session_send_message, use session_search with live: true (no other filters) to list all live sessions and find the target.",
-    ],
+    description,
+    promptSnippet,
+    promptGuidelines,
     parameters: SEND_MESSAGE_PARAMS,
     renderCall(args, theme, context) {
       const state = context.state as SendMessageRendererState;
@@ -36,7 +65,7 @@ export function createSessionSendMessageTool(service: SessionMessagingService): 
       state.callComponent = component;
       component.update(
         buildSendMessagePresentation(
-          buildSendingMessageView(args, service.getCachedRelationTo(args?.session)),
+          buildSendingMessageView(args, options.getCachedRelationTo(args?.session)),
           theme,
         ),
         context.expanded,
@@ -101,7 +130,7 @@ export function createSessionSendMessageTool(service: SessionMessagingService): 
   });
 }
 
-export function createSessionCancelTool(service: SessionMessagingService): ToolDefinition {
+export function createSessionCancelTool(service: CancelSessionService): ToolDefinition {
   return defineTool({
     name: "session_cancel",
     label: "Cancel a running session",

@@ -149,6 +149,7 @@ function handleSend(
       type: "send_result",
       requestId: message.requestId,
       delivered: false,
+      reason: "no_session",
       error: resolved.error,
     });
     return;
@@ -199,6 +200,7 @@ function failPendingSendsTo(targetSessionId: string): void {
       type: "send_result",
       requestId,
       delivered: false,
+      reason: "disconnected",
       error: "Target disconnected before accepting the envelope.",
     });
   }

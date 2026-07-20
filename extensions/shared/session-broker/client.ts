@@ -5,6 +5,7 @@ import { readFrames, writeFrame } from "./framing.ts";
 import {
   BROKER_FRAME_SCHEMA,
   type OutboundSessionEnvelope,
+  type SessionEnvelopeSendFailureReason,
   type SessionMessagingBrokerFrame,
 } from "./protocol.ts";
 import { getSessionMessagingSocketPath } from "./socket-path.ts";
@@ -26,10 +27,13 @@ interface PendingSendRequest {
   timeout: NodeJS.Timeout;
 }
 
-export interface SessionEnvelopeSendResult {
-  delivered: boolean;
-  error?: string | undefined;
-}
+export type SessionEnvelopeSendResult =
+  | { delivered: true }
+  | {
+      delivered: false;
+      reason?: SessionEnvelopeSendFailureReason | undefined;
+      error?: string | undefined;
+    };
 
 export interface SendSessionEnvelopeOptions {
   target: string;
@@ -209,10 +213,15 @@ export class SessionMessagingClient extends EventEmitter {
         if (!pending) return;
         clearTimeout(pending.timeout);
         this.pendingSends.delete(frame.requestId);
-        pending.resolve({
-          delivered: frame.delivered,
-          error: frame.error,
-        });
+        pending.resolve(
+          frame.delivered
+            ? { delivered: true }
+            : {
+                delivered: false,
+                ...(frame.reason === undefined ? {} : { reason: frame.reason }),
+                ...(frame.error === undefined ? {} : { error: frame.error }),
+              },
+        );
         break;
       }
       case "error":

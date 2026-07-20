@@ -5,6 +5,10 @@ import { installHandoff } from "./session-handoff/install.ts";
 import { installHooks } from "./session-hooks/install.ts";
 import { installIndex } from "./session-index/install.ts";
 import { installMessaging } from "./session-messaging/install.ts";
+import {
+  createSessionCancelTool,
+  createSessionSendMessageTool,
+} from "./session-messaging/pi/tools.ts";
 import { installSearch } from "./session-search/install.ts";
 import type { SessionLifecycle } from "./shared/composition.ts";
 import { createSessionModelRuntime, type ModelRuntimeProvider } from "./shared/model-runtime.ts";
@@ -50,6 +54,15 @@ export default function piSessions(pi: ExtensionAPI): void {
       : undefined;
   if (subagents) {
     lifecycles.push(subagents);
+  }
+  if (messaging) {
+    pi.registerTool(
+      createSessionSendMessageTool(subagents ?? messaging, {
+        wakeCapable: Boolean(subagents),
+        getCachedRelationTo: messaging.getCachedRelationTo,
+      }),
+    );
+    pi.registerTool(createSessionCancelTool(messaging));
   }
   if (settings.features.handoff) {
     lifecycles.push(

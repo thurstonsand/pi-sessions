@@ -56,7 +56,7 @@ What session did I implement the db layer?
 | Session Search     | `session_search` pi tool                          | Search through old sessions                             |
 | Session Ask        | `session_ask` pi tool                             | Ask questions about old sessions                        |
 | Session Handoff    | `/handoff`, `session_handoff` pi tool             | Start a focused new session; alternative to compaction  |
-| Session Messaging  | `session_send_message`, `session_cancel` pi tools | Coordinate between running Pi sessions                  |
+| Session Messaging  | `session_send_message`, `session_cancel` pi tools | Coordinate between live Pi sessions and own subagents   |
 | Session Picker     | `Alt+O`                                           | Reference old sessions in your prompt                   |
 | Session Index      | `/session-index` slash command                    | Shows index status and rebuilds the local session index |
 | Session Auto Title | in background, `/title` slash command             | Give sessions titles                                    |
@@ -106,13 +106,13 @@ When using Ghostty, if background handoffs ever target the wrong pane, run `/han
 
 ## Session Messaging
 
-Agents can coordinate with other currently running Pi sessions:
+Agents can coordinate with live Pi sessions and their own subagents:
 
 - `session_search` with `live: true` lists live sessions
-- `session_send_message` sends a message to another live session
+- `session_send_message` sends a message to a live session or own subagent
 - `session_cancel` aborts another live session's current turn
 
-Incoming messages start the recipient agent when idle and steer it when already running. Inactive sessions cannot receive messages, but you can still use `session_search` and `session_ask` with them.
+Incoming messages start the recipient agent when idle and steer it when already running. Messaging a dormant owned subagent resumes it automatically; other inactive sessions cannot receive messages, but you can still use `session_search` and `session_ask` with them.
 
 ## Session picker
 

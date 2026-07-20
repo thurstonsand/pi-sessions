@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createChildGeneratedHandoffBootstrap,
   createHandoffBootstrap,
   createHandoffSessionMetadata,
   HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
@@ -291,6 +292,42 @@ describe("session handoff extension", () => {
     expect(result.content[0]?.text).toContain('"requestResponse": true');
   });
 
+  it("rejects overlong titles before preparing a child session", async () => {
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi);
+
+    await expect(
+      runTool(pi, handlers, {
+        goal: "Investigate it",
+        title: "x".repeat(65),
+        launch: "deferred",
+      }),
+    ).rejects.toThrow("session_handoff title must be 64 characters or less.");
+
+    const definition = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
+    expect(titleMaxLength(definition)).toBe(64);
+    expect(mockPrepareHandoffLaunch).not.toHaveBeenCalled();
+  });
+
+  it("accepts a schema-valid 64-code-point astral title", async () => {
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi);
+
+    await expect(
+      runTool(pi, handlers, {
+        goal: "Investigate it",
+        title: "😀".repeat(64),
+        launch: "deferred",
+      }),
+    ).resolves.toMatchObject({ details: { sessionId: "child-session-999" } });
+
+    expect(mockPrepareHandoffLaunch).toHaveBeenCalledOnce();
+  });
+
   it("runs a deferred handoff, copies the resume command, and reports it", async () => {
     const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
@@ -413,6 +450,44 @@ describe("session handoff extension", () => {
       }),
       { triggerTurn: true },
     );
+  });
+
+  it("shuts down an automatic child when bootstrap fails before its first turn", async () => {
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi);
+
+    const ctx = createSessionStartContext({
+      sessionId: "child-session-123",
+      entries: [pendingGeneratedBootstrapEntry("automatic")],
+    });
+    ctx.ui.custom = vi.fn(async () => {
+      throw new Error("bootstrap failed");
+    });
+    await handlers.get("session_start")?.({}, ctx as never);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith("bootstrap failed", "error");
+    expect(ctx.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("leaves reviewed handoffs open when bootstrap fails", async () => {
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi);
+
+    const ctx = createSessionStartContext({
+      sessionId: "child-session-123",
+      entries: [pendingGeneratedBootstrapEntry("review")],
+    });
+    ctx.ui.custom = vi.fn(async () => {
+      throw new Error("bootstrap failed");
+    });
+    await handlers.get("session_start")?.({}, ctx as never);
+
+    expect(ctx.ui.notify).toHaveBeenCalledWith("bootstrap failed", "error");
+    expect(ctx.shutdown).not.toHaveBeenCalled();
   });
 
   it("refuses bootstrap when the target session already has user input", async () => {
@@ -549,6 +624,11 @@ function launchValues(definition: unknown): string[] {
   return parameters.properties.launch.anyOf.map((schema) => (schema as { const: string }).const);
 }
 
+function titleMaxLength(definition: unknown): number | undefined {
+  return (definition as { parameters: { properties: { title: { maxLength?: number } } } })
+    .parameters.properties.title.maxLength;
+}
+
 async function runTool(
   pi: ReturnType<typeof createPiApi>,
   handlers: Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>,
@@ -639,6 +719,24 @@ function pendingBootstrapEntry() {
   };
 }
 
+function pendingGeneratedBootstrapEntry(bootstrapMode: "review" | "automatic") {
+  return {
+    type: "custom",
+    id: "bootstrap-1",
+    parentId: null,
+    timestamp: "2026-03-23T00:00:00.000Z",
+    customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+    data: createChildGeneratedHandoffBootstrap({
+      sessionId: "child-session-123",
+      goal: "Finish phase 1",
+      title: "Implement autocomplete",
+      parentSessionFile: "/tmp/missing-parent.jsonl",
+      sourceLeafId: "source-leaf",
+      bootstrapMode,
+    }),
+  };
+}
+
 function createSessionStartContext(options: {
   sessionId: string;
   entries?: unknown[];
@@ -648,7 +746,9 @@ function createSessionStartContext(options: {
     hasUI: true,
     ui: {
       notify: vi.fn(),
+      custom: vi.fn(),
     },
+    shutdown: vi.fn(),
     modelRegistry: createFakeModelRegistry({
       available: (options.availableModels ?? []) as never,
     }),

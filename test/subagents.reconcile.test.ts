@@ -2,10 +2,10 @@ import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import {
   SUBAGENT_CANCELLED_CUSTOM_TYPE,
-  SUBAGENT_DISOWNED_NOTICE_CUSTOM_TYPE,
+  SUBAGENT_DISOWNED_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
-  SUBAGENT_OWNERSHIP_CLOSED_CUSTOM_TYPE,
   SUBAGENT_REPORT_CUSTOM_TYPE,
+  SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
   SUBAGENT_SUSPENDED_CUSTOM_TYPE,
 } from "../extensions/subagents/ledger.ts";
@@ -15,21 +15,53 @@ const parentId = "12345678-1234-1234-1234-123456789abc";
 const childId = "87654321-1234-1234-1234-123456789abc";
 
 describe("subagent reconciliation", () => {
-  it("recovers a missed report and closes dormant ownership", async () => {
+  it("recovers a missed report and wakes an idle parent with its contents", async () => {
     const fixture = createFixture([launchEntry()], [reportEntry()]);
 
     await fixture.reconciler.reconcile();
 
     expect(fixture.appended.map((entry) => entry.customType)).toEqual([
       SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
-      SUBAGENT_OWNERSHIP_CLOSED_CUSTOM_TYPE,
     ]);
-    expect(fixture.appended[0]?.data).toMatchObject({
+    expect(fixture.appended[0]?.data).toEqual({
+      writerSessionId: parentId,
       childSessionId: childId,
       reportId: "report-1",
-      provenance: "recovered",
     });
-    expect(fixture.sent).toEqual([`[system] subagent ${childId.slice(0, 8)} has result available`]);
+    expect(fixture.sent).toEqual([
+      expect.objectContaining({
+        message: expect.objectContaining({
+          customType: SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
+          content: expect.stringContaining("Complete."),
+          details: expect.objectContaining({ reportId: "report-1", provenance: "recovered" }),
+        }),
+        options: { triggerTurn: true },
+      }),
+    ]);
+  });
+
+  it("replays an accepted report whose visible message was not injected", async () => {
+    const fixture = createFixture(
+      [
+        launchEntry(),
+        customEntry("receipt", SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, {
+          writerSessionId: parentId,
+          childSessionId: childId,
+          reportId: "report-1",
+        }),
+      ],
+      [reportEntry()],
+      false,
+      async () => [],
+      false,
+      true,
+      false,
+    );
+
+    await fixture.reconciler.reconcile();
+
+    expect(fixture.appended).toEqual([]);
+    expect(fixture.sent[0]).toMatchObject({ options: { deliverAs: "steer" } });
   });
 
   it("restores only a durably suspended child when restoration is requested", async () => {
@@ -209,6 +241,21 @@ describe("subagent reconciliation", () => {
     expect(fixture.killed()).toBe(1);
   });
 
+  it("owns broker registration history for the current session epoch", async () => {
+    let live = true;
+    const fixture = createFixture([launchEntry()], [], false, async () => (live ? [childId] : []));
+
+    const observed = await fixture.reconciler.reconcile();
+    live = false;
+    const remembered = await fixture.reconciler.reconcile();
+    fixture.reconciler.beginSession();
+    const reset = await fixture.reconciler.reconcile();
+
+    expect(observed.registered).toContain(childId);
+    expect(remembered.registered).toContain(childId);
+    expect(reset.registered).not.toContain(childId);
+  });
+
   it("coalesces concurrent triggers and performs one dirty follow-up", async () => {
     let release: (() => void) | undefined;
     let calls = 0;
@@ -232,15 +279,18 @@ describe("subagent reconciliation", () => {
     expect(calls).toBe(2);
   });
 
-  it("writes one fork disownment notice", async () => {
+  it("writes one fork disownment message", async () => {
     const foreign = launchEntry("aaaaaaaa-1234-1234-1234-123456789abc");
     const fixture = createFixture([foreign, launchEntry()], []);
 
     await fixture.reconciler.reconcile();
     await fixture.reconciler.reconcile();
 
+    expect(fixture.appended).toEqual([]);
     expect(
-      fixture.appended.filter((entry) => entry.customType === SUBAGENT_DISOWNED_NOTICE_CUSTOM_TYPE),
+      fixture.sent.filter(
+        (entry) => entry.message.customType === SUBAGENT_DISOWNED_MESSAGE_CUSTOM_TYPE,
+      ),
     ).toHaveLength(1);
   });
 });
@@ -252,6 +302,7 @@ function createFixture(
   listSessions: () => Promise<string[]> = async () => [],
   blockCreate = false,
   killSucceeds = true,
+  idle = true,
 ) {
   let windowExists = initialWindow;
   let created = 0;
@@ -259,14 +310,31 @@ function createFixture(
   let sessionKilled = 0;
   let releaseCreate: (() => void) | undefined;
   const appended: Array<{ customType: string; data: unknown }> = [];
-  const sent: string[] = [];
+  const sent: Array<{
+    message: { customType: string; content: string; display: boolean; details: unknown };
+    options?: { triggerTurn: true } | { deliverAs: "steer" };
+  }> = [];
   const branch = [...parentEntries];
   const executor = {
     appendEntry: vi.fn((customType: string, data: unknown) => {
       appended.push({ customType, data });
       branch.push(customEntry(`append-${branch.length}`, customType, data));
     }),
-    sendMessage: vi.fn((message: { content: string }) => sent.push(message.content)),
+    sendMessage: vi.fn(
+      (
+        message: { customType: string; content: string; display: boolean; details: unknown },
+        options?: { triggerTurn: true } | { deliverAs: "steer" },
+      ) => {
+        sent.push({ message, ...(options ? { options } : {}) });
+        branch.push({
+          type: "custom_message",
+          id: `message-${branch.length}`,
+          parentId: null,
+          timestamp: "2026-03-25T00:00:00.000Z",
+          ...message,
+        });
+      },
+    ),
     exec: vi.fn(async (_command: string, args: string[]) => {
       switch (args[0]) {
         case "list-windows":
@@ -306,7 +374,7 @@ function createFixture(
       }
     }),
   };
-  const parent = { sessionId: parentId, epoch: 1, getBranch: () => branch };
+  const parent = { sessionId: parentId, epoch: 1, getBranch: () => branch, isIdle: () => idle };
   const reconciler = new SubagentReconciler({
     executor: executor as never,
     messaging: { listSessions: vi.fn(listSessions) },

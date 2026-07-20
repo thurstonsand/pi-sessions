@@ -75,7 +75,7 @@ export default function piSessions(pi: ExtensionAPI): void {
     );
   }
   if (settings.features.search) {
-    installSearch(pi, { settings, index, messaging });
+    installSearch(pi, { settings, index, messaging, roster: subagents?.roster });
   }
   if (settings.features.ask) {
     installAsk(pi, { settings, index, getModelRuntime });

@@ -11,10 +11,9 @@ import {
   collectParentLedger,
   SUBAGENT_REPORT_CUSTOM_TYPE,
   type SubagentReport,
+  type SubagentReportMessage,
   type SubagentReportReceived,
 } from "./ledger.ts";
-
-export const SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE = "pi-sessions.subagent_report_message";
 
 export interface SubagentParentSession {
   sessionId: string;
@@ -28,7 +27,8 @@ export interface ReportingSubagentSession extends SubagentParentSession {
 }
 
 export interface IncomingSubagentReport {
-  receipt: SubagentReportReceived;
+  receipt: SubagentReportReceived | undefined;
+  message: SubagentReportMessage;
   content: string;
   delivery: { triggerTurn: true } | { deliverAs: "steer" };
 }
@@ -105,11 +105,18 @@ export function buildIncomingSubagentReport(
   if (!launch) {
     throw new Error("Report source is not an owned subagent on the active branch.");
   }
-  if (ledger.receivedReportIds.has(envelope.reportId)) {
+  if (ledger.deliveredReportIds.has(envelope.reportId)) {
     return undefined;
   }
 
-  const receipt: SubagentReportReceived = {
+  const receipt = ledger.receivedReportIds.has(envelope.reportId)
+    ? undefined
+    : {
+        writerSessionId: ownerSessionId,
+        childSessionId: envelope.source,
+        reportId: envelope.reportId,
+      };
+  const message: SubagentReportMessage = {
     writerSessionId: ownerSessionId,
     childSessionId: envelope.source,
     reportId: envelope.reportId,
@@ -122,29 +129,30 @@ export function buildIncomingSubagentReport(
   };
   return {
     receipt,
-    content: formatReportForModel(launch.title, receipt),
+    message,
+    content: formatReportForModel(launch.title, message),
     delivery: session.isIdle() ? { triggerTurn: true } : { deliverAs: "steer" },
   };
 }
 
-function formatReportForModel(title: string, receipt: SubagentReportReceived): string {
+export function formatReportForModel(title: string, report: SubagentReportMessage): string {
   const sections = [
-    `Subagent report from "${title}" (session: ${receipt.childSessionId}, status: ${receipt.status})`,
-    `Summary\n\n${receipt.summary}`,
+    `Subagent report from "${title}" (session: ${report.childSessionId}, status: ${report.status})`,
+    `Summary\n\n${report.summary}`,
   ];
-  if (receipt.details) {
-    sections.push(`Details\n\n${receipt.details}`);
+  if (report.details) {
+    sections.push(`Details\n\n${report.details}`);
   }
-  if (receipt.references?.length) {
-    const references = receipt.references.map((reference) =>
+  if (report.references?.length) {
+    const references = report.references.map((reference) =>
       reference.description
         ? `- ${reference.reference} — ${reference.description}`
         : `- ${reference.reference}`,
     );
     sections.push(`References\n\n${references.join("\n")}`);
   }
-  if (receipt.nextSteps?.length) {
-    sections.push(`Next steps\n\n${receipt.nextSteps.map((step) => `- ${step}`).join("\n")}`);
+  if (report.nextSteps?.length) {
+    sections.push(`Next steps\n\n${report.nextSteps.map((step) => `- ${step}`).join("\n")}`);
   }
   return sections.join("\n\n");
 }

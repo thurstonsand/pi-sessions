@@ -117,6 +117,9 @@ async function startChildGeneratedHandoff(
   }
 
   if (!ctx.hasUI) {
+    if (bootstrap.bootstrapMode === "automatic") {
+      ctx.shutdown();
+    }
     return;
   }
 
@@ -190,5 +193,8 @@ async function startChildGeneratedHandoff(
     );
   } catch (error) {
     ctx.ui.notify(formatHandoffError(error), "error");
+    if (bootstrap.bootstrapMode === "automatic") {
+      ctx.shutdown();
+    }
   }
 }

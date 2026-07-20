@@ -2,7 +2,9 @@ import type {
   SearchSessionResult,
   SearchSort,
   SessionIndexStatus,
+  SessionKind,
 } from "../shared/session-index/index.ts";
+import type { SubagentState } from "../subagents/classify.ts";
 
 export interface SessionSearchToolParams {
   query?: string;
@@ -19,10 +21,26 @@ export interface SessionSearchToolParams {
   sort?: SearchSort;
   limit?: number;
   live?: boolean;
+  kind?: SessionKind;
+  relationScope?: "branch" | "tree";
 }
+
+export interface SessionSearchScopeDetails {
+  matched: number;
+  total: number;
+}
+
+export interface AnnotatedSearchResult extends SearchSessionResult {
+  state: SubagentState;
+  depth: number;
+  onActiveBranch: boolean;
+}
+
+export type SessionSearchResult = SearchSessionResult | AnnotatedSearchResult;
 
 export interface SessionSearchToolDetails {
   params?: SessionSearchToolParams | undefined;
-  results: SearchSessionResult[];
+  results: SessionSearchResult[];
   status?: SessionIndexStatus | undefined;
+  scope?: SessionSearchScopeDetails | undefined;
 }

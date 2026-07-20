@@ -1,4 +1,4 @@
-import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, SessionEntry, SessionTreeNode } from "@earendil-works/pi-coding-agent";
 import type { HandoffLaunchTarget } from "../session-handoff/launch-target.ts";
 import type {
   MessagingHandle,
@@ -16,6 +16,7 @@ import {
   hasSubagentLaunchEntries,
   SUBAGENT_CLOSED_CUSTOM_TYPE,
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
+  SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
   SUBAGENT_REPORT_REMINDER_MESSAGE_CUSTOM_TYPE,
 } from "./ledger.ts";
@@ -23,9 +24,9 @@ import { openReconcileSession, SubagentReconciler } from "./reconcile.ts";
 import {
   buildIncomingSubagentReport,
   createSubmitTaskReportTool,
-  SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
   type SubagentParentSession,
 } from "./report.ts";
+import { openRosterSession, type SubagentRoster, TranscriptSubagentRoster } from "./roster.ts";
 import { SubagentMessageRouter } from "./wake.ts";
 
 const LINGER_POLL_MS = 1_000;
@@ -33,6 +34,7 @@ const LINGER_POLL_MS = 1_000;
 interface ParentSessionState extends SubagentParentSession {
   launchState: SubagentLaunchState;
   tmuxInstalled: boolean;
+  getTree(): SessionTreeNode[];
   hasPendingMessages(): boolean;
   shutdown(): void;
 }
@@ -49,6 +51,7 @@ interface CurrentSubagentSession {
 }
 
 export interface SubagentsHandle extends SessionLifecycle {
+  roster: SubagentRoster;
   getLaunchTargets(): readonly HandoffLaunchTarget[];
   sendMessage(request: SendMessageRequest): Promise<SendMessageResult>;
   cancelSession(sessionId: string): Promise<SubagentCancelResult>;
@@ -76,6 +79,13 @@ export function installSubagents(
     getParent: () => current?.parent,
     isCurrent: isCurrentSession,
     openSession: openReconcileSession,
+  });
+  const roster = new TranscriptSubagentRoster({
+    executor: pi,
+    messaging: deps.messaging,
+    getParent: () => current?.parent,
+    reconcile: () => reconciler.reconcile(),
+    openSession: openRosterSession,
   });
   const messageRouter = new SubagentMessageRouter(
     pi,
@@ -106,13 +116,15 @@ export function installSubagents(
     if (!incoming) {
       return;
     }
-    pi.appendEntry(SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, incoming.receipt);
+    if (incoming.receipt) {
+      pi.appendEntry(SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, incoming.receipt);
+    }
     pi.sendMessage(
       {
         customType: SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
         content: incoming.content,
         display: true,
-        details: incoming.receipt,
+        details: incoming.message,
       },
       incoming.delivery,
     );
@@ -176,6 +188,7 @@ You are working as a subagent on one task delegated by a parent session. The han
   });
 
   return {
+    roster,
     sendMessage: (request) => messageRouter.sendMessage(request),
     cancelSession: (sessionId) => cancellationRouter.cancelSession(sessionId),
     getLaunchTargets() {
@@ -189,11 +202,12 @@ You are working as a subagent on one task delegated by a parent session. The han
       clearLinger();
       epoch += 1;
       const sessionId = ctx.sessionManager.getSessionId();
-      const identity = findSubagentIdentity(ctx.sessionManager.getBranch(), sessionId);
+      const identity = findSubagentIdentity(ctx.sessionManager);
       const sessionManager = ctx.sessionManager;
       const parent: ParentSessionState = {
         sessionId,
         getBranch: () => sessionManager.getBranch(),
+        getTree: () => sessionManager.getTree(),
         isIdle: ctx.isIdle,
         hasPendingMessages: ctx.hasPendingMessages,
         shutdown: ctx.shutdown,

@@ -26,6 +26,7 @@ import {
 import type { SessionOrigin } from "../shared/session-index/index.ts";
 import { contentToText, isRecord } from "../shared/text.ts";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
+import { SUBAGENT_LAUNCHED_CUSTOM_TYPE, SUBAGENT_LAUNCHED_SCHEMA } from "../subagents/ledger.ts";
 import {
   deriveSessionRepoRoots,
   type FileTouchOp,
@@ -181,6 +182,9 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
   appendDurableHandoffMetadataChunks(chunks, scan.handoffMetadata);
 
   const parentSessionPath = normalizeParentSessionPath(parsed.header.parentSession);
+  const parentSession = parentSessionPath
+    ? inspectParentSession(parentSessionPath, parsed.header.id, sessionPath)
+    : undefined;
 
   return {
     sessionId: parsed.header.id,
@@ -194,8 +198,12 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
     messageCount: scan.messageCount,
     entryCount: scan.entryCount,
     parentSessionPath,
-    parentSessionId: parentSessionPath ? readSessionIdFromPath(parentSessionPath) : undefined,
-    sessionOrigin: inferSessionOrigin(parentSessionPath, scan.handoffMetadata?.metadata),
+    parentSessionId: parentSession?.sessionId,
+    sessionOrigin: deriveSessionOrigin(
+      parentSessionPath,
+      parentSession?.launchedSubagent ?? false,
+      scan.handoffMetadata?.metadata,
+    ),
     handoffGoal: scan.handoffMetadata?.metadata.goal,
     handoffNextTask: scan.handoffMetadata?.metadata.nextTask,
     indexedFileSize: slice.consumedBytes,
@@ -458,23 +466,66 @@ function normalizeParentSessionPath(parentSession: string | undefined): string |
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function readSessionIdFromPath(sessionPath: string): string | undefined {
+interface ParentSessionInspection {
+  sessionId: string;
+  launchedSubagent: boolean;
+}
+
+export function inferSessionOrigin(
+  sessionId: string,
+  sessionPath: string,
+  parentSessionPath: string | undefined,
+  handoffMetadata: HandoffSessionMetadata | undefined,
+): SessionOrigin | undefined {
+  const parentSession = parentSessionPath
+    ? inspectParentSession(parentSessionPath, sessionId, sessionPath)
+    : undefined;
+  return deriveSessionOrigin(
+    parentSessionPath,
+    parentSession?.launchedSubagent ?? false,
+    handoffMetadata,
+  );
+}
+
+function inspectParentSession(
+  parentSessionPath: string,
+  childSessionId: string,
+  childSessionPath: string,
+): ParentSessionInspection | undefined {
   try {
-    const parsed = parseSessionFile(sessionPath);
-    return parsed?.header.id;
+    const parent = parseSessionFile(parentSessionPath);
+    if (!parent) {
+      return undefined;
+    }
+
+    const launchedSubagent = parent.entries.some((entry) => {
+      if (entry.type !== "custom" || entry.customType !== SUBAGENT_LAUNCHED_CUSTOM_TYPE) {
+        return false;
+      }
+      const launch = safeParseTypeBoxValue(SUBAGENT_LAUNCHED_SCHEMA, entry.data);
+      return (
+        launch?.writerSessionId === parent.header.id &&
+        launch.childSessionId === childSessionId &&
+        launch.childSessionFile === childSessionPath
+      );
+    });
+    return { sessionId: parent.header.id, launchedSubagent };
   } catch {
     return undefined;
   }
 }
 
-function inferSessionOrigin(
+function deriveSessionOrigin(
   parentSessionPath: string | undefined,
+  launchedSubagent: boolean,
   handoffMetadata: HandoffSessionMetadata | undefined,
 ): SessionOrigin | undefined {
   if (!parentSessionPath) {
     return undefined;
   }
-
+  if (launchedSubagent) {
+    return "subagent";
+  }
   return handoffMetadata?.origin === "handoff" ? "handoff" : "unknown_child";
 }
 

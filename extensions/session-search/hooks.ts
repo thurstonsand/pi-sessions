@@ -27,6 +27,7 @@ import {
   type ExtractedSessionTail,
   extractSessionRecord,
   extractSessionTail,
+  inferSessionOrigin,
   type SessionFileTouch,
 } from "./extract.ts";
 import { deriveSessionRepoRoots } from "./normalize.ts";
@@ -392,10 +393,15 @@ function buildTailSessionRow(
 ): SessionRow {
   const scan = tail.scan;
   const tailHandoffMetadata = baseline.handoffGoal ? undefined : scan.handoffMetadata?.metadata;
-  const tailOrigin =
-    baseline.parentSessionPath && tailHandoffMetadata?.origin === "handoff"
-      ? ("handoff" as const)
-      : undefined;
+  let tailOrigin: SessionOrigin | undefined;
+  if (baseline.sessionOrigin !== "subagent" && baseline.sessionOrigin !== "fork") {
+    tailOrigin = inferSessionOrigin(
+      baseline.sessionId,
+      baseline.sessionPath,
+      baseline.parentSessionPath,
+      tailHandoffMetadata,
+    );
+  }
   const nextOrigin = resolveSessionOrigin(sessionOrigin, tailOrigin, baseline.sessionOrigin);
 
   return {

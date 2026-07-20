@@ -116,6 +116,11 @@ describe("subagent reports", () => {
         writerSessionId: parentId,
         childSessionId: childId,
         reportId: "report-1",
+      },
+      message: {
+        writerSessionId: parentId,
+        childSessionId: childId,
+        reportId: "report-1",
         status: "done",
         summary: "Implemented and tested.",
         details: "The focused checks pass.",
@@ -144,12 +149,38 @@ Next steps
     });
   });
 
-  it("deduplicates a report already received on the active branch", () => {
+  it("replays a report that was accepted but not injected", () => {
     const incoming = buildIncomingSubagentReport(
       {
         epoch: 1,
         sessionId: parentId,
         getBranch: () => [launchEntry(), receivedEntry()] as never,
+        isIdle: () => false,
+      },
+      {
+        kind: "subagent_report",
+        reportId: "report-1",
+        source: childId,
+        target: parentId,
+        status: "done",
+        summary: "Retry after receipt.",
+        sentAt: "2026-03-25T00:00:00.000Z",
+      },
+    );
+
+    expect(incoming).toMatchObject({
+      receipt: undefined,
+      message: { reportId: "report-1", summary: "Retry after receipt." },
+      delivery: { deliverAs: "steer" },
+    });
+  });
+
+  it("deduplicates a report already injected on the active branch", () => {
+    const incoming = buildIncomingSubagentReport(
+      {
+        epoch: 1,
+        sessionId: parentId,
+        getBranch: () => [launchEntry(), receivedEntry(), deliveredEntry()] as never,
         isIdle: () => true,
       },
       {
@@ -219,6 +250,23 @@ function receivedEntry() {
     timestamp: "2026-03-25T00:01:00.000Z",
     customType: "pi-sessions.subagent_report_received",
     data: {
+      writerSessionId: parentId,
+      childSessionId: childId,
+      reportId: "report-1",
+    },
+  };
+}
+
+function deliveredEntry() {
+  return {
+    type: "custom_message",
+    id: "delivered-1",
+    parentId: "received-1",
+    timestamp: "2026-03-25T00:01:01.000Z",
+    customType: "pi-sessions.subagent_report_message",
+    content: "Delivered.",
+    display: true,
+    details: {
       writerSessionId: parentId,
       childSessionId: childId,
       reportId: "report-1",

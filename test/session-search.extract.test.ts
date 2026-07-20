@@ -160,6 +160,52 @@ describe("extractSessionRecord", () => {
     );
   });
 
+  it("classifies a child with a matching parent launch as subagent origin", () => {
+    const root = testFs.createTempDir();
+    const parentPath = `${root}/parent.jsonl`;
+    const childPath = `${root}/subagent.jsonl`;
+    testFs.writeJsonlFile(root, "parent.jsonl", [
+      {
+        type: "session",
+        id: "parent-session",
+        timestamp: "2026-03-23T00:00:00.000Z",
+        cwd: "/repo/app",
+      },
+      {
+        type: "custom",
+        id: "launch-1",
+        parentId: null,
+        timestamp: "2026-03-23T00:00:01.000Z",
+        customType: "pi-sessions.subagent_launched",
+        data: {
+          writerSessionId: "parent-session",
+          childSessionId: "subagent-session",
+          childSessionFile: childPath,
+          title: "Subagent",
+          goal: "Investigate",
+          requestResponse: true,
+          cwd: "/repo/app",
+          resumeCommand: "resume",
+          depth: 1,
+        },
+      },
+    ]);
+    testFs.writeJsonlFile(root, "subagent.jsonl", [
+      {
+        type: "session",
+        id: "subagent-session",
+        timestamp: "2026-03-23T00:10:00.000Z",
+        cwd: "/repo/app",
+        parentSession: parentPath,
+      },
+    ]);
+
+    expect(extractSessionRecord(childPath)).toMatchObject({
+      sessionId: "subagent-session",
+      sessionOrigin: "subagent",
+    });
+  });
+
   it("captures durable handoff metadata for child sessions", () => {
     const root = testFs.createTempDir();
     const parentPath = testFs.writeJsonlFile(root, "parent.jsonl", [

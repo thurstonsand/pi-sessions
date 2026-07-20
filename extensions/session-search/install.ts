@@ -5,15 +5,19 @@ import type { IndexHandle } from "../shared/composition.ts";
 import { formatError } from "../shared/errors.ts";
 import { stripSearchSnippetMarkers } from "../shared/search-snippet.ts";
 import {
-  type SearchSessionResult,
   type SearchSessionsParams,
   type SessionSearchEvidence,
   searchSessions,
   withSessionIndex,
 } from "../shared/session-index/index.ts";
 import type { SessionSettings } from "../shared/settings.ts";
+import type { SubagentRoster, SubagentRosterEntry } from "../subagents/roster.ts";
 import { renderSessionSearchResult } from "./renderer.ts";
-import type { SessionSearchToolDetails, SessionSearchToolParams } from "./tool-contract.ts";
+import type {
+  SessionSearchResult,
+  SessionSearchToolDetails,
+  SessionSearchToolParams,
+} from "./tool-contract.ts";
 
 const DEFAULT_SESSION_SEARCH_LIMIT = 6;
 
@@ -21,6 +25,7 @@ export interface SearchInstallDeps {
   settings: SessionSettings;
   index: IndexHandle;
   messaging?: MessagingHandle | undefined;
+  roster?: SubagentRoster | undefined;
 }
 
 export function installSearch(pi: ExtensionAPI, deps: SearchInstallDeps): void {
@@ -34,6 +39,7 @@ export function installSearch(pi: ExtensionAPI, deps: SearchInstallDeps): void {
     promptGuidelines: [
       "Omit queries in session_search to list matching sessions chronologically.",
       "After session_search finds a session id, switch to session_ask for questions about it.",
+      'To identify your own subagents, use session_search with relationScope: "branch".',
     ],
     parameters: Type.Object({
       query: Type.Optional(
@@ -97,6 +103,17 @@ export function installSearch(pi: ExtensionAPI, deps: SearchInstallDeps): void {
           description: "When true, only return currently active sessions",
         }),
       ),
+      kind: Type.Optional(
+        Type.Union([Type.Literal("user"), Type.Literal("subagent")], {
+          description: "Filter by session kind",
+        }),
+      ),
+      relationScope: Type.Optional(
+        Type.Union([Type.Literal("branch"), Type.Literal("tree")], {
+          description:
+            "Restrict results to subagents launched from the active branch or anywhere in this session's conversation tree",
+        }),
+      ),
       limit: Type.Optional(
         Type.Number({
           description: "Number of matches to return",
@@ -118,14 +135,30 @@ export function installSearch(pi: ExtensionAPI, deps: SearchInstallDeps): void {
         details: progressDetails,
       });
 
-      const liveSessionIds = params.live ? await getLiveSessionIds(deps.messaging) : undefined;
+      const scope = await resolveSearchScope(params, deps);
 
       return withSessionIndex(indexPath, { mode: "read", required: true }, ({ db, status }) => {
-        const results = searchSessions(db, buildSearchParams(params, ctx, liveSessionIds));
+        const results = searchSessions(
+          db,
+          buildSearchParams(params, ctx, scope.includeSessionIds),
+        ).map((result) => {
+          const annotation = scope.annotations.get(result.sessionId);
+          return annotation
+            ? {
+                ...result,
+                state: annotation.state,
+                depth: annotation.depth,
+                onActiveBranch: annotation.onActiveBranch,
+              }
+            : result;
+        });
         const details: SessionSearchToolDetails = {
           params,
           status,
           results,
+          ...(scope.total === undefined
+            ? {}
+            : { scope: { matched: results.length, total: scope.total } }),
         };
         return {
           content: [
@@ -157,10 +190,47 @@ function buildSearchParams(
     cwd: params.cwd,
     after: params.time?.after,
     before: params.time?.before,
+    kind: params.kind,
     sort: params.sort,
     limit: params.limit ?? DEFAULT_SESSION_SEARCH_LIMIT,
     includeSessionIds: liveSessionIds,
     relativeToSessionId: currentSessionId,
+  };
+}
+
+interface ResolvedSearchScope {
+  includeSessionIds: string[] | undefined;
+  annotations: ReadonlyMap<string, SubagentRosterEntry>;
+  total: number | undefined;
+}
+
+async function resolveSearchScope(
+  params: SessionSearchToolParams,
+  deps: SearchInstallDeps,
+): Promise<ResolvedSearchScope> {
+  if (params.relationScope) {
+    if (!deps.roster) {
+      throw new Error("Subagent relations are unavailable because subagents are not active.");
+    }
+    try {
+      const roster = await deps.roster.resolve(params.relationScope);
+      const entries = params.live
+        ? roster.entries.filter((entry) => entry.managedLive)
+        : roster.entries;
+      return {
+        includeSessionIds: entries.map((entry) => entry.sessionId),
+        annotations: new Map(roster.entries.map((entry) => [entry.sessionId, entry])),
+        total: roster.total,
+      };
+    } catch (error) {
+      throw new Error(`Subagent relation scope is unavailable: ${formatError(error)}`);
+    }
+  }
+
+  return {
+    includeSessionIds: params.live ? await getLiveSessionIds(deps.messaging) : undefined,
+    annotations: new Map(),
+    total: undefined,
   };
 }
 
@@ -183,6 +253,7 @@ function formatSearchResultsForModel(details: SessionSearchToolDetails): string 
     {
       params: details.params,
       status: details.status,
+      ...(details.scope ? { scope: details.scope } : {}),
       results: details.results.map(formatSearchResultForModel),
     },
     null,
@@ -190,7 +261,7 @@ function formatSearchResultsForModel(details: SessionSearchToolDetails): string 
   );
 }
 
-function formatSearchResultForModel(result: SearchSessionResult): SearchSessionResult {
+function formatSearchResultForModel(result: SessionSearchResult): SessionSearchResult {
   return {
     ...result,
     snippet: stripSearchSnippetMarkers(result.snippet) ?? result.snippet,

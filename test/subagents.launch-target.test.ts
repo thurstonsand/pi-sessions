@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { SUBAGENT_IDENTITY_CUSTOM_TYPE } from "../extensions/subagents/identity.ts";
 import { createSubagentLaunchTarget } from "../extensions/subagents/launch-target.ts";
 import { SUBAGENT_LAUNCHED_CUSTOM_TYPE } from "../extensions/subagents/ledger.ts";
 
 const parentId = "12345678-1234-1234-1234-123456789abc";
 
 describe("subagent launch target", () => {
-  it("prewrites identity, records ownership, and then creates a stamped tmux window", async () => {
+  it("records ownership before creating a stamped tmux window", async () => {
     const order: string[] = [];
     const appendEntry = vi.fn(() => order.push("ledger"));
     const exec = vi.fn(async (_command: string, args: string[]) => {
@@ -27,20 +26,11 @@ describe("subagent launch target", () => {
       { sessionId: parentId, depth: 0, epoch: 3 },
       (epoch) => epoch === 3,
     );
-    const appendCustomEntry = vi.fn();
-
     target.prepareChild({
-      manager: { appendCustomEntry } as never,
+      manager: {} as never,
       childSessionId: "child-session",
       parentSessionId: parentId,
       parentSessionFile: "/tmp/parent.jsonl",
-      requestResponse: true,
-    });
-    expect(appendCustomEntry).toHaveBeenCalledWith(SUBAGENT_IDENTITY_CUSTOM_TYPE, {
-      childSessionId: "child-session",
-      ownerSessionId: parentId,
-      parentSessionFile: "/tmp/parent.jsonl",
-      depth: 1,
       requestResponse: true,
     });
 

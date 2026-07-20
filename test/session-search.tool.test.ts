@@ -8,7 +8,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { listSessionPickerItems } from "../extensions/session-handoff/query.ts";
 import type { MessagingHandle } from "../extensions/session-messaging/install.ts";
 import { installSearch } from "../extensions/session-search/install.ts";
@@ -25,6 +25,7 @@ import {
   setMetadata,
 } from "../extensions/shared/session-index/index.ts";
 import { loadSettings } from "../extensions/shared/settings.ts";
+import type { SubagentRoster } from "../extensions/subagents/roster.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-search-tool-");
@@ -412,6 +413,135 @@ describe("session_search tool", () => {
     ]);
   });
 
+  it("resolves subagent relations outside the index and reports scope totals", async () => {
+    const agentDir = testFs.createTempDir();
+    const dir = testFs.createTempDir();
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    writeFileSync(
+      path.join(agentDir, "settings.json"),
+      `${JSON.stringify({ sessions: { index: { dir } } }, null, 2)}\n`,
+    );
+    const dbPath = path.join(dir, "index.sqlite");
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    for (const [sessionId, sessionOrigin] of [
+      ["owned-stale-origin", "handoff"],
+      ["owned-subagent", "subagent"],
+    ] as const) {
+      insertSession(
+        db,
+        {
+          sessionId,
+          sessionPath: `/tmp/${sessionId}.jsonl`,
+          sessionName: sessionId,
+          cwd: "/repo/app",
+          repoRoots: ["/repo"],
+          startedAt: "2026-03-22T00:00:00.000Z",
+          modifiedAt:
+            sessionId === "owned-subagent"
+              ? "2026-03-22T00:20:00.000Z"
+              : "2026-03-22T00:10:00.000Z",
+          messageCount: 1,
+          entryCount: 1,
+          sessionOrigin,
+        },
+        "full_reindex",
+      );
+    }
+    db.close();
+
+    const roster = {
+      resolve: vi.fn(async () => ({
+        total: 3,
+        entries: [
+          rosterEntry("owned-stale-origin", true, false),
+          rosterEntry("owned-subagent", false, true),
+          rosterEntry("owned-but-unindexed", false, true),
+        ],
+      })),
+    } as SubagentRoster;
+    const tool = registerSessionSearchTool({ roster });
+    const result = await tool.execute(
+      "tool-1",
+      { relationScope: "branch" },
+      undefined,
+      undefined,
+      createToolContext("/repo", "current-session"),
+    );
+    const output = JSON.parse((result.content[0] as { text: string }).text) as {
+      scope: { matched: number; total: number };
+      results: Array<{
+        sessionId: string;
+        state?: string;
+        depth?: number;
+        onActiveBranch?: boolean;
+      }>;
+    };
+
+    expect(roster.resolve).toHaveBeenCalledWith("branch");
+    expect(output.scope).toEqual({ matched: 2, total: 3 });
+    expect(output.results).toEqual([
+      expect.objectContaining({
+        sessionId: "owned-subagent",
+        state: "interrupted",
+        depth: 1,
+        onActiveBranch: true,
+      }),
+      expect.objectContaining({
+        sessionId: "owned-stale-origin",
+        state: "completed",
+        onActiveBranch: false,
+      }),
+    ]);
+
+    const component = new ToolExecutionComponent(
+      tool.name,
+      "tool-1",
+      { relationScope: "branch" },
+      undefined,
+      tool,
+      createFakeTui(),
+      "/repo",
+    );
+    component.updateResult(
+      { content: result.content, details: result.details, isError: false },
+      false,
+    );
+    component.setExpanded(true);
+    const rendered = stripAnsi(component.render(120).join("\n"));
+    expect(rendered).toContain("scope: 2 matched • 3 total");
+    expect(rendered).toContain("[interrupted • depth 1]");
+    expect(rendered).toContain("[completed • depth 1 • history]");
+
+    const liveResult = await tool.execute(
+      "tool-2",
+      { relationScope: "tree", live: true },
+      undefined,
+      undefined,
+      createToolContext("/repo", "current-session"),
+    );
+    const liveOutput = JSON.parse((liveResult.content[0] as { text: string }).text) as {
+      scope: { matched: number; total: number };
+      results: Array<{ sessionId: string }>;
+    };
+    expect(roster.resolve).toHaveBeenLastCalledWith("tree");
+    expect(liveOutput.scope).toEqual({ matched: 1, total: 3 });
+    expect(liveOutput.results.map((row) => row.sessionId)).toEqual(["owned-stale-origin"]);
+
+    const filteredResult = await tool.execute(
+      "tool-3",
+      { relationScope: "branch", query: "absent-content" },
+      undefined,
+      undefined,
+      createToolContext("/repo", "current-session"),
+    );
+    const filteredOutput = JSON.parse((filteredResult.content[0] as { text: string }).text) as {
+      scope: { matched: number; total: number };
+      results: unknown[];
+    };
+    expect(filteredOutput).toMatchObject({ scope: { matched: 0, total: 3 }, results: [] });
+  });
+
   it("fails live search clearly when session messaging is inactive", async () => {
     const agentDir = testFs.createTempDir();
     const dir = testFs.createTempDir();
@@ -530,7 +660,10 @@ describe("session_search tool", () => {
   });
 });
 
-function registerSessionSearchTool(deps?: { messaging?: MessagingHandle | undefined }) {
+function registerSessionSearchTool(deps?: {
+  messaging?: MessagingHandle | undefined;
+  roster?: SubagentRoster | undefined;
+}) {
   let registeredTool: ToolDefinition | undefined;
 
   const settings = loadSettings();
@@ -540,7 +673,12 @@ function registerSessionSearchTool(deps?: { messaging?: MessagingHandle | undefi
         registeredTool = tool;
       },
     } as unknown as ExtensionAPI,
-    { settings, index: { path: settings.index.path }, messaging: deps?.messaging },
+    {
+      settings,
+      index: { path: settings.index.path },
+      messaging: deps?.messaging,
+      roster: deps?.roster,
+    },
   );
 
   if (!registeredTool) {
@@ -548,6 +686,20 @@ function registerSessionSearchTool(deps?: { messaging?: MessagingHandle | undefi
   }
 
   return registeredTool;
+}
+
+function rosterEntry(sessionId: string, managedLive: boolean, onActiveBranch: boolean) {
+  return {
+    sessionId,
+    sessionFile: `/tmp/${sessionId}.jsonl`,
+    ownerSessionId: "current-session",
+    title: sessionId,
+    goal: "Work",
+    depth: 1,
+    state: onActiveBranch ? ("interrupted" as const) : ("completed" as const),
+    onActiveBranch,
+    managedLive,
+  };
 }
 
 function createToolContext(cwd: string, sessionId = "another-session") {

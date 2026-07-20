@@ -72,6 +72,8 @@ File filters distinguish read-or-write evidence from write-only evidence:
 - `files.touched`: sessions that read or changed a path
 - `files.changed`: sessions that changed a path
 
+Use `kind: "user"` or `kind: "subagent"` to filter by session type across the whole index. Use `relationScope: "branch"` to search subagents launched from the current conversation branch, or `relationScope: "tree"` to include subagents launched from abandoned branches as well.
+
 ## Session Handoff
 
 `/handoff <goal>` starts a focused new session. Give pi a goal, and it will generate a prompt for you to review before kicking it off.

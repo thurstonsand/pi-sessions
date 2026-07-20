@@ -111,7 +111,10 @@ function createFixture(options: {
   });
   const reconcile = vi.fn(async () => {
     order.push("reconcile");
-    return { states: new Map([[childId, options.state ?? "unknown"]]) };
+    return {
+      states: new Map([[childId, options.state ?? "unknown"]]),
+      registered: new Set<string>(),
+    };
   });
   const parent = { sessionId: parentId, epoch: 7, getBranch: () => branch };
   const router = new SubagentCancellationRouter(

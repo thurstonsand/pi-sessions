@@ -2,7 +2,6 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { HandoffLaunchTarget } from "../session-handoff/launch-target.ts";
 import { formatError } from "../shared/errors.ts";
 import { createTmuxWindow, tmuxSessionName } from "../shared/tmux.ts";
-import { SUBAGENT_IDENTITY_CUSTOM_TYPE } from "./identity.ts";
 import { SUBAGENT_LAUNCHED_CUSTOM_TYPE, type SubagentLaunched } from "./ledger.ts";
 
 export interface SubagentLaunchState {
@@ -24,13 +23,6 @@ export function createSubagentLaunchTarget(
     bootstrapMode: "automatic",
     prepareChild(input) {
       requireCurrentParent(state, input.parentSessionId, isCurrent);
-      input.manager.appendCustomEntry(SUBAGENT_IDENTITY_CUSTOM_TYPE, {
-        childSessionId: input.childSessionId,
-        ownerSessionId: state.sessionId,
-        parentSessionFile: input.parentSessionFile,
-        depth: state.depth + 1,
-        requestResponse: input.requestResponse,
-      });
     },
     async launch(input) {
       requireCurrentParent(state, input.parentSessionId, isCurrent);

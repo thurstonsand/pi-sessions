@@ -1,16 +1,20 @@
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SUBAGENT_IDENTITY_CUSTOM_TYPE } from "../extensions/subagents/identity.ts";
 import { installSubagents } from "../extensions/subagents/install.ts";
 import {
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
   SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
 } from "../extensions/subagents/ledger.ts";
+import { createTestFilesystem } from "./test-helpers.ts";
 
+const testFs = createTestFilesystem("pi-sessions-subagent-install-");
+const childSessionFiles = new WeakMap<unknown[], { parentPath: string; childPath: string }>();
 const parentId = "12345678-1234-1234-1234-123456789abc";
 const childId = "87654321-1234-1234-1234-123456789abc";
 
 afterEach(() => {
   vi.useRealTimers();
+  testFs.cleanup();
 });
 
 describe("subagent installation", () => {
@@ -179,7 +183,7 @@ describe("subagent installation", () => {
       entries.push({
         type: "custom_message",
         id: `entry-${entries.length}`,
-        parentId: entries.at(-1)?.id ?? null,
+        parentId: (entries.at(-1) as { id?: string } | undefined)?.id ?? null,
         customType: message.customType,
         content: message.content,
         display: true,
@@ -280,6 +284,11 @@ function createContext(sessionId: string, entries: unknown[]) {
       getSessionId: () => sessionId,
       getBranch: () => entries,
       getEntries: () => entries,
+      getHeader: () => {
+        const files = childSessionFiles.get(entries);
+        return files ? { parentSession: files.parentPath } : undefined;
+      },
+      getSessionFile: () => childSessionFiles.get(entries)?.childPath,
     },
     hasPendingMessages: () => false,
     isIdle: () => true,
@@ -308,20 +317,29 @@ function launchEntry() {
   };
 }
 
-function childEntries(depth: number, requestResponse = true) {
-  return [
+function childEntries(depth: number, requestResponse = true): unknown[] {
+  const root = testFs.createTempDir();
+  const parentPath = join(root, "parent.jsonl");
+  const childPath = join(root, "child.jsonl");
+  testFs.writeJsonlFile(root, "parent.jsonl", [
     {
-      type: "custom",
-      id: "identity",
-      parentId: null,
-      customType: SUBAGENT_IDENTITY_CUSTOM_TYPE,
+      type: "session",
+      id: parentId,
+      timestamp: "2026-03-25T00:00:00.000Z",
+      cwd: "/repo",
+    },
+    {
+      ...launchEntry(),
+      timestamp: "2026-03-25T00:00:01.000Z",
       data: {
-        childSessionId: childId,
-        ownerSessionId: parentId,
-        parentSessionFile: "/tmp/parent.jsonl",
+        ...launchEntry().data,
+        childSessionFile: childPath,
         depth,
         requestResponse,
       },
     },
-  ];
+  ]);
+  const entries: unknown[] = [];
+  childSessionFiles.set(entries, { parentPath, childPath });
+  return entries;
 }

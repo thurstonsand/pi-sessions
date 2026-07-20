@@ -181,20 +181,25 @@ describe("session handoff extraction", () => {
     expect(prompt).not.toContain("Call create_handoff_context exactly once.");
   });
 
-  it("rejects generated titles longer than 64 characters", async () => {
+  it("clamps generated titles to the parent tool input limit", async () => {
+    const title =
+      "This generated handoff title is intentionally much longer than sixty four characters";
     createAgentSessionMock.mockResolvedValue(
       createMockAgentSession({
-        title:
-          "This generated handoff title is intentionally much longer than sixty four characters",
+        title,
         summary: "The command is partly implemented.",
         relevantFiles: [],
         nextTask: "Finish phase 1 and verify it.",
       }),
     );
 
-    await expect(
-      generateHandoffDraft(createGenerationContext(), "Finish phase 1.", "medium"),
-    ).rejects.toThrow("Handoff title must be 64 characters or less.");
+    const result = await generateHandoffDraft(
+      createGenerationContext(),
+      "Finish phase 1.",
+      "medium",
+    );
+
+    expect(result?.context.title).toBe([...title].slice(0, 64).join(""));
   });
 
   it("rejects extraction runs that do not call the structured tool", async () => {

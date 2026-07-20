@@ -9,6 +9,8 @@
 - Added durable handoff launch receipts for deferred, tmux split, and Ghostty split launches.
 - Added a compact renderer for durable sent session-message receipts.
 - Added `session_cancel` for aborting another live Pi session's current turn.
+- Added detached tmux subagents with durable task reports, wake-on-message, cancellation, suspend/restore, and report recovery.
+- Added `kind` and `relationScope` filters to `session_search` for global session-type filtering and branch- or tree-scoped subagent recall.
 - Added auto-title `thinkingLevel` passthrough; an explicit setting overrides a thinking suffix on the configured model.
 
 ### Changed

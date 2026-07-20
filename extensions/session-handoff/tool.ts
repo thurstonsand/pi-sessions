@@ -20,6 +20,8 @@ import type { HandoffToolDetails } from "./tool-contract.ts";
 export type { HandoffLaunchValue } from "./launch-target.ts";
 export { DEFERRED_LAUNCH, LAUNCH_DIRECTIONS, SUBAGENT_LAUNCH } from "./launch-target.ts";
 
+export const MAX_HANDOFF_TITLE_LENGTH = 64;
+
 export interface HandoffToolParams {
   goal: string;
   title: string;
@@ -46,6 +48,9 @@ export async function executeSessionHandoffTool(
   const title = params.title.trim();
   if (!title) {
     throw new Error("session_handoff requires a title.");
+  }
+  if ([...title].length > MAX_HANDOFF_TITLE_LENGTH) {
+    throw new Error("session_handoff title must be 64 characters or less.");
   }
 
   if (!ctx.model) {

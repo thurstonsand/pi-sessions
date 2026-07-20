@@ -52,7 +52,12 @@ import {
 } from "./receipt.ts";
 import { reviewHandoffDraft } from "./review.ts";
 import { prepareHandoffLaunch } from "./spawn.ts";
-import { DEFERRED_LAUNCH, executeSessionHandoffTool, type HandoffToolParams } from "./tool.ts";
+import {
+  DEFERRED_LAUNCH,
+  executeSessionHandoffTool,
+  type HandoffToolParams,
+  MAX_HANDOFF_TITLE_LENGTH,
+} from "./tool.ts";
 import { HANDOFF_TOOL_DETAILS_SCHEMA } from "./tool-contract.ts";
 import { HandoffToolComponent } from "./tool-renderer.ts";
 import {
@@ -113,6 +118,7 @@ export function installHandoff(
             "Self-contained briefing that explains the objective, relevant context, constraints, and expected result.",
         }),
         title: Type.String({
+          maxLength: MAX_HANDOFF_TITLE_LENGTH,
           description:
             "Short display title for the child session, 64 characters or less. Summarize the mission; do not repeat the full goal.",
         }),

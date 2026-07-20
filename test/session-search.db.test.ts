@@ -135,6 +135,44 @@ describe("session-search db", () => {
     expect(fileHits[0]?.hitCount).toBe(1);
   });
 
+  it("filters indexed sessions by user or subagent kind", () => {
+    const dir = testFs.createTempDir();
+    const dbPath = path.join(dir, "index.sqlite");
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    for (const [sessionId, sessionOrigin] of [
+      ["root-session", undefined],
+      ["handoff-session", "handoff"],
+      ["subagent-session", "subagent"],
+    ] as const) {
+      insertSession(
+        db,
+        {
+          sessionId,
+          sessionPath: `/tmp/${sessionId}.jsonl`,
+          sessionName: sessionId,
+          cwd: "/repo",
+          repoRoots: ["/repo"],
+          startedAt: "2026-03-22T00:00:00.000Z",
+          modifiedAt: "2026-03-22T00:00:00.000Z",
+          messageCount: 1,
+          entryCount: 1,
+          sessionOrigin,
+        },
+        "full_reindex",
+      );
+    }
+
+    expect(searchSessions(db, { kind: "subagent" }).map((row) => row.sessionId)).toEqual([
+      "subagent-session",
+    ]);
+    expect(searchSessions(db, { kind: "user" }).map((row) => row.sessionId)).toEqual([
+      "root-session",
+      "handoff-session",
+    ]);
+    db.close();
+  });
+
   it("searches text chunks as scoped entry-level hits", () => {
     const dir = testFs.createTempDir();
     const dbPath = path.join(dir, "index.sqlite");

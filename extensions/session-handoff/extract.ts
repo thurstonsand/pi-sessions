@@ -293,11 +293,7 @@ function extractHandoffContextFromArguments(
     return { error: "Handoff extraction did not return structured context." };
   }
 
-  const title = normalizeText(requiredArguments.title);
-  if (title.length > MAX_HANDOFF_TITLE_LENGTH) {
-    return { error: "Handoff title must be 64 characters or less." };
-  }
-
+  const title = truncateText(normalizeText(requiredArguments.title), MAX_HANDOFF_TITLE_LENGTH);
   const summary = normalizeText(requiredArguments.summary);
   const relevantFiles = getRelevantFiles(argumentsValue);
   const nextTask = normalizeText(requiredArguments.nextTask) || goal.trim();
@@ -370,6 +366,10 @@ function getOpenQuestions(argumentsValue: unknown): string[] {
 
 function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function truncateText(value: string, maxLength: number): string {
+  return [...value].slice(0, maxLength).join("").trimEnd();
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

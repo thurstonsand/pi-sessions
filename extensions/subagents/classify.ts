@@ -16,7 +16,6 @@ export interface SubagentEvidence {
   cancelled: boolean;
   suspended: boolean;
   hasReportOrClosure: boolean;
-  ownershipClosed: boolean;
   childReadable: boolean;
 }
 
@@ -36,7 +35,7 @@ export function classifySubagent(evidence: SubagentEvidence): SubagentState {
   if (evidence.brokerLive) {
     return "active";
   }
-  if (evidence.hasReportOrClosure || evidence.ownershipClosed) {
+  if (evidence.hasReportOrClosure) {
     return "completed";
   }
   if (evidence.cancelled) {

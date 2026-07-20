@@ -8,7 +8,6 @@ const base: SubagentEvidence = {
   cancelled: false,
   suspended: false,
   hasReportOrClosure: false,
-  ownershipClosed: false,
   childReadable: true,
 };
 

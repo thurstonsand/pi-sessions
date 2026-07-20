@@ -19,6 +19,7 @@ import {
   type SearchSessionsParams,
   type SearchSort,
   type SessionIndexDatabase,
+  type SessionKind,
   type SessionLineageRelation,
   sanitizeFilterValues,
   tokenizeSearchText,
@@ -88,6 +89,7 @@ interface SearchWhereFilters {
   repo: string | undefined;
   touched: string[];
   changed: string[];
+  kind: SessionKind | undefined;
   excludeSessionIds: string[];
   includeSessionIds: string[] | undefined;
 }
@@ -202,6 +204,7 @@ function buildSearchFilters(params: SearchSessionsParams): SearchFilters {
     repo: params.repo?.trim(),
     touched: sanitizeFilterValues(params.touched),
     changed: sanitizeFilterValues(params.changed),
+    kind: params.kind,
     limit: normalizeResultLimit(params.limit),
     sort: normalizeSort(params.sort),
     query: params.query?.trim() || undefined,
@@ -445,6 +448,7 @@ function createSessionIdWhereFilters(sessionIds: string[] | undefined): SearchWh
     repo: undefined,
     touched: [],
     changed: [],
+    kind: undefined,
     excludeSessionIds: [],
     includeSessionIds: sessionIds === undefined ? undefined : sanitizeFilterValues(sessionIds),
   };
@@ -757,6 +761,12 @@ function buildSessionWhereClause(alias: string, filters: SearchWhereFilters): Sq
   if (filters.cwd) {
     conditions.push(`(${alias}.cwd = ? OR ${alias}.cwd LIKE ? ESCAPE '\\')`);
     args.push(filters.cwd, filters.cwdLike ?? `${escapeLikePrefix(filters.cwd)}%`);
+  }
+
+  if (filters.kind === "subagent") {
+    conditions.push(`${alias}.session_origin = 'subagent'`);
+  } else if (filters.kind === "user") {
+    conditions.push(`(${alias}.session_origin IS NULL OR ${alias}.session_origin <> 'subagent')`);
   }
 
   if (filters.excludeSessionIds.length > 0) {

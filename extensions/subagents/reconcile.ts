@@ -13,21 +13,22 @@ import {
   collectParentLedger,
   getChildSubagentLifecycle,
   type ParentSubagentLedger,
-  SUBAGENT_DISOWNED_NOTICE_CUSTOM_TYPE,
+  SUBAGENT_DISOWNED_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
-  SUBAGENT_OWNERSHIP_CLOSED_CUSTOM_TYPE,
+  SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
   SUBAGENT_SUSPENDED_CUSTOM_TYPE,
-  type SubagentClosed,
   type SubagentLaunched,
   type SubagentReport,
+  type SubagentReportMessage,
 } from "./ledger.ts";
-import { SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE } from "./report.ts";
+import { formatReportForModel } from "./report.ts";
 
 export interface ReconcileParentSession {
   sessionId: string;
   epoch: number;
   getBranch(): readonly SessionEntry[];
+  isIdle(): boolean;
 }
 
 export interface ReconcileSessionManager {
@@ -40,7 +41,10 @@ export interface ReconcileMessaging {
 
 export interface ReconcileActions extends TmuxExecutor {
   appendEntry(customType: string, data: unknown): void;
-  sendMessage(message: { customType: string; content: string; display: boolean }): void;
+  sendMessage(
+    message: { customType: string; content: string; display: boolean; details: unknown },
+    options?: { triggerTurn: true } | { deliverAs: "steer" },
+  ): void;
 }
 
 export interface ReconcileDependencies {
@@ -59,13 +63,12 @@ interface ChildEvidence {
   launch: SubagentLaunched;
   classification: SubagentEvidence;
   state: SubagentState;
-  hasOwnershipClosure: boolean;
   reports: readonly SubagentReport[];
-  closed: SubagentClosed | undefined;
 }
 
 export interface ReconcileResult {
   states: ReadonlyMap<string, SubagentState>;
+  registered: ReadonlySet<string>;
 }
 
 /**
@@ -78,7 +81,7 @@ export class SubagentReconciler {
   private restoreSuspended = false;
   private shuttingDown = false;
   private registered: { epoch: number; sessionIds: Set<string> } | undefined;
-  private latestResult: ReconcileResult = { states: new Map() };
+  private latestResult: ReconcileResult = emptyReconcileResult();
 
   constructor(private readonly deps: ReconcileDependencies) {}
 
@@ -87,7 +90,7 @@ export class SubagentReconciler {
     this.dirty = false;
     this.restoreSuspended = false;
     this.registered = undefined;
-    this.latestResult = { states: new Map() };
+    this.latestResult = emptyReconcileResult();
   }
 
   reconcile(): Promise<ReconcileResult> {
@@ -157,7 +160,7 @@ export class SubagentReconciler {
   private async reconcileOnce(restoreSuspended: boolean): Promise<ReconcileResult> {
     const parent = this.deps.getParent();
     if (!parent) {
-      return { states: new Map() };
+      return emptyReconcileResult();
     }
 
     const branch = parent.getBranch();
@@ -186,13 +189,7 @@ export class SubagentReconciler {
     let runtimeChanged = false;
 
     if (ledger.hasForeignLaunch && !ledger.hasDisownedNotice) {
-      this.append(parent, SUBAGENT_DISOWNED_NOTICE_CUSTOM_TYPE, {
-        writerSessionId: parent.sessionId,
-      });
-      this.sendSystemLine(
-        parent,
-        "[system] copied subagent records belong to the original session; this fork owns none.",
-      );
+      this.sendDisownedMessage(parent);
     }
 
     for (const child of evidence) {
@@ -201,33 +198,16 @@ export class SubagentReconciler {
       }
 
       for (const report of child.reports) {
-        if (ledger.receivedReportIds.has(report.reportId)) {
-          continue;
+        if (!ledger.receivedReportIds.has(report.reportId)) {
+          this.append(parent, SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, {
+            writerSessionId: parent.sessionId,
+            childSessionId: child.launch.childSessionId,
+            reportId: report.reportId,
+          });
         }
-        this.append(parent, SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, {
-          writerSessionId: parent.sessionId,
-          childSessionId: child.launch.childSessionId,
-          ...report,
-          provenance: "recovered",
-        });
-        this.sendSystemLine(
-          parent,
-          `[system] subagent ${shortId(child.launch.childSessionId)} has result available`,
-        );
-      }
-
-      const closureReason = child.reports.length > 0 ? "report_received" : child.closed?.reason;
-      if (
-        !child.classification.hasWindow &&
-        !child.classification.brokerLive &&
-        !child.hasOwnershipClosure &&
-        closureReason
-      ) {
-        this.append(parent, SUBAGENT_OWNERSHIP_CLOSED_CUSTOM_TYPE, {
-          writerSessionId: parent.sessionId,
-          childSessionId: child.launch.childSessionId,
-          reason: closureReason,
-        });
+        if (!ledger.deliveredReportIds.has(report.reportId)) {
+          this.deliverRecoveredReport(parent, child.launch, report);
+        }
       }
 
       if (child.state === "suspended" && restoreSuspended) {
@@ -243,7 +223,6 @@ export class SubagentReconciler {
           ...child.classification,
           cancelled: false,
           suspended: false,
-          ownershipClosed: false,
         };
         runtimeChanged = true;
       } else if (child.state === "stopping") {
@@ -285,6 +264,7 @@ export class SubagentReconciler {
 
     return {
       states: new Map(evidence.map((child) => [child.launch.childSessionId, child.state])),
+      registered: new Set(registered),
     };
   }
 
@@ -296,7 +276,6 @@ export class SubagentReconciler {
     hasRegistered: boolean,
   ): ChildEvidence {
     const lifecycle = this.readChildLifecycle(launch.childSessionFile);
-    const hasOwnershipClosure = ledger.ownershipClosures.has(launch.childSessionId);
     const classification: SubagentEvidence = {
       hasWindow,
       brokerLive,
@@ -304,15 +283,12 @@ export class SubagentReconciler {
       cancelled: ledger.cancelledChildIds.has(launch.childSessionId),
       suspended: ledger.suspendedChildIds.has(launch.childSessionId),
       hasReportOrClosure: lifecycle.reports.length > 0 || lifecycle.closed !== undefined,
-      ownershipClosed: hasOwnershipClosure,
       childReadable: lifecycle.readable,
     };
     return {
       launch,
       classification,
-      hasOwnershipClosure,
       reports: lifecycle.reports,
-      closed: lifecycle.closed,
       state: classifySubagent(classification),
     };
   }
@@ -340,13 +316,45 @@ export class SubagentReconciler {
     this.deps.executor.appendEntry(customType, data);
   }
 
-  private sendSystemLine(parent: ReconcileParentSession, content: string): void {
+  private deliverRecoveredReport(
+    parent: ReconcileParentSession,
+    launch: SubagentLaunched,
+    report: SubagentReport,
+  ): void {
+    const message: SubagentReportMessage = {
+      writerSessionId: parent.sessionId,
+      childSessionId: launch.childSessionId,
+      ...report,
+      provenance: "recovered",
+    };
+    this.sendMessage(parent, {
+      customType: SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
+      content: formatReportForModel(launch.title, message),
+      display: true,
+      details: message,
+    });
+  }
+
+  private sendDisownedMessage(parent: ReconcileParentSession): void {
     this.requireCurrent(parent);
     this.deps.executor.sendMessage({
-      customType: SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
-      content,
+      customType: SUBAGENT_DISOWNED_MESSAGE_CUSTOM_TYPE,
+      content:
+        "[system] copied subagent records belong to the original session; this fork owns none.",
       display: true,
+      details: { writerSessionId: parent.sessionId },
     });
+  }
+
+  private sendMessage(
+    parent: ReconcileParentSession,
+    message: { customType: string; content: string; display: boolean; details: unknown },
+  ): void {
+    this.requireCurrent(parent);
+    const delivery = parent.isIdle()
+      ? { triggerTurn: true as const }
+      : { deliverAs: "steer" as const };
+    this.deps.executor.sendMessage(message, delivery);
   }
 
   private requireCurrent(parent: ReconcileParentSession): void {
@@ -360,6 +368,6 @@ export function openReconcileSession(path: string): ReconcileSessionManager {
   return SessionManager.open(path);
 }
 
-function shortId(sessionId: string): string {
-  return sessionId.slice(0, 8);
+function emptyReconcileResult(): ReconcileResult {
+  return { states: new Map(), registered: new Set() };
 }

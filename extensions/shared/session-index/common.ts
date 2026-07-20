@@ -3,9 +3,10 @@ import type { FileTouchOp, FileTouchSource, PathScope } from "../../session-sear
 import { safeParseTypeBoxJson } from "../typebox.ts";
 import type { SqliteDatabase } from "./sqlite.ts";
 
-export const INDEX_SCHEMA_VERSION = 12;
+export const INDEX_SCHEMA_VERSION = 13;
 
-export type SessionOrigin = "handoff" | "fork" | "unknown_child";
+export type SessionOrigin = "handoff" | "subagent" | "fork" | "unknown_child";
+export type SessionKind = "user" | "subagent";
 export type SessionLineageRelation =
   | "self"
   | "parent"
@@ -93,6 +94,7 @@ export interface SearchSessionsParams {
   before?: string | undefined;
   touched?: string[] | undefined;
   changed?: string[] | undefined;
+  kind?: SessionKind | undefined;
   sort?: SearchSort | undefined;
   limit?: number | undefined;
   excludeSessionIds?: string[] | undefined;
@@ -156,6 +158,7 @@ export type SessionIndexDatabase = SqliteDatabase;
 export const NULLABLE_STRING_SCHEMA = Type.Union([Type.String(), Type.Null()]);
 export const SESSION_ORIGIN_SCHEMA = Type.Union([
   Type.Literal("handoff"),
+  Type.Literal("subagent"),
   Type.Literal("fork"),
   Type.Literal("unknown_child"),
 ]);

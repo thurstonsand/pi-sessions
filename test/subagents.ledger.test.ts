@@ -5,9 +5,9 @@ import {
   getChildSubagentLifecycle,
   SUBAGENT_CANCELLED_CUSTOM_TYPE,
   SUBAGENT_CLOSED_CUSTOM_TYPE,
-  SUBAGENT_DISOWNED_NOTICE_CUSTOM_TYPE,
+  SUBAGENT_DISOWNED_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
-  SUBAGENT_OWNERSHIP_CLOSED_CUSTOM_TYPE,
+  SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
   SUBAGENT_REPORT_REMINDER_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_SUSPENDED_CUSTOM_TYPE,
@@ -29,12 +29,12 @@ describe("subagent ledgers", () => {
         writerSessionId: ownerId,
         childSessionIds: [childId],
       }),
-      customEntry(SUBAGENT_OWNERSHIP_CLOSED_CUSTOM_TYPE, {
+      customEntry(SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, {
         writerSessionId: ownerId,
         childSessionId: childId,
-        reason: "report_received",
+        reportId: "report-1",
       }),
-      customEntry(SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, {
+      customMessage(SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE, {
         writerSessionId: ownerId,
         childSessionId: childId,
         reportId: "report-1",
@@ -50,15 +50,15 @@ describe("subagent ledgers", () => {
     expect(ledger.launches).toHaveLength(1);
     expect(ledger.cancelledChildIds).not.toContain(childId);
     expect(ledger.suspendedChildIds).not.toContain(childId);
-    expect(ledger.ownershipClosures.has(childId)).toBe(false);
     expect(ledger.receivedReportIds).toContain("report-1");
+    expect(ledger.deliveredReportIds).toContain("report-1");
   });
 
   it("collects fork evidence independently from owned launches", () => {
     const entries = [
       launchEntry("aaaaaaaa-1234-1234-1234-123456789abc"),
       launchEntry(),
-      customEntry(SUBAGENT_DISOWNED_NOTICE_CUSTOM_TYPE, { writerSessionId: ownerId }),
+      customMessage(SUBAGENT_DISOWNED_MESSAGE_CUSTOM_TYPE, { writerSessionId: ownerId }),
     ];
 
     const ledger = collectParentLedger(entries, ownerId);
@@ -101,6 +101,19 @@ function launchEntry(writerSessionId = ownerId): SessionEntry {
     resumeCommand: "resume",
     depth: 1,
   });
+}
+
+function customMessage(customType: string, details: unknown): SessionEntry {
+  return {
+    type: "custom_message",
+    id: `${customType}-${entryId++}`,
+    parentId: null,
+    timestamp: "2026-03-25T00:00:00.000Z",
+    customType,
+    content: "message",
+    display: true,
+    details,
+  };
 }
 
 function customEntry(customType: string, data: unknown): SessionEntry {

@@ -53,11 +53,14 @@ export type SendMessageResult =
 
 export type CancelSessionResult =
   | {
+      kind: "transport";
       cancelId: string;
       delivered: false;
+      reason?: SessionEnvelopeSendFailureReason | undefined;
       error?: string | undefined;
     }
   | {
+      kind: "transport";
       cancelId: string;
       delivered: true;
       target: ReceivedMessageEndpoint;
@@ -216,13 +219,16 @@ export class SessionMessagingService {
 
     if (!result.delivered) {
       return {
+        kind: "transport",
         cancelId,
         delivered: false,
+        ...(result.reason === undefined ? {} : { reason: result.reason }),
         ...(result.error === undefined ? {} : { error: result.error }),
       };
     }
 
     return {
+      kind: "transport",
       cancelId,
       delivered: true,
       target: this.getTargetEndpoint(sessionId),

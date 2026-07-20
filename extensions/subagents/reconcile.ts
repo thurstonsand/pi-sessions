@@ -7,7 +7,7 @@ import {
   type TmuxExecutor,
   tmuxSessionName,
 } from "../shared/tmux.ts";
-import { classifySubagent, type SubagentState } from "./classify.ts";
+import { classifySubagent, type SubagentEvidence, type SubagentState } from "./classify.ts";
 import {
   type ChildSubagentLifecycle,
   collectParentLedger,
@@ -57,12 +57,15 @@ interface ChildLifecycle extends ChildSubagentLifecycle {
 
 interface ChildEvidence {
   launch: SubagentLaunched;
+  classification: SubagentEvidence;
   state: SubagentState;
-  hasWindow: boolean;
-  brokerLive: boolean;
   hasOwnershipClosure: boolean;
   reports: readonly SubagentReport[];
   closed: SubagentClosed | undefined;
+}
+
+export interface ReconcileResult {
+  states: ReadonlyMap<string, SubagentState>;
 }
 
 /**
@@ -70,11 +73,12 @@ interface ChildEvidence {
  * It intentionally does not cache child files: every trigger observes current branch truth.
  */
 export class SubagentReconciler {
-  private inFlight: Promise<void> | undefined;
+  private inFlight: Promise<ReconcileResult> | undefined;
   private dirty = false;
   private restoreSuspended = false;
   private shuttingDown = false;
   private registered: { epoch: number; sessionIds: Set<string> } | undefined;
+  private latestResult: ReconcileResult = { states: new Map() };
 
   constructor(private readonly deps: ReconcileDependencies) {}
 
@@ -83,19 +87,20 @@ export class SubagentReconciler {
     this.dirty = false;
     this.restoreSuspended = false;
     this.registered = undefined;
+    this.latestResult = { states: new Map() };
   }
 
-  reconcile(): Promise<void> {
+  reconcile(): Promise<ReconcileResult> {
     return this.requestReconciliation(false);
   }
 
-  reconcileAndRestoreSuspended(): Promise<void> {
+  reconcileAndRestoreSuspended(): Promise<ReconcileResult> {
     return this.requestReconciliation(true);
   }
 
-  private requestReconciliation(restoreSuspended: boolean): Promise<void> {
+  private requestReconciliation(restoreSuspended: boolean): Promise<ReconcileResult> {
     if (this.shuttingDown) {
-      return this.inFlight ?? Promise.resolve();
+      return this.inFlight ?? Promise.resolve(this.latestResult);
     }
     this.dirty = true;
     this.restoreSuspended ||= restoreSuspended;
@@ -139,19 +144,20 @@ export class SubagentReconciler {
     await killTmuxSession(this.deps.executor, tmuxSession);
   }
 
-  private async run(): Promise<void> {
+  private async run(): Promise<ReconcileResult> {
     while (this.dirty && !this.shuttingDown) {
       this.dirty = false;
       const restoreSuspended = this.restoreSuspended;
       this.restoreSuspended = false;
-      await this.reconcileOnce(restoreSuspended);
+      this.latestResult = await this.reconcileOnce(restoreSuspended);
     }
+    return this.latestResult;
   }
 
-  private async reconcileOnce(restoreSuspended: boolean): Promise<void> {
+  private async reconcileOnce(restoreSuspended: boolean): Promise<ReconcileResult> {
     const parent = this.deps.getParent();
     if (!parent) {
-      return;
+      return { states: new Map() };
     }
 
     const branch = parent.getBranch();
@@ -176,6 +182,8 @@ export class SubagentReconciler {
         registered.has(launch.childSessionId),
       ),
     );
+
+    let runtimeChanged = false;
 
     if (ledger.hasForeignLaunch && !ledger.hasDisownedNotice) {
       this.append(parent, SUBAGENT_DISOWNED_NOTICE_CUSTOM_TYPE, {
@@ -209,7 +217,12 @@ export class SubagentReconciler {
       }
 
       const closureReason = child.reports.length > 0 ? "report_received" : child.closed?.reason;
-      if (!child.hasWindow && !child.brokerLive && !child.hasOwnershipClosure && closureReason) {
+      if (
+        !child.classification.hasWindow &&
+        !child.classification.brokerLive &&
+        !child.hasOwnershipClosure &&
+        closureReason
+      ) {
         this.append(parent, SUBAGENT_OWNERSHIP_CLOSED_CUSTOM_TYPE, {
           writerSessionId: parent.sessionId,
           childSessionId: child.launch.childSessionId,
@@ -226,9 +239,17 @@ export class SubagentReconciler {
           command: child.launch.resumeCommand,
           piSessionId: child.launch.childSessionId,
         });
+        child.classification = {
+          ...child.classification,
+          cancelled: false,
+          suspended: false,
+          ownershipClosed: false,
+        };
+        runtimeChanged = true;
       } else if (child.state === "stopping") {
         this.requireCurrent(parent);
         await killTmuxWindow(this.deps.executor, tmuxSession, child.launch.childSessionId);
+        runtimeChanged = true;
       }
     }
 
@@ -237,8 +258,34 @@ export class SubagentReconciler {
       if (!ownedIds.has(window.piSessionId)) {
         this.requireCurrent(parent);
         await killTmuxWindow(this.deps.executor, tmuxSession, window.piSessionId);
+        runtimeChanged = true;
       }
     }
+
+    if (runtimeChanged) {
+      const [currentWindows, currentLiveSessionIds] = await Promise.all([
+        listTmuxWindows(this.deps.executor, tmuxSession),
+        this.deps.messaging.listSessions(),
+      ]);
+      const currentWindowSessionIds = new Set(currentWindows.map((window) => window.piSessionId));
+      const currentLiveSessions = new Set(currentLiveSessionIds);
+      for (const sessionId of currentLiveSessionIds) {
+        registered.add(sessionId);
+      }
+      for (const child of evidence) {
+        child.classification = {
+          ...child.classification,
+          hasWindow: currentWindowSessionIds.has(child.launch.childSessionId),
+          brokerLive: currentLiveSessions.has(child.launch.childSessionId),
+          hasRegistered: registered.has(child.launch.childSessionId),
+        };
+        child.state = classifySubagent(child.classification);
+      }
+    }
+
+    return {
+      states: new Map(evidence.map((child) => [child.launch.childSessionId, child.state])),
+    };
   }
 
   private readChildEvidence(
@@ -250,23 +297,23 @@ export class SubagentReconciler {
   ): ChildEvidence {
     const lifecycle = this.readChildLifecycle(launch.childSessionFile);
     const hasOwnershipClosure = ledger.ownershipClosures.has(launch.childSessionId);
-    return {
-      launch,
+    const classification: SubagentEvidence = {
       hasWindow,
       brokerLive,
+      hasRegistered,
+      cancelled: ledger.cancelledChildIds.has(launch.childSessionId),
+      suspended: ledger.suspendedChildIds.has(launch.childSessionId),
+      hasReportOrClosure: lifecycle.reports.length > 0 || lifecycle.closed !== undefined,
+      ownershipClosed: hasOwnershipClosure,
+      childReadable: lifecycle.readable,
+    };
+    return {
+      launch,
+      classification,
       hasOwnershipClosure,
       reports: lifecycle.reports,
       closed: lifecycle.closed,
-      state: classifySubagent({
-        hasWindow,
-        brokerLive,
-        hasRegistered,
-        cancelled: ledger.cancelledChildIds.has(launch.childSessionId),
-        suspended: ledger.suspendedChildIds.has(launch.childSessionId),
-        hasReportOrClosure: lifecycle.reports.length > 0 || lifecycle.closed !== undefined,
-        ownershipClosed: hasOwnershipClosure,
-        childReadable: lifecycle.readable,
-      }),
+      state: classifySubagent(classification),
     };
   }
 

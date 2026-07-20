@@ -18,7 +18,11 @@ import {
   SessionMessagingService,
 } from "./pi/service.ts";
 
-export type { SendMessageRequest, SendMessageResult } from "./pi/service.ts";
+export type {
+  CancelSessionResult,
+  SendMessageRequest,
+  SendMessageResult,
+} from "./pi/service.ts";
 
 /** The live surface the messaging feature exposes to other features (search, subagents). */
 export interface MessagingHandle {

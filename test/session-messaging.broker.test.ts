@@ -333,6 +333,7 @@ test("service cancels a live target and waits for broker registration", async ()
 
     const result = await source.cancelSession("cancel-target");
     expect(result).toMatchObject({
+      kind: "transport",
       delivered: true,
       cancelId: expect.any(String),
       target: { sessionId: "cancel-target" },
@@ -350,6 +351,11 @@ test("service cancels a live target and waits for broker registration", async ()
     await late.connect("late-registration");
     await expect(wait).resolves.toBe(true);
     await expect(source.waitForSession("missing-registration", 0)).resolves.toBe(false);
+    await expect(source.cancelSession("missing-cancel-target")).resolves.toMatchObject({
+      kind: "transport",
+      delivered: false,
+      reason: "no_session",
+    });
   } finally {
     late.disconnect();
     target.stop();

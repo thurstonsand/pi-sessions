@@ -4,7 +4,16 @@ import { formatError } from "../../shared/errors.ts";
 import { ExpandableContentLayout } from "../../shared/rendering/expandable-content-layout.ts";
 import { safeParseTypeBoxValue } from "../../shared/typebox.ts";
 import {
+  buildCancelSessionModelText,
+  buildCancelSessionUserError,
+  buildCancelSessionUserText,
+  buildDeadSessionError,
+  buildUnknownCancellationError,
+  isConfirmedManagedCancellation,
+} from "./cancel-session-presenter.ts";
+import {
   CANCEL_SESSION_PARAMS,
+  CANCEL_SESSION_TOOL_DETAILS_SCHEMA,
   type CancelSessionParams,
   type CancelSessionToolDetails,
   SEND_MESSAGE_PARAMS,
@@ -20,8 +29,21 @@ interface SendMessageService {
   sendMessage(request: SendMessageRequest): Promise<SendMessageResult>;
 }
 
+interface ManagedCancelSessionResult {
+  kind: "managed";
+  accepted: true;
+  target: {
+    sessionId: string;
+    sessionName?: string;
+    cwd?: string;
+  };
+  state: string;
+  cancelId?: string;
+  relation?: string;
+}
+
 interface CancelSessionService {
-  cancelSession(sessionId: string): Promise<CancelSessionResult>;
+  cancelSession(sessionId: string): Promise<CancelSessionResult | ManagedCancelSessionResult>;
 }
 
 export interface SessionSendMessageToolOptions {
@@ -131,33 +153,68 @@ export function createSessionSendMessageTool(
 }
 
 export function createSessionCancelTool(service: CancelSessionService): ToolDefinition {
-  return defineTool({
+  return defineTool<typeof CANCEL_SESSION_PARAMS, CancelSessionToolDetails>({
     name: "session_cancel",
     label: "Cancel a running session",
     description: "Cancel another running pi session",
     promptSnippet: "Cancel another running pi session",
     promptGuidelines: ["Only cancel a user session when the user directs it."],
     parameters: CANCEL_SESSION_PARAMS,
+    renderResult(result, options, theme, context) {
+      const output = getFirstText(result);
+      if (context.isError) {
+        const error = buildCancelSessionUserError(output, options.expanded);
+        return new Text(error ? theme.fg("error", error) : "", 0, 0);
+      }
+
+      const details = safeParseTypeBoxValue(CANCEL_SESSION_TOOL_DETAILS_SCHEMA, result.details);
+      if (!details) {
+        return new Text(output, 0, 0);
+      }
+
+      let text = theme.fg("toolOutput", buildCancelSessionUserText(details));
+      if (options.expanded && details.target.sessionName) {
+        text += `\n${theme.fg("dim", `${theme.bold("session")} ${details.target.sessionId}`)}`;
+      }
+      return new Text(text, 0, 0);
+    },
     async execute(_toolCallId, params: CancelSessionParams) {
       const target = parseSessionTarget(params.session, "session_cancel");
       const result = await service.cancelSession(target);
+      if (result.kind === "managed") {
+        const details: CancelSessionToolDetails = {
+          kind: "managed",
+          accepted: true,
+          target: result.target,
+          state: result.state,
+          ...(result.cancelId === undefined ? {} : { cancelId: result.cancelId }),
+          ...(result.relation === undefined ? {} : { relation: result.relation }),
+        };
+        if (!isConfirmedManagedCancellation(result.state)) {
+          throw new Error(buildUnknownCancellationError(result.target));
+        }
+        return {
+          content: [{ type: "text" as const, text: buildCancelSessionModelText(details) }],
+          details,
+        };
+      }
       if (!result.delivered) {
+        if (result.reason === "no_session") {
+          throw new Error(buildDeadSessionError(target));
+        }
         throw new Error(result.error ?? "Cancellation was not delivered.");
       }
 
+      const details: CancelSessionToolDetails = {
+        kind: "transport",
+        delivered: true,
+        cancelId: result.cancelId,
+        target: result.target,
+        ...(result.relation === undefined ? {} : { relation: result.relation }),
+      };
       return {
-        content: [
-          {
-            type: "text" as const,
-            text: `Cancellation delivered to ${target}.`,
-          },
-        ],
-        details: {
-          delivered: true,
-          cancelId: result.cancelId,
-          target: result.target,
-          ...(result.relation === undefined ? {} : { relation: result.relation }),
-        } satisfies CancelSessionToolDetails,
+        content: [{ type: "text" as const, text: buildCancelSessionModelText(details) }],
+        details,
       };
     },
   });

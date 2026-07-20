@@ -62,7 +62,7 @@ export default function piSessions(pi: ExtensionAPI): void {
         getCachedRelationTo: messaging.getCachedRelationTo,
       }),
     );
-    pi.registerTool(createSessionCancelTool(messaging));
+    pi.registerTool(createSessionCancelTool(subagents ?? messaging));
   }
   if (settings.features.handoff) {
     lifecycles.push(

@@ -1,6 +1,7 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import {
+  SUBAGENT_CANCELLED_CUSTOM_TYPE,
   SUBAGENT_DISOWNED_NOTICE_CUSTOM_TYPE,
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
   SUBAGENT_OWNERSHIP_CLOSED_CUSTOM_TYPE,
@@ -49,6 +50,98 @@ describe("subagent reconciliation", () => {
     await fixture.reconciler.reconcileAndRestoreSuspended();
     expect(fixture.created()).toBe(1);
     expect(fixture.appended.at(-1)?.customType).toBe(SUBAGENT_LAUNCHED_CUSTOM_TYPE);
+  });
+
+  it("reports post-mutation state from the same evidence classifier", async () => {
+    const fixture = createFixture(
+      [
+        launchEntry(),
+        customEntry("cancel", SUBAGENT_CANCELLED_CUSTOM_TYPE, {
+          writerSessionId: parentId,
+          childSessionId: childId,
+        }),
+      ],
+      [],
+      true,
+    );
+
+    const result = await fixture.reconciler.reconcile();
+
+    expect(result.states.get(childId)).toBe("stopped");
+    expect(fixture.killed()).toBe(1);
+  });
+
+  it("reports completion when a child report races cancellation", async () => {
+    const fixture = createFixture(
+      [
+        launchEntry(),
+        customEntry("cancel", SUBAGENT_CANCELLED_CUSTOM_TYPE, {
+          writerSessionId: parentId,
+          childSessionId: childId,
+        }),
+      ],
+      [reportEntry()],
+    );
+
+    const result = await fixture.reconciler.reconcile();
+
+    expect(result.states.get(childId)).toBe("completed");
+    expect(fixture.killed()).toBe(0);
+  });
+
+  it("keeps failed teardown classified as stopping", async () => {
+    const fixture = createFixture(
+      [
+        launchEntry(),
+        customEntry("cancel", SUBAGENT_CANCELLED_CUSTOM_TYPE, {
+          writerSessionId: parentId,
+          childSessionId: childId,
+        }),
+      ],
+      [],
+      true,
+      async () => [],
+      false,
+      false,
+    );
+
+    const result = await fixture.reconciler.reconcile();
+
+    expect(result.states.get(childId)).toBe("stopping");
+    expect(fixture.windowExists()).toBe(true);
+  });
+
+  it("drains cancellation behind an in-flight restore before returning state", async () => {
+    const fixture = createFixture(
+      [
+        launchEntry(),
+        customEntry("suspend", SUBAGENT_SUSPENDED_CUSTOM_TYPE, {
+          writerSessionId: parentId,
+          childSessionIds: [childId],
+        }),
+      ],
+      [],
+      false,
+      async () => [],
+      true,
+    );
+
+    const restore = fixture.reconciler.reconcileAndRestoreSuspended();
+    await vi.waitFor(() => expect(fixture.releaseCreate).toBeDefined());
+    fixture.append(SUBAGENT_CANCELLED_CUSTOM_TYPE, {
+      writerSessionId: parentId,
+      childSessionId: childId,
+    });
+    const cancellation = fixture.reconciler.reconcile();
+    expect(cancellation).toBe(restore);
+
+    fixture.releaseCreate?.();
+    const result = await cancellation;
+
+    expect(result.states.get(childId)).toBe("stopped");
+    expect(fixture.created()).toBe(1);
+    expect(fixture.killed()).toBe(1);
+    expect(fixture.windowExists()).toBe(false);
   });
 
   it("waits for in-flight reconciliation before suspending and killing", async () => {
@@ -158,6 +251,7 @@ function createFixture(
   initialWindow = false,
   listSessions: () => Promise<string[]> = async () => [],
   blockCreate = false,
+  killSucceeds = true,
 ) {
   let windowExists = initialWindow;
   let created = 0;
@@ -195,8 +289,14 @@ function createFixture(
           return { code: 0, stdout: "", stderr: "" };
         case "kill-window":
           killed += 1;
-          windowExists = false;
-          return { code: 0, stdout: "", stderr: "" };
+          if (killSucceeds) {
+            windowExists = false;
+          }
+          return {
+            code: killSucceeds ? 0 : 1,
+            stdout: "",
+            stderr: killSucceeds ? "" : "kill failed",
+          };
         case "kill-session":
           sessionKilled += 1;
           windowExists = false;
@@ -216,6 +316,7 @@ function createFixture(
   });
   return {
     reconciler,
+    append: (customType: string, data: unknown) => executor.appendEntry(customType, data),
     appended,
     sent,
     created: () => created,

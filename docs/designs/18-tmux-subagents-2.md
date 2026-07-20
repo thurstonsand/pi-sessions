@@ -361,7 +361,7 @@ Every phase is independently shippable: `npm run check` green, no half-finished 
   - Work: Plan-then-apply with the eight-state reducer; triggers wired (`session_start`, `agent_settled`, `session_tree`, cancellation, wake, incoming report); single-flight with dirty flag; suspension records + tmux-session kill on non-reload shutdown; reload adoption; auto-restore suspended, never interrupted; recovered receipts (`provenance: recovered`, fold by `reportId`) with the one-line reminder; fork disowned notice; reminder-then-closure policy; ownership-closed entries.
   - Validation: A test per reducer row and per reconcile action with fixture files; rewind/fork fixtures; smoke: quit mid-fanout → resume → suspended workers restore, interrupted ones do not; kill a window manually → `interrupted`, message restarts it.
 
-- [ ] Phase 7: Composite `session_cancel`
+- [x] Phase 7: Composite `session_cancel`
   - Goal: Ownership-resolved cancellation with honest convergence.
   - Files: `extensions/subagents/cancel.ts`; root registration choice; tests.
   - Work: Owned → durable intent, live-cancel envelope, verified kill, reconcile (unverified → `stopping`); otherwise Phase 2 behavior.

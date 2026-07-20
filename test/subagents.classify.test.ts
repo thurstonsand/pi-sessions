@@ -18,12 +18,17 @@ describe("subagent classification", () => {
     ["starting", { hasWindow: true }],
     ["busy", { hasWindow: true, hasRegistered: true }],
     ["active", { brokerLive: true }],
-    ["completed", { hasReportOrClosure: true, cancelled: true }],
     ["stopped", { cancelled: true }],
     ["suspended", { suspended: true }],
     ["interrupted", {}],
     ["unknown", { childReadable: false, hasWindow: true }],
   ] as const)("classifies %s from reducer precedence", (expected, evidence) => {
     expect(classifySubagent({ ...base, ...evidence })).toBe(expected);
+  });
+
+  it("lets completion win when a report races cancellation", () => {
+    expect(classifySubagent({ ...base, hasReportOrClosure: true, cancelled: true })).toBe(
+      "completed",
+    );
   });
 });

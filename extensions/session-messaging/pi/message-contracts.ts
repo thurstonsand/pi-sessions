@@ -30,12 +30,23 @@ export const CANCEL_SESSION_PARAMS = Type.Object({
   session: Type.String({ description: "Bare UUID for the live session to cancel." }),
 });
 
-export const CANCEL_SESSION_TOOL_DETAILS_SCHEMA = Type.Object({
-  delivered: Type.Literal(true),
-  cancelId: Type.String(),
-  target: RECEIVED_MESSAGE_ENDPOINT_SCHEMA,
-  relation: Type.Optional(Type.String()),
-});
+export const CANCEL_SESSION_TOOL_DETAILS_SCHEMA = Type.Union([
+  Type.Object({
+    kind: Type.Literal("transport"),
+    delivered: Type.Literal(true),
+    cancelId: Type.String(),
+    target: RECEIVED_MESSAGE_ENDPOINT_SCHEMA,
+    relation: Type.Optional(Type.String()),
+  }),
+  Type.Object({
+    kind: Type.Literal("managed"),
+    accepted: Type.Literal(true),
+    target: RECEIVED_MESSAGE_ENDPOINT_SCHEMA,
+    state: Type.String(),
+    cancelId: Type.Optional(Type.String()),
+    relation: Type.Optional(Type.String()),
+  }),
+]);
 
 export const RECEIVED_MESSAGE_ENTRY_SCHEMA = Type.Object({
   messageId: Type.String(),

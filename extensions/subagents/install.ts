@@ -8,6 +8,7 @@ import type {
 import type { SessionLifecycle } from "../shared/composition.ts";
 import type { SessionSettings } from "../shared/settings.ts";
 import { hasAttachedTmuxClients, isTmuxInstalled, tmuxSessionName } from "../shared/tmux.ts";
+import { SubagentCancellationRouter, type SubagentCancelResult } from "./cancel.ts";
 import { findSubagentIdentity, type SubagentIdentity } from "./identity.ts";
 import { createSubagentLaunchTarget, type SubagentLaunchState } from "./launch-target.ts";
 import {
@@ -50,6 +51,7 @@ interface CurrentSubagentSession {
 export interface SubagentsHandle extends SessionLifecycle {
   getLaunchTargets(): readonly HandoffLaunchTarget[];
   sendMessage(request: SendMessageRequest): Promise<SendMessageResult>;
+  cancelSession(sessionId: string): Promise<SubagentCancelResult>;
 }
 
 export function installSubagents(
@@ -82,8 +84,17 @@ export function installSubagents(
     isCurrentSession,
     {
       onMaterialize: (launch) => pi.appendEntry(SUBAGENT_LAUNCHED_CUSTOM_TYPE, launch),
-      afterOwnedSend: () => reconciler.reconcile(),
+      afterOwnedSend: async () => {
+        await reconciler.reconcile();
+      },
     },
+  );
+  const cancellationRouter = new SubagentCancellationRouter(
+    pi,
+    deps.messaging,
+    reconciler,
+    () => current?.parent,
+    isCurrentSession,
   );
 
   deps.messaging.onIncomingSubagentReport(async (envelope) => {
@@ -166,6 +177,7 @@ You are working as a subagent on one task delegated by a parent session. The han
 
   return {
     sendMessage: (request) => messageRouter.sendMessage(request),
+    cancelSession: (sessionId) => cancellationRouter.cancelSession(sessionId),
     getLaunchTargets() {
       const parent = current?.parent;
       if (!parent?.tmuxInstalled || parent.launchState.depth >= deps.settings.subagents.maxDepth) {

@@ -23,9 +23,12 @@ const details = {
   sessionId: "child-1",
   title: "Index recovery audit",
   launch: "deferred" as const,
+  childSessionFile: "/tmp/child-1.jsonl",
   resumeCommand: "pi --session-id 'child-1'",
   cwd: "/repo/app",
   model: "openai/gpt-5.4:high",
+  modelName: "GPT 5.4",
+  thinkingLevel: "high" as const,
 };
 
 function render(
@@ -44,7 +47,11 @@ describe("session_handoff tool renderer", () => {
     const lines = render(undefined, undefined, false)
       .split("\n")
       .map((line) => line.trimEnd());
-    expect(lines.slice(0, 2)).toEqual(["session_handoff […] …", "goal …"]);
+    expect(lines.slice(0, 3)).toEqual([
+      "session_handoff […] …",
+      "model …  ·  thinking …",
+      "goal …",
+    ]);
   });
 
   it("tolerates malformed and progressively streamed arguments", () => {
@@ -53,14 +60,18 @@ describe("session_handoff tool renderer", () => {
     const lines = render({ launch: "subagent", goal: "Fix the ind" }, undefined, false)
       .split("\n")
       .map((line) => line.trimEnd());
-    expect(lines.slice(0, 2)).toEqual(["session_handoff [subagent] …", "goal Fix the ind"]);
+    expect(lines.slice(0, 3)).toEqual([
+      "session_handoff [subagent] …",
+      "model …  ·  thinking …",
+      "goal Fix the ind",
+    ]);
   });
 
-  it("omits secondary argument metadata from the compact call", () => {
+  it("keeps effective launch metadata in the compact call", () => {
     const rendered = render(args, undefined, false);
     expect(rendered).toContain("session_handoff [deferred] Index recovery audit");
+    expect(rendered).toContain("model openai/gpt-5.4  ·  thinking high");
     expect(rendered).not.toContain("cwd /repo/app");
-    expect(rendered).not.toContain("model openai/gpt-5.4");
     expect(rendered).not.toContain("requests a response");
   });
 
@@ -69,6 +80,7 @@ describe("session_handoff tool renderer", () => {
     expect(rendered).toContain("goal Inspect the index recovery path");
     expect(rendered).toContain("resume command · copied to clipboard");
     expect(rendered).toContain("pi --session-id 'child-1'");
+    expect(rendered).toContain("model GPT 5.4  ·  thinking high");
     expect(rendered).not.toContain("session child-1");
     expect(rendered).not.toContain("model openai/gpt-5.4:high");
   });
@@ -78,14 +90,15 @@ describe("session_handoff tool renderer", () => {
     const lines = rendered.split("\n");
     const goalIndex = lines.findIndex((line) => line.startsWith("goal "));
     expect(visibleWidth(lines[goalIndex] ?? "")).toBe(40);
-    expect(rendered).toContain("more lines");
+    expect(rendered).toContain("3 more lines, 5 total");
     expect(rendered).not.toContain("...");
   });
 
   it("adds full goal and result metadata when expanded", () => {
     const rendered = render(args, details, true);
     expect(rendered).toContain("session child-1");
-    expect(rendered).toContain("model openai/gpt-5.4:high");
+    expect(rendered).toContain("model GPT 5.4  ·  thinking high");
+    expect(rendered).not.toContain("model openai/gpt-5.4:high");
     expect(rendered).toContain("cwd /repo/app");
   });
 });

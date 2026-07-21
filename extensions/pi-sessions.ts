@@ -1,4 +1,8 @@
-import type { ExtensionAPI, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  type ModelRuntime,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import { installAsk } from "./session-ask/install.ts";
 import { installAutoTitle } from "./session-auto-title/install.ts";
 import { installHandoff } from "./session-handoff/install.ts";
@@ -65,12 +69,21 @@ export default function piSessions(pi: ExtensionAPI): void {
     pi.registerTool(createSessionCancelTool(subagents ?? messaging));
   }
   if (settings.features.handoff) {
+    const board = {
+      roster: subagents?.roster,
+      cancelSubagent: subagents
+        ? (sessionId: string) => subagents.cancelSession(sessionId)
+        : undefined,
+      listLiveSessions: messaging ? () => messaging.listSessions() : undefined,
+      readSessionEntries: (sessionFile: string) => SessionManager.open(sessionFile).getEntries(),
+    };
     lifecycles.push(
       installHandoff(pi, {
         settings,
         index,
         getModelRuntime,
         ...(subagents ? { getLaunchTargets: () => subagents.getLaunchTargets() } : {}),
+        board,
       }),
     );
   }
@@ -92,7 +105,6 @@ export default function piSessions(pi: ExtensionAPI): void {
   if (settings.features.hooks) {
     lifecycles.push(installHooks(pi, { settings, index }));
   }
-
   // Messaging leads every session_start so the broker connection is registered before any
   // other feature hook runs. A side effect is that messaging's first relation snapshot can
   // predate hooks' index sync for this session; getCachedRelationTo self-heals on miss, so
@@ -106,8 +118,8 @@ export default function piSessions(pi: ExtensionAPI): void {
 
   pi.on("session_shutdown", async (event, ctx) => {
     sessionEpoch += 1;
-    for (const lifecycle of lifecycles) {
-      await lifecycle.onSessionShutdown?.(event, ctx);
+    for (let index = lifecycles.length - 1; index >= 0; index -= 1) {
+      await lifecycles[index]?.onSessionShutdown?.(event, ctx);
     }
   });
 }

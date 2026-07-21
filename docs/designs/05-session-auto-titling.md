@@ -6,7 +6,7 @@
 
 - indexed historical recall via `session_search`
 - deep follow-up via `session_ask`
-- deliberate thread creation via `/handoff`
+- deliberate thread creation via `session_handoff`
 - hook-driven session lifecycle wiring in `extensions/session-hooks.ts`
 
 Pi already exposes the core primitive needed for naming:

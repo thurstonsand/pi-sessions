@@ -47,7 +47,6 @@ export function initializeSchema(db: SessionIndexDatabase): void {
       parent_session_id TEXT,
       session_origin TEXT,
       handoff_goal TEXT,
-      handoff_next_task TEXT,
       indexed_file_size INTEGER,
       indexed_file_mtime_ms INTEGER,
       indexed_file_anchor TEXT,

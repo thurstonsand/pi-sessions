@@ -27,7 +27,6 @@ const SESSION_ROW_QUERY_SCHEMA = Type.Object({
   parentSessionId: NULLABLE_STRING_SCHEMA,
   sessionOrigin: Type.Union([SESSION_ORIGIN_SCHEMA, Type.Null()]),
   handoffGoal: NULLABLE_STRING_SCHEMA,
-  handoffNextTask: NULLABLE_STRING_SCHEMA,
   indexedFileSize: Type.Union([Type.Number(), Type.Null()]),
   indexedFileMtimeMs: Type.Union([Type.Number(), Type.Null()]),
   indexedFileAnchor: NULLABLE_STRING_SCHEMA,
@@ -49,7 +48,6 @@ function sessionRowBindings(row: SessionRow, indexSource: string) {
     row.parentSessionId ?? null,
     row.sessionOrigin ?? null,
     row.handoffGoal ?? null,
-    row.handoffNextTask ?? null,
     row.indexedFileSize ?? null,
     row.indexedFileMtimeMs ?? null,
     row.indexedFileAnchor ?? null,
@@ -70,10 +68,10 @@ export function insertSession(
         session_id, session_path, session_name, first_user_prompt, cwd, repo_roots_json,
         created_ts, modified_ts, message_count, entry_count,
         parent_session_path, parent_session_id, session_origin,
-        handoff_goal, handoff_next_task,
+        handoff_goal,
         indexed_file_size, indexed_file_mtime_ms, indexed_file_anchor,
         index_version, indexed_at_ts, index_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
   ).run(...sessionRowBindings(row, indexSource));
   syncSessionRepoRoots(db, row);
@@ -90,10 +88,10 @@ export function upsertSession(
         session_id, session_path, session_name, first_user_prompt, cwd, repo_roots_json,
         created_ts, modified_ts, message_count, entry_count,
         parent_session_path, parent_session_id, session_origin,
-        handoff_goal, handoff_next_task,
+        handoff_goal,
         indexed_file_size, indexed_file_mtime_ms, indexed_file_anchor,
         index_version, indexed_at_ts, index_source
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_id) DO UPDATE SET
         session_path = excluded.session_path,
         session_name = excluded.session_name,
@@ -108,7 +106,6 @@ export function upsertSession(
         parent_session_id = excluded.parent_session_id,
         session_origin = excluded.session_origin,
         handoff_goal = excluded.handoff_goal,
-        handoff_next_task = excluded.handoff_next_task,
         indexed_file_size = excluded.indexed_file_size,
         indexed_file_mtime_ms = excluded.indexed_file_mtime_ms,
         indexed_file_anchor = excluded.indexed_file_anchor,
@@ -142,7 +139,6 @@ export function getSessionRowByPath(
           parent_session_id as parentSessionId,
           session_origin as sessionOrigin,
           handoff_goal as handoffGoal,
-          handoff_next_task as handoffNextTask,
           indexed_file_size as indexedFileSize,
           indexed_file_mtime_ms as indexedFileMtimeMs,
           indexed_file_anchor as indexedFileAnchor
@@ -179,7 +175,6 @@ function buildSessionRow(row: Static<typeof SESSION_ROW_QUERY_SCHEMA>): SessionR
     parentSessionId: row.parentSessionId ?? undefined,
     sessionOrigin: row.sessionOrigin ?? undefined,
     handoffGoal: row.handoffGoal ?? undefined,
-    handoffNextTask: row.handoffNextTask ?? undefined,
     indexedFileSize: row.indexedFileSize ?? undefined,
     indexedFileMtimeMs: row.indexedFileMtimeMs ?? undefined,
     indexedFileAnchor: row.indexedFileAnchor ?? undefined,

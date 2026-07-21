@@ -42,6 +42,7 @@ export const SUBAGENT_REPORT_MESSAGE_SCHEMA = Type.Intersect([
     writerSessionId: Type.String(),
     childSessionId: Type.String(),
     reportId: Type.String(),
+    title: Type.Optional(Type.String()),
     provenance: Type.Union([Type.Literal("live"), Type.Literal("recovered")]),
   }),
   TASK_REPORT_SCHEMA,
@@ -78,8 +79,12 @@ export interface ChildSubagentLifecycle {
   hasReminder: boolean;
 }
 
+export interface ParentSubagentLaunch extends SubagentLaunched {
+  launchedAt: string;
+}
+
 export interface ParentSubagentLedger {
-  launches: readonly SubagentLaunched[];
+  launches: readonly ParentSubagentLaunch[];
   cancelledChildIds: ReadonlySet<string>;
   suspendedChildIds: ReadonlySet<string>;
   receivedReportIds: ReadonlySet<string>;
@@ -98,7 +103,7 @@ export function findOwnedSubagentLaunch(
   branch: readonly SessionEntry[],
   ownerSessionId: string,
   childSessionId: string,
-): SubagentLaunched | undefined {
+): ParentSubagentLaunch | undefined {
   return collectParentLedger(branch, ownerSessionId).launches.find(
     (launch) => launch.childSessionId === childSessionId,
   );
@@ -108,7 +113,7 @@ export function collectParentLedger(
   branch: readonly SessionEntry[],
   ownerSessionId: string,
 ): ParentSubagentLedger {
-  const launches = new Map<string, SubagentLaunched>();
+  const launches = new Map<string, ParentSubagentLaunch>();
   const cancelledChildIds = new Set<string>();
   const suspendedChildIds = new Set<string>();
   const receivedReportIds = new Set<string>();
@@ -142,7 +147,7 @@ export function collectParentLedger(
         hasForeignLaunch = true;
         continue;
       }
-      launches.set(launch.childSessionId, launch);
+      launches.set(launch.childSessionId, { ...launch, launchedAt: entry.timestamp });
       cancelledChildIds.delete(launch.childSessionId);
       suspendedChildIds.delete(launch.childSessionId);
       continue;

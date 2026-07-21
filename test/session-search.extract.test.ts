@@ -233,7 +233,6 @@ describe("extractSessionRecord", () => {
         data: {
           origin: "handoff",
           goal: "Continue phase 3",
-          nextTask: "Implement autocomplete",
           title: "Implement autocomplete",
           initial_prompt: "Continue phase 3",
         },
@@ -247,7 +246,6 @@ describe("extractSessionRecord", () => {
       parentSessionId: "parent-session",
       sessionOrigin: "handoff",
       handoffGoal: "Continue phase 3",
-      handoffNextTask: "Implement autocomplete",
     });
   });
 });

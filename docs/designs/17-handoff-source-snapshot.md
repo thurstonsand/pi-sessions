@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by design 18, Phase 9
 
 ## Decision Summary
 

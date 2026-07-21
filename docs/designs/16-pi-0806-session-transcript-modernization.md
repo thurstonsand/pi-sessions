@@ -125,7 +125,7 @@ The separate `thinkingLevel` remains preferred, but Pi-compatible suffixes in `m
 
 `renderCall()` handles empty, malformed, partial, and complete streamed arguments through a pure view-model pass, a surface-specific presenter, and `ExpandableContentLayout`. It progressively displays `session_handoff`, launch target, authoritative title, and a one-row `CollapsibleText` goal. Resizing cannot turn the preview into an accidental second content row; hidden content is followed by the shared native-style expansion hint line. Unknown values remain pending rather than throwing or printing raw partial JSON.
 
-On success, `renderResult()` updates that same layout instead of adding a second receipt block. A thin handoff-specific component composes the generic layout with the persistent command block and degraded-launch notice; the shared layout does not gain a speculative footer slot. Collapsed output adds the command beneath the one-row goal. Expanded output shows the complete goal plus labeled `session`, effective `model`, and conditional `cwd` metadata. The durable tool result is validated against the shared launch-receipt fields plus optional degraded direction and remains consumable by future History views.
+On success, `renderResult()` updates that same layout instead of adding a second receipt block. A thin handoff-specific component composes the generic layout with the persistent command block and degraded-launch notice; the shared layout does not gain a speculative footer slot. Collapsed output adds the command beneath the one-row goal. Expanded output shows the complete goal plus labeled `session`, effective `model`, and conditional `cwd` metadata. The durable tool result is validated against the shared launch-receipt fields plus optional degraded direction and remains consumable by future user-session views.
 
 ### Handoff kickoff: child-side model input
 
@@ -149,7 +149,7 @@ Its `content` is exactly the approved handoff prompt, so provider context is unc
 
 The renderer uses a Pi custom-message shell. Collapsed and expanded views both show the complete approved prompt beneath the label, child title, and `from <parent title> (<full parent UUID>)` source identity (or the UUID alone when untitled). The kickoff represents the instructions delivered on the user's behalf, so hiding or substituting any part of that prompt would be misleading. Expansion intentionally does not alter this entry.
 
-The originating goal and generated next task remain internal handoff metadata used during extraction; neither is duplicated into newly written kickoff details. The renderer does not show child id, cwd, launch target, model, or resume command. Those are launch output owned by the parent receipt.
+The originating goal remains internal handoff metadata and is not duplicated into newly written kickoff details. Extracted context is supplementary evidence rather than a second task. The renderer does not show child id, cwd, launch target, model, or resume command. Those are launch output owned by the parent receipt.
 
 All accepted kickoff paths use this message:
 
@@ -216,6 +216,7 @@ The view model contains:
 ```ts
 {
   sessionId: string
+  childSessionFile: string
   title: string
   launch: "deferred" | "left" | "right" | "up" | "down"
   resumeCommand: string
@@ -224,7 +225,7 @@ The view model contains:
 }
 ```
 
-`cwd` is present only when the effective target cwd differs from the parent cwd. `model` always records the effective child model/thinking, including when it matches the parent. Design 18 extends the launch vocabulary with `subagent`; the receipt contract is unchanged.
+`childSessionFile` is required so the User sessions board can read startup evidence directly without scanning project sessions. Receipts without it are invalid. `cwd` is present only when the effective target cwd differs from the parent cwd. `model` always records the effective child model/thinking, including when it matches the parent. Design 18 also extends the launch vocabulary with `subagent`.
 
 #### Deferred receipt
 
@@ -272,7 +273,7 @@ No prefix is added when both cwd values are equal. This makes copied commands re
 
 Pi has no transcript component whose selected text differs from its visual rows. `Text` and `Markdown` wrap into terminal lines, and tool/message/entry renderers are passive. The full command remains visible as useful evidence, but terminal selection is not the supported correctness path.
 
-Explicit copy actions use Pi's public `copyToClipboard()` and live in the handoff board (design 18), whose History tab normalizes command-launched custom receipts and `session_handoff` tool results into the shared launch-receipt view model, across all branches, newest first. The source is the session transcript rather than the index, so branching, compaction, or index freshness cannot hide a launch that actually occurred. This design contributes the durable receipts and the shared view model; the board's layout, keys, and empty states are design 18's scope.
+Explicit copy actions use Pi's public `copyToClipboard()` and live in the handoff board (design 18), whose User sessions tab normalizes directional and deferred command receipts plus `session_handoff` tool results into the shared launch-receipt view model, across all branches, newest first; subagent receipts stay solely in the operational roster. The source is the session transcript rather than the index, so branching, compaction, or index freshness cannot hide a launch that actually occurred. This design contributes the durable receipts and the shared view model; the board's layout, keys, and empty states are design 18's scope.
 
 ### Sent session-message tool receipt
 
@@ -321,9 +322,9 @@ The public package exposes the `ThinkingLevel` type but not the runtime validato
 
 ### 3. Make the tool-supplied title authoritative
 
-A background tool receipt must have a useful label before the child generates or reviews its draft. Updating an immutable parent receipt later would add cross-session synchronization for cosmetic state. Using the goal as a title would mix instructions with UI copy.
+A background tool receipt must have a useful label before the child generates or reviews its draft. Updating an immutable parent receipt later would add cross-session synchronization for cosmetic state.
 
-The caller therefore supplies a required concise title, explicitly documented as the child's title. Command handoffs retain extraction-generated titles because their human-facing flow already generates and reviews a draft before launch.
+The caller therefore supplies a required concise title, explicitly documented as the child's title. Command handoffs have no separate title argument, so they use the first 64 characters of the submitted goal.
 
 ### 4. Separate kickoff input from launch output
 
@@ -355,13 +356,15 @@ A deferred handoff's primary output is the command. Hiding or truncating it behi
 
 A split launch differs because the child is already running. Its command is recovery detail and belongs in expanded mode.
 
+**Amended by design 18, Phase 9:** `/handoff` is board-only and command launches no longer exist. The `session_handoff` tool result is the sole launch receipt and the User sessions tab's persistent data and copy surface.
+
 ### 9. Make resume commands self-locating
 
 A command copied in the parent may be pasted from another directory. Prefixing `cd` only when the target differs preserves concise common-case output while making cross-project handoffs reproducible. The same canonical string must be used by backends, clipboard, errors, and renderers so no “display command” diverges from the launch command.
 
 ### 10. Persist bootstrap state, but retain the startup model argument
 
-Moving bootstrap into the child session removes an unbounded environment payload and makes pending work durable. Pi's deferred first write means one manual flush remains necessary; using `SessionManager` to construct entries keeps that workaround at the persistence boundary rather than duplicating Pi's session model.
+Moving bootstrap into the child session removes an unbounded environment payload and makes pending work durable. Pi's deferred first write means one manual flush remains necessary; using `SessionManager` to construct entries keeps that workaround at the persistence boundary rather than duplicating Pi's session model. The submitted goal is the destination `Task` for every generated handoff. Extraction contributes only supplementary context, relevant file paths, and open questions; it does not synthesize or persist a competing task. Human review may still edit the assembled prompt before launch.
 
 Pi's initial model restoration still requires context messages. Retaining `--model` is preferable to injecting a fake message or importing more startup internals.
 
@@ -477,7 +480,7 @@ Calling `void session.abort()` makes cleanup race the operation it is meant to s
 ### Dedicated `--copy-last` and `--list` command surfaces
 
 - **Status:** Rejected
-- **Decision:** Both surfaces were replaced by the handoff board (design 18) before implementation. Bare `/handoff` opens the board; copy actions live in its History tab.
+- **Decision:** Both surfaces were replaced by the handoff board (design 18) before implementation. Bare `/handoff` opens the board; copy actions live in its User sessions tab.
 - **Discussion:** `--copy-last`'s meaning became ambiguous once attach and resume commands coexist for sub-agents, and a management modal was needed regardless. Shortcuts can return when usage patterns earn them.
 
 ### Store cross-project children in the parent session directory

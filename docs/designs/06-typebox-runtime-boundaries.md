@@ -1,5 +1,7 @@
 # 06 — TypeBox runtime-boundary alignment plan
 
+> **Later refinement:** [Design 18, Phase 9](18-tmux-subagents.md) removes `nextTask` from handoff metadata while retaining TypeBox validation at that boundary.
+
 ## Context
 
 `pi-sessions` currently mixes three different approaches at dynamic boundaries:

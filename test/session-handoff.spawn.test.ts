@@ -4,14 +4,29 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildHandoffKickoffMessage } from "../extensions/session-handoff/kickoff.ts";
 import {
-  createHandoffBootstrap,
-  createHandoffSessionMetadata,
+  createChildGeneratedHandoffBootstrap,
   findPendingHandoffBootstrap,
   HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
 } from "../extensions/session-handoff/metadata.ts";
-import { buildPiResumeCommand, prepareHandoffLaunch } from "../extensions/session-handoff/spawn.ts";
+import {
+  buildPiResumeCommand,
+  formatHandoffLaunchFailure,
+  prepareHandoffLaunch,
+} from "../extensions/session-handoff/spawn.ts";
 
 describe("session handoff spawn helpers", () => {
+  it("formats one canonical recovery message for surviving prepared sessions", () => {
+    expect(
+      formatHandoffLaunchFailure("Backend failed.", {
+        sessionId: "child-1",
+        sessionFile: "/tmp/child-1.jsonl",
+        resumeCommand: "pi --session-id child-1",
+      }),
+    ).toBe(
+      "Backend failed. Created handoff session child-1; start it manually with: pi --session-id child-1",
+    );
+  });
+
   it("creates a prepared child session with lineage, title, and pending bootstrap", () => {
     const sessionDir = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-spawn-"));
     const cwd = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-cwd-"));
@@ -23,8 +38,7 @@ describe("session handoff spawn helpers", () => {
       parentSessionFile: "/tmp/project/parent.jsonl",
       title: "Implement autocomplete",
       model: undefined,
-      buildBootstrap: (sessionId) =>
-        createHandoffBootstrap(sessionId, createMetadata(), createSource()),
+      buildBootstrap: (sessionId) => createBootstrap(sessionId),
     });
 
     const lines = readFileSync(prepared.sessionFile, "utf8").trim().split("\n");
@@ -51,8 +65,10 @@ describe("session handoff spawn helpers", () => {
       parentId: sessionInfo.id,
       data: {
         sessionId: prepared.sessionId,
+        mode: "generate",
         title: "Implement autocomplete",
-        source: createSource(),
+        parentSessionFile: "/tmp/project/parent.jsonl",
+        sourceLeafId: "source-leaf",
       },
     });
   });
@@ -68,8 +84,7 @@ describe("session handoff spawn helpers", () => {
       parentSessionFile: "/tmp/parent.jsonl",
       title: "Title",
       model: undefined,
-      buildBootstrap: (sessionId) =>
-        createHandoffBootstrap(sessionId, createMetadata(), createSource()),
+      buildBootstrap: (sessionId) => createBootstrap(sessionId),
     });
 
     expect(prepared.sessionFile.startsWith(sessionDir)).toBe(true);
@@ -109,8 +124,7 @@ describe("session handoff spawn helpers", () => {
       parentSessionFile: "/tmp/parent.jsonl",
       title: "Title",
       model: "openai/gpt-5.4:medium",
-      buildBootstrap: (sessionId) =>
-        createHandoffBootstrap(sessionId, createMetadata(), createSource()),
+      buildBootstrap: (sessionId) => createBootstrap(sessionId),
     });
 
     expect(prepared.sessionFile.startsWith(parentSessionDir)).toBe(false);
@@ -153,7 +167,7 @@ describe("session handoff spawn helpers", () => {
       type: "custom",
       id: "bootstrap-1",
       customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
-      data: createHandoffBootstrap("child-1", createMetadata(), createSource()),
+      data: createBootstrap("child-1"),
     };
     const unrelatedKickoff = {
       type: "custom_message",
@@ -188,8 +202,7 @@ describe("session handoff spawn helpers", () => {
       parentSessionFile: "/tmp/parent.jsonl",
       title: "Implement autocomplete",
       model: undefined,
-      buildBootstrap: (sessionId) =>
-        createHandoffBootstrap(sessionId, createMetadata(), createSource()),
+      buildBootstrap: (sessionId) => createBootstrap(sessionId),
     });
 
     const entries = readFileSync(prepared.sessionFile, "utf8")
@@ -204,19 +217,22 @@ describe("session handoff spawn helpers", () => {
       bootstrap: {
         sessionId: prepared.sessionId,
         goal: "Finish phase 1",
-        initialPrompt: "Approved handoff draft",
+        parentSessionFile: "/tmp/project/parent.jsonl",
       },
     });
   });
 });
 
-function createMetadata() {
-  return createHandoffSessionMetadata(
-    "Finish phase 1",
-    "Implement autocomplete",
-    "Approved handoff draft",
-    "Implement autocomplete",
-  );
+function createBootstrap(sessionId: string) {
+  return createChildGeneratedHandoffBootstrap({
+    sessionId,
+    goal: "Finish phase 1",
+    title: "Implement autocomplete",
+    parentSessionFile: "/tmp/project/parent.jsonl",
+    sourceLeafId: "source-leaf",
+    requestResponse: false,
+    bootstrapMode: "review",
+  });
 }
 
 function createSource() {

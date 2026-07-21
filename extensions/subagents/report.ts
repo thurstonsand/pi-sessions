@@ -120,6 +120,7 @@ export function buildIncomingSubagentReport(
     writerSessionId: ownerSessionId,
     childSessionId: envelope.source,
     reportId: envelope.reportId,
+    title: launch.title,
     status: envelope.status,
     summary: envelope.summary,
     ...(envelope.details ? { details: envelope.details } : {}),

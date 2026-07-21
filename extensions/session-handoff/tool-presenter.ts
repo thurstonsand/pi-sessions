@@ -11,7 +11,6 @@ export function buildHandoffToolPresentation(
   const expandedMetadata: string[] = [];
   if (model.result) {
     expandedMetadata.push(`${theme.bold("session")} ${model.result.sessionId}`);
-    expandedMetadata.push(`${theme.bold("model")} ${model.result.model}`);
     if (model.result.cwd) {
       expandedMetadata.push(`${theme.bold("cwd")} ${model.result.cwd}`);
     }
@@ -23,6 +22,9 @@ export function buildHandoffToolPresentation(
       theme.fg("dim", `[${model.launch ?? PENDING}]`),
       theme.bold(model.title ?? PENDING),
     ].join(" "),
+    metadata: [
+      `${theme.fg("muted", "model")} ${model.model ?? PENDING}  ${theme.fg("dim", "·")}  ${theme.fg("muted", "thinking")} ${model.thinkingLevel ?? PENDING}`,
+    ],
     ...(expandedMetadata.length > 0 ? { expandedMetadata } : {}),
     body: {
       text: `${theme.bold("goal")} ${model.goal ?? PENDING}`,

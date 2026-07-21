@@ -38,20 +38,41 @@ describe("subagent ledgers", () => {
         writerSessionId: ownerId,
         childSessionId: childId,
         reportId: "report-1",
+        title: "Child",
         status: "done",
         summary: "Complete.",
         provenance: "live",
       }),
-      launchEntry(),
+      launchEntry(ownerId, "Replacement", "2026-03-25T00:01:00.000Z"),
     ];
 
     const ledger = collectParentLedger(entries, ownerId);
 
-    expect(ledger.launches).toHaveLength(1);
+    expect(ledger.launches).toMatchObject([
+      { title: "Replacement", launchedAt: "2026-03-25T00:01:00.000Z" },
+    ]);
     expect(ledger.cancelledChildIds).not.toContain(childId);
     expect(ledger.suspendedChildIds).not.toContain(childId);
     expect(ledger.receivedReportIds).toContain("report-1");
     expect(ledger.deliveredReportIds).toContain("report-1");
+  });
+
+  it("keeps legacy report messages without titles eligible for delivery deduplication", () => {
+    const ledger = collectParentLedger(
+      [
+        customMessage(SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE, {
+          writerSessionId: ownerId,
+          childSessionId: childId,
+          reportId: "legacy-report",
+          status: "done",
+          summary: "Complete.",
+          provenance: "live",
+        }),
+      ],
+      ownerId,
+    );
+
+    expect(ledger.deliveredReportIds).toContain("legacy-report");
   });
 
   it("collects fork evidence independently from owned launches", () => {
@@ -89,18 +110,26 @@ describe("subagent ledgers", () => {
   });
 });
 
-function launchEntry(writerSessionId = ownerId): SessionEntry {
-  return customEntry(SUBAGENT_LAUNCHED_CUSTOM_TYPE, {
-    writerSessionId,
-    childSessionId: childId,
-    childSessionFile: "/tmp/child.jsonl",
-    title: "Child",
-    goal: "Work",
-    requestResponse: true,
-    cwd: "/repo",
-    resumeCommand: "resume",
-    depth: 1,
-  });
+function launchEntry(
+  writerSessionId = ownerId,
+  title = "Child",
+  timestamp = "2026-03-25T00:00:00.000Z",
+): SessionEntry {
+  return customEntry(
+    SUBAGENT_LAUNCHED_CUSTOM_TYPE,
+    {
+      writerSessionId,
+      childSessionId: childId,
+      childSessionFile: "/tmp/child.jsonl",
+      title,
+      goal: "Work",
+      requestResponse: true,
+      cwd: "/repo",
+      resumeCommand: "resume",
+      depth: 1,
+    },
+    timestamp,
+  );
 }
 
 function customMessage(customType: string, details: unknown): SessionEntry {
@@ -116,12 +145,16 @@ function customMessage(customType: string, details: unknown): SessionEntry {
   };
 }
 
-function customEntry(customType: string, data: unknown): SessionEntry {
+function customEntry(
+  customType: string,
+  data: unknown,
+  timestamp = "2026-03-25T00:00:00.000Z",
+): SessionEntry {
   return {
     type: "custom",
     id: `${customType}-${entryId++}`,
     parentId: null,
-    timestamp: "2026-03-25T00:00:00.000Z",
+    timestamp,
     customType,
     data,
   };

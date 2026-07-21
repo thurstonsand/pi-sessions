@@ -79,7 +79,6 @@ export interface ExtractedSessionRecord {
   parentSessionId?: string | undefined;
   sessionOrigin?: SessionOrigin | undefined;
   handoffGoal?: string | undefined;
-  handoffNextTask?: string | undefined;
   indexedFileSize: number;
   indexedFileMtimeMs: number;
   indexedFileAnchor: string;
@@ -205,7 +204,6 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
       scan.handoffMetadata?.metadata,
     ),
     handoffGoal: scan.handoffMetadata?.metadata.goal,
-    handoffNextTask: scan.handoffMetadata?.metadata.nextTask,
     indexedFileSize: slice.consumedBytes,
     indexedFileMtimeMs,
     indexedFileAnchor: buildFileAnchor(buffer, slice.consumedBytes),
@@ -558,10 +556,7 @@ function appendDurableHandoffMetadataChunks(
   }
 
   const { entryId, ts, metadata } = durableHandoffMetadata;
-  chunks.push(
-    createMetadataChunk(entryId, ts, "handoff_goal", metadata.goal),
-    createMetadataChunk(entryId, ts, "handoff_next_task", metadata.nextTask),
-  );
+  chunks.push(createMetadataChunk(entryId, ts, "handoff_goal", metadata.goal));
 }
 
 function createMetadataChunk(

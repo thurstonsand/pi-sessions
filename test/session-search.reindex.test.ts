@@ -159,7 +159,6 @@ describe("rebuildSessionIndex", () => {
         data: {
           origin: "handoff",
           goal: "Finish the split",
-          nextTask: "Implement autocomplete",
           title: "Implement autocomplete",
           initial_prompt: "Finish the split",
         },
@@ -194,14 +193,13 @@ describe("rebuildSessionIndex", () => {
     const db = openIndexDatabase(indexPath, { create: false });
     const childRow = db
       .prepare(
-        `SELECT parent_session_path as parentSessionPath, parent_session_id as parentSessionId, session_origin as sessionOrigin, handoff_goal as handoffGoal, handoff_next_task as handoffNextTask FROM sessions WHERE session_id = ?`,
+        `SELECT parent_session_path as parentSessionPath, parent_session_id as parentSessionId, session_origin as sessionOrigin, handoff_goal as handoffGoal FROM sessions WHERE session_id = ?`,
       )
       .get("child-session") as {
       parentSessionPath?: string;
       parentSessionId?: string;
       sessionOrigin?: string;
       handoffGoal?: string;
-      handoffNextTask?: string;
     };
     db.close();
 
@@ -210,7 +208,6 @@ describe("rebuildSessionIndex", () => {
       parentSessionId: "parent-session",
       sessionOrigin: "handoff",
       handoffGoal: "Finish the split",
-      handoffNextTask: "Implement autocomplete",
     });
   });
 

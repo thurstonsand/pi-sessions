@@ -362,14 +362,6 @@ function applyTailSync(
           sourceKind: "handoff_goal",
           text: metadata.goal,
         });
-        insertTextChunk(db, {
-          sessionId: baseline.sessionId,
-          entryId,
-          entryType: "custom",
-          ts,
-          sourceKind: "handoff_next_task",
-          text: metadata.nextTask,
-        });
       }
 
       for (const chunk of scan.chunks) {
@@ -422,7 +414,6 @@ function buildTailSessionRow(
     parentSessionId: baseline.parentSessionId,
     sessionOrigin: baseline.parentSessionPath ? (nextOrigin ?? "unknown_child") : undefined,
     handoffGoal: baseline.handoffGoal ?? tailHandoffMetadata?.goal,
-    handoffNextTask: baseline.handoffNextTask ?? tailHandoffMetadata?.nextTask,
     indexedFileSize: tail.indexedFileSize,
     indexedFileMtimeMs: tail.indexedFileMtimeMs,
     indexedFileAnchor: tail.indexedFileAnchor,

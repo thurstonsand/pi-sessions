@@ -121,6 +121,7 @@ describe("subagent reports", () => {
         writerSessionId: parentId,
         childSessionId: childId,
         reportId: "report-1",
+        title: "Implement phase",
         status: "done",
         summary: "Implemented and tested.",
         details: "The focused checks pass.",
@@ -147,6 +148,9 @@ Next steps
 - Review the diff.`,
       delivery: { triggerTurn: true },
     });
+    expect(incoming?.content.split("\n", 1)[0]).toBe(
+      `Subagent report from "Implement phase" (session: ${childId}, status: done)`,
+    );
   });
 
   it("replays a report that was accepted but not injected", () => {

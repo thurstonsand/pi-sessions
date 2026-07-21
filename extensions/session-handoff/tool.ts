@@ -14,7 +14,7 @@ import {
 import { createChildGeneratedHandoffBootstrap } from "./metadata.ts";
 import { formatModelArgument, resolveModelOverride } from "./model.ts";
 import { buildLaunchReceipt } from "./receipt.ts";
-import { prepareHandoffLaunch } from "./spawn.ts";
+import { formatHandoffLaunchFailure, prepareHandoffLaunch } from "./spawn.ts";
 import type { HandoffToolDetails } from "./tool-contract.ts";
 
 export type { HandoffLaunchValue } from "./launch-target.ts";
@@ -85,10 +85,9 @@ export async function executeSessionHandoffTool(
   const override = params.model
     ? resolveModelOverride(modelRuntime, params.model, params.thinkingLevel)
     : undefined;
-  const model = formatModelArgument(
-    override?.model ?? ctx.model,
-    override?.thinkingLevel ?? params.thinkingLevel ?? pi.getThinkingLevel(),
-  );
+  const childModel = override?.model ?? ctx.model;
+  const thinkingLevel = override?.thinkingLevel ?? params.thinkingLevel ?? pi.getThinkingLevel();
+  const model = formatModelArgument(childModel, thinkingLevel);
   if (!model) {
     throw new Error("No active model is available for the handoff.");
   }
@@ -129,9 +128,7 @@ export async function executeSessionHandoffTool(
   });
 
   if (!outcome.success) {
-    throw new Error(
-      `${outcome.error} Created handoff session ${prepared.sessionId}; start it manually with: ${prepared.resumeCommand}`,
-    );
+    throw new Error(formatHandoffLaunchFailure(outcome.error, prepared));
   }
   if (outcome.clipboardStatus) {
     recordClipboardStatus(prepared.sessionId, outcome.clipboardStatus);
@@ -140,6 +137,7 @@ export async function executeSessionHandoffTool(
   const details: HandoffToolDetails = {
     ...buildLaunchReceipt({
       sessionId: prepared.sessionId,
+      childSessionFile: prepared.sessionFile,
       title,
       launch: target.value,
       resumeCommand: prepared.resumeCommand,
@@ -147,6 +145,8 @@ export async function executeSessionHandoffTool(
       targetCwd: targetCwd.path,
       parentCwd: ctx.cwd,
       childModel: model,
+      childModelName: childModel.name || childModel.id,
+      thinkingLevel,
     }),
     ...(degradedFrom ? { degradedFrom } : {}),
   };

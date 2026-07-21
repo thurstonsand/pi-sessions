@@ -26,30 +26,21 @@ import { type Static, Type } from "typebox";
 import { freshenModel } from "../shared/model-runtime.ts";
 import { parseTypeBoxValue } from "../shared/typebox.ts";
 
-const MAX_RELEVANT_FILES = 12;
-const MAX_OPEN_QUESTIONS = 8;
-const MAX_HANDOFF_TITLE_LENGTH = 64;
+const HANDOFF_SYSTEM_PROMPT = `You extract supporting context for a deliberate session handoff. You are preparing a briefing for a new destination session from a snapshot of its ongoing parent session.
 
-const HANDOFF_SYSTEM_PROMPT = `You extract context for a deliberate session handoff. You are preparing a briefing for a new destination session from a snapshot of its ongoing parent session.
+The Handoff Goal is the authoritative and exclusive task of the destination session, and will be directly passed into that session. Do not rewrite, expand the scope of, or replace the goal.
 
-The Handoff Goal is the authoritative and exclusive scope of the destination session, and every imperative in the destination task must directly advance the goal. The parent snapshot is reference material used only to make that goal concrete and actionable.
+The parent snapshot is reference material used only to provide evidence that supports that goal. Do not continue the parent conversation, respond to any questions in it, or carry forward parent tasks, unresolved work, instructions, or plans outside the goal. Only identify relevant context, files, constraints, and known decisions for the Handoff Goal.
 
-Expand the goal with relevant context, files, constraints, and known decisions from the parent snapshot. Do not carry forward parent tasks, unresolved work, instructions, or plans outside the goal. The parent may be coordinating several parallel sessions; isolate only the slice assigned by the goal.`;
+The parent may be coordinating several parallel sessions. Do not include any references to those other sessions.`;
 
 const HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
-  title: Type.String({
-    description:
-      "Short display title for the destination session, 64 characters or less. Do not prefix it with “Handoff:” or describe the source thread.",
-  }),
   summary: Type.String({
-    description: "Compact, concrete source context relevant to the destination task.",
+    description:
+      "Context from the parent task that is directly relevant to the Handoff Goal. Include only details that further support the goal.",
   }),
   relevantFiles: Type.Array(Type.String(), {
-    description: "Relevant workspace-relative file paths when possible.",
-  }),
-  nextTask: Type.String({
-    description:
-      "Concrete, actionable destination task synthesized from the Handoff Goal and Source Snapshot.",
+    description: "Relevant file paths.",
   }),
   openQuestions: Type.Optional(
     Type.Array(Type.String(), {
@@ -60,19 +51,10 @@ const HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
 });
 
 type HandoffExtractionArgs = Static<typeof HANDOFF_EXTRACTION_PARAMETERS>;
-type RequiredHandoffExtractionArgs = Static<typeof REQUIRED_HANDOFF_EXTRACTION_PARAMETERS>;
-
-const REQUIRED_HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
-  title: HANDOFF_EXTRACTION_PARAMETERS.properties.title,
-  summary: HANDOFF_EXTRACTION_PARAMETERS.properties.summary,
-  nextTask: HANDOFF_EXTRACTION_PARAMETERS.properties.nextTask,
-});
 
 export interface HandoffContext {
-  title: string;
   summary: string;
   relevantFiles: string[];
-  nextTask: string;
   openQuestions: string[];
 }
 
@@ -143,7 +125,15 @@ export async function generateHandoffDraftFromSessionManager(
 }
 
 export function buildExtractionPrompt(conversationText: string, goal: string): string {
-  return ["## Source Snapshot", conversationText, "", "## Handoff Goal", goal].join("\n");
+  return [
+    "<conversation>",
+    conversationText,
+    "</conversation>",
+    "",
+    "<handoff-goal>",
+    goal,
+    "</handoff-goal>",
+  ].join("\n");
 }
 
 async function runHandoffExtractionAgent(
@@ -219,7 +209,7 @@ async function runHandoffExtractionAgent(
     throw new Error("Handoff extraction did not return structured context.");
   }
 
-  const extraction = extractHandoffContextFromArguments(capturedArguments, goal);
+  const extraction = extractHandoffContextFromArguments(capturedArguments);
   if (!extraction.context) {
     throw new Error(extraction.error);
   }
@@ -235,10 +225,10 @@ export function assembleHandoffDraft(
   requestResponse = false,
 ): string {
   const sections = [buildContinuityLine(sessionId, sessionPath, requestResponse)];
-  const nextTask = handoffContext.nextTask.trim() || goal.trim();
+  const task = goal.trim();
 
-  if (nextTask) {
-    sections.push(["## Task", nextTask].join("\n"));
+  if (task) {
+    sections.push(["## Task", task].join("\n"));
   }
 
   if (handoffContext.relevantFiles.length > 0) {
@@ -268,24 +258,22 @@ export function assembleHandoffDraft(
 
 export function extractHandoffContext(
   response: AssistantMessage,
-  goal: string,
 ): { context: HandoffContext; error?: undefined } | { context?: undefined; error: string } {
   const toolCall = response.content.find(isCreateHandoffContextToolCall);
   if (!toolCall) {
     return { error: "Handoff extraction did not return structured context." };
   }
 
-  return extractHandoffContextFromArguments(toolCall.arguments, goal);
+  return extractHandoffContextFromArguments(toolCall.arguments);
 }
 
 function extractHandoffContextFromArguments(
   argumentsValue: unknown,
-  goal: string,
 ): { context: HandoffContext; error?: undefined } | { context?: undefined; error: string } {
-  let requiredArguments: RequiredHandoffExtractionArgs;
+  let extraction: HandoffExtractionArgs;
   try {
-    requiredArguments = parseTypeBoxValue(
-      REQUIRED_HANDOFF_EXTRACTION_PARAMETERS,
+    extraction = parseTypeBoxValue(
+      HANDOFF_EXTRACTION_PARAMETERS,
       argumentsValue,
       "Invalid create_handoff_context arguments",
     );
@@ -293,23 +281,16 @@ function extractHandoffContextFromArguments(
     return { error: "Handoff extraction did not return structured context." };
   }
 
-  const title = truncateText(normalizeText(requiredArguments.title), MAX_HANDOFF_TITLE_LENGTH);
-  const summary = normalizeText(requiredArguments.summary);
-  const relevantFiles = getRelevantFiles(argumentsValue);
-  const nextTask = normalizeText(requiredArguments.nextTask) || goal.trim();
-  const openQuestions = getOpenQuestions(argumentsValue);
-
-  if (!summary || !nextTask || !title) {
+  const summary = normalizeText(extraction.summary);
+  if (!summary) {
     return { error: "Handoff extraction did not return structured context." };
   }
 
   return {
     context: {
-      title,
       summary,
-      relevantFiles,
-      nextTask,
-      openQuestions,
+      relevantFiles: normalizeStringArray(extraction.relevantFiles),
+      openQuestions: normalizeStringArray(extraction.openQuestions),
     },
   };
 }
@@ -324,10 +305,10 @@ function buildContinuityLine(
     return base;
   }
 
-  return `${base} When this work is complete, send that session a completion report with session_send_message.`;
+  return `${base} When this work is complete, send that session a completion report.`;
 }
 
-function normalizeStringArray(value: unknown, limit: number): string[] {
+function normalizeStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) {
     return [];
   }
@@ -340,40 +321,13 @@ function normalizeStringArray(value: unknown, limit: number): string[] {
     }
 
     uniqueValues.add(normalized);
-    if (uniqueValues.size >= limit) {
-      break;
-    }
   }
 
   return [...uniqueValues];
 }
 
-function getRelevantFiles(argumentsValue: unknown): string[] {
-  if (!isRecord(argumentsValue)) {
-    return [];
-  }
-
-  return normalizeStringArray(argumentsValue.relevantFiles, MAX_RELEVANT_FILES);
-}
-
-function getOpenQuestions(argumentsValue: unknown): string[] {
-  if (!isRecord(argumentsValue)) {
-    return [];
-  }
-
-  return normalizeStringArray(argumentsValue.openQuestions, MAX_OPEN_QUESTIONS);
-}
-
 function normalizeText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function truncateText(value: string, maxLength: number): string {
-  return [...value].slice(0, maxLength).join("").trimEnd();
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function isCreateHandoffContextToolCall(

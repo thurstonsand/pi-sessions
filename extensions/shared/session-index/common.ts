@@ -3,7 +3,7 @@ import type { FileTouchOp, FileTouchSource, PathScope } from "../../session-sear
 import { safeParseTypeBoxJson } from "../typebox.ts";
 import type { SqliteDatabase } from "./sqlite.ts";
 
-export const INDEX_SCHEMA_VERSION = 13;
+export const INDEX_SCHEMA_VERSION = 14;
 
 export type SessionOrigin = "handoff" | "subagent" | "fork" | "unknown_child";
 export type SessionKind = "user" | "subagent";
@@ -33,7 +33,6 @@ export interface SessionRow {
   parentSessionId?: string | undefined;
   sessionOrigin?: SessionOrigin | undefined;
   handoffGoal?: string | undefined;
-  handoffNextTask?: string | undefined;
   indexedFileSize?: number | undefined;
   indexedFileMtimeMs?: number | undefined;
   indexedFileAnchor?: string | undefined;
@@ -51,7 +50,6 @@ export interface SessionLineageRow {
   parentSessionId?: string | undefined;
   sessionOrigin?: SessionOrigin | undefined;
   handoffGoal?: string | undefined;
-  handoffNextTask?: string | undefined;
 }
 
 export interface SessionRelatedSessionRow extends SessionLineageRow {
@@ -137,7 +135,6 @@ export interface SearchSessionResult {
   firstUserPrompt?: string | undefined;
   sessionOrigin?: SessionOrigin | undefined;
   handoffGoal?: string | undefined;
-  handoffNextTask?: string | undefined;
   relation?: SessionLineageRelation | undefined;
   snippet: string;
   evidence: SessionSearchEvidence[];

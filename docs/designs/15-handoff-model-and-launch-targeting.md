@@ -6,7 +6,7 @@ Accepted
 
 ## Decision Summary
 
-> **Later refinement:** [Design 16](16-pi-0806-session-transcript-modernization.md) supersedes this design's exact-only model resolution with Pi's public `resolveCliModel` plus an authenticated-availability guard, adds Pi 0.80.6 `max`, and defines rich kickoff and launch-receipt rendering. The launch-backend seam and targeting surfaces remain in force; the detached backend is renamed to deferred.
+> **Later refinement:** [Design 16](16-pi-0806-session-transcript-modernization.md) supersedes this design's exact-only model resolution with Pi's public `resolveCliModel` plus an authenticated-availability guard, adds Pi 0.80.6 `max`, and defines rich kickoff and launch-receipt rendering. [Design 18, Phase 9](18-tmux-subagents.md) removes the command targeting surface; model and launch targeting remain on `session_handoff`, while bare `/handoff` opens the management board.
 
 Handoffs gain two targeting axes. First, the `session_handoff` tool and `/handoff` command can direct the child session to a different model and thinking level, defaulting to the current session's values. Second, session _creation_ is decoupled from session _launch_ behind a launch-backend seam, and a `detached` backend ships alongside Ghostty — the tool works everywhere, returning (and copying to clipboard) the resume command instead of opening a pane. The key tradeoff: a breaking tool-schema change (`launch` replaces `splitDirection`) in exchange for one parameter that cannot express contradictions.
 

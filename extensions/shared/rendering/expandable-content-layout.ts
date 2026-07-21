@@ -1,4 +1,4 @@
-import { type Component, Container, Spacer, Text } from "@earendil-works/pi-tui";
+import { type Component, Container, Spacer, Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { CollapsibleText } from "./collapsible-text.ts";
 import type { RenderTheme } from "./theme.ts";
 
@@ -56,15 +56,18 @@ export class ExpandableContentLayout implements Component {
     const container = new Container();
     container.addChild(new Text(this.presentation.header, 0, 0));
 
-    const metadata = [
-      ...(this.presentation.metadata ?? []),
-      ...(this.expanded ? (this.presentation.expandedMetadata ?? []) : []),
-    ];
+    const visibleMetadata = this.presentation.metadata ?? [];
+    const expandedMetadata = this.presentation.expandedMetadata ?? [];
+    const metadata = [...visibleMetadata, ...(this.expanded ? expandedMetadata : [])];
     if (metadata.length > 0) {
       container.addChild(new Text(metadata.join("\n"), 0, 0));
     }
 
     if (this.body && this.presentation.body?.text) {
+      this.body.setSupplementalRowCounts(
+        countRenderedRows(visibleMetadata, width),
+        countRenderedRows(expandedMetadata, width),
+      );
       const spacingBefore = this.presentation.body.spacingBefore ?? 1;
       if (spacingBefore > 0) {
         container.addChild(new Spacer(spacingBefore));
@@ -73,4 +76,9 @@ export class ExpandableContentLayout implements Component {
     }
     return container.render(width);
   }
+}
+
+function countRenderedRows(lines: readonly string[], width: number): number {
+  const renderWidth = Math.max(1, width);
+  return lines.reduce((total, line) => total + wrapTextWithAnsi(line, renderWidth).length, 0);
 }

@@ -1,8 +1,4 @@
-import type {
-  ExtensionCommandContext,
-  ExtensionUIContext,
-  Theme,
-} from "@earendil-works/pi-coding-agent";
+import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component } from "@earendil-works/pi-tui";
 import {
   Key,
@@ -11,6 +7,7 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+import { renderStrongModal } from "./strong-modal.ts";
 
 const PREVIEW_TIMEOUT_MS = 8_000;
 const PREVIEW_BODY_LINE_LIMIT = 16;
@@ -205,17 +202,6 @@ export class HandoffPreviewComponent implements Component {
   }
 }
 
-export function renderStrongModal(lines: string[], width: number, theme: Theme): string[] {
-  const innerWidth = Math.max(20, width - 4);
-  const fillLine = (text: string) => {
-    const truncated = truncateToWidth(text, innerWidth, "…", true);
-    const padding = Math.max(0, innerWidth - visibleWidth(truncated));
-    return theme.bg("customMessageBg", `  ${truncated}${" ".repeat(padding)}  `);
-  };
-
-  return ["", ...lines, ""].map(fillLine);
-}
-
 function formatKeymapLine(left: string, right: string): string {
   return `${left.padEnd(27, " ")}${right}`;
 }
@@ -233,18 +219,6 @@ function renderPromptSection(lines: string[], width: number, _theme: Theme): str
     ...lines.map((text) => line("│", text, "│")),
     `└${"─".repeat(innerWidth + 2)}┘`,
   ];
-}
-
-export async function reviewHandoffDraft(
-  ctx: ExtensionCommandContext,
-  draft: string,
-): Promise<string | undefined> {
-  const result = await reviewHandoffDraftForSend(ctx.ui, draft);
-  if (result.action !== "send") {
-    return undefined;
-  }
-
-  return result.prompt;
 }
 
 export async function reviewHandoffDraftForSend(

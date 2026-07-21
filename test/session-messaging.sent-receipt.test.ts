@@ -70,7 +70,7 @@ describe("sent session-message tool receipt", () => {
     expect(rendered).toContain("First line.");
     expect(rendered).toContain("Second line.");
     expect(rendered).toContain("Third line.");
-    expect(rendered).toContain("more lines");
+    expect(rendered).toContain("2 more lines, 5 total");
     expect(rendered).not.toContain("...");
     expect(rendered).not.toContain("Fourth line.");
     expect(rendered).not.toContain("session target-1");
@@ -89,7 +89,7 @@ describe("sent session-message tool receipt", () => {
     expect(preview).toHaveLength(72);
     expect(preview).toContain("Long first line");
     expect(rendered).not.toContain("Second line.");
-    expect(rendered).toContain("more lines");
+    expect(rendered).toContain("2 more lines, 5 total");
   });
 
   it("adds the session id and complete message when expanded", () => {

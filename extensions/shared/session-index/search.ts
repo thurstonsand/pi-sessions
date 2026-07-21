@@ -52,7 +52,6 @@ const SESSION_LIST_ROW_SCHEMA = Type.Object({
   firstUserPrompt: NULLABLE_STRING_SCHEMA,
   sessionOrigin: Type.Union([SESSION_ORIGIN_SCHEMA, Type.Null()]),
   handoffGoal: NULLABLE_STRING_SCHEMA,
-  handoffNextTask: NULLABLE_STRING_SCHEMA,
 });
 
 type SessionListRow = Static<typeof SESSION_LIST_ROW_SCHEMA>;
@@ -261,8 +260,7 @@ function getFilteredSessionCandidates(
             s.parent_session_id as parentSessionId,
             s.first_user_prompt as firstUserPrompt,
             s.session_origin as sessionOrigin,
-            s.handoff_goal as handoffGoal,
-            s.handoff_next_task as handoffNextTask
+            s.handoff_goal as handoffGoal
           FROM sessions s
           ${where.sql}
           ORDER BY s.modified_ts ${orderDirection}
@@ -661,7 +659,6 @@ function buildSearchResult(
     firstUserPrompt: row.firstUserPrompt ?? undefined,
     sessionOrigin: row.sessionOrigin ?? undefined,
     handoffGoal: row.handoffGoal ?? undefined,
-    handoffNextTask: row.handoffNextTask ?? undefined,
     relation: relationBySessionId.get(row.sessionId),
     snippet: "",
     evidence: [...fileEvidence],

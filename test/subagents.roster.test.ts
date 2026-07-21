@@ -17,9 +17,27 @@ describe("subagent transcript roster", () => {
 
     expect(branch.entries.map((entry) => entry.sessionId)).toEqual([activeChildId]);
     expect(tree.entries).toMatchObject([
-      { sessionId: historyChildId, depth: 1, onActiveBranch: false },
-      { sessionId: activeChildId, depth: 1, onActiveBranch: true },
-      { sessionId: grandchildId, depth: 2, onActiveBranch: true },
+      {
+        sessionId: historyChildId,
+        ownerTitle: "Parent board session",
+        ownerIsCurrentSession: true,
+        depth: 1,
+        onActiveBranch: false,
+      },
+      {
+        sessionId: activeChildId,
+        ownerTitle: "Parent board session",
+        ownerIsCurrentSession: true,
+        depth: 1,
+        onActiveBranch: true,
+      },
+      {
+        sessionId: grandchildId,
+        ownerTitle: "Historical child session",
+        ownerIsCurrentSession: false,
+        depth: 2,
+        onActiveBranch: true,
+      },
     ]);
     expect(tree.total).toBe(3);
   });
@@ -34,6 +52,21 @@ describe("subagent transcript roster", () => {
     expect(tree.entries).not.toContainEqual(expect.objectContaining({ sessionId: grandchildId }));
   });
 
+  it("uses the latest relaunch metadata and timestamp", async () => {
+    const fixture = createFixture({ relaunchActive: true });
+
+    const branch = await fixture.roster.resolve("branch");
+
+    expect(branch.entries).toMatchObject([
+      {
+        sessionId: activeChildId,
+        title: "Relaunched worker",
+        resumeCommand: "resume-new",
+        launchedAt: "2026-03-25T00:05:00.000Z",
+      },
+    ]);
+  });
+
   it("treats stamped windows and broker-only processes as managed-live", async () => {
     const fixture = createFixture({
       windowChildId: activeChildId,
@@ -45,7 +78,14 @@ describe("subagent transcript roster", () => {
 
     expect(tree.entries).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ sessionId: activeChildId, managedLive: true, state: "busy" }),
+        expect.objectContaining({
+          sessionId: activeChildId,
+          managedLive: true,
+          state: "busy",
+          tmuxWindowId: "@1",
+          launchedAt: "2026-03-25T00:00:00.000Z",
+          resumeCommand: "resume",
+        }),
         expect.objectContaining({ sessionId: historyChildId, managedLive: true, state: "active" }),
         expect.objectContaining({ sessionId: grandchildId, managedLive: false }),
       ]),
@@ -59,6 +99,7 @@ function createFixture(options?: {
   windowChildId?: string;
   liveSessionIds?: string[];
   registeredSessionIds?: string[];
+  relaunchActive?: boolean;
 }) {
   const root = customEntry("root", "fixture.root", undefined, null);
   const activeLaunch = launchEntry(
@@ -69,7 +110,27 @@ function createFixture(options?: {
     1,
     root.id,
   );
-  const activeTail = customEntry("active-tail", "fixture.tail", undefined, activeLaunch.id);
+  const activeRelaunch = options?.relaunchActive
+    ? launchEntry(
+        "launch-active-again",
+        parentId,
+        activeChildId,
+        "active.jsonl",
+        1,
+        activeLaunch.id,
+        {
+          title: "Relaunched worker",
+          resumeCommand: "resume-new",
+          timestamp: "2026-03-25T00:05:00.000Z",
+        },
+      )
+    : undefined;
+  const activeTail = customEntry(
+    "active-tail",
+    "fixture.tail",
+    undefined,
+    activeRelaunch?.id ?? activeLaunch.id,
+  );
   const historyLaunch = launchEntry(
     "launch-history",
     parentId,
@@ -89,14 +150,15 @@ function createFixture(options?: {
   const parentEntries = [
     root,
     activeLaunch,
+    ...(activeRelaunch ? [activeRelaunch] : []),
     activeTail,
     historyLaunch,
     ...(options?.foreignLaunch ? [foreignLaunch] : []),
   ];
-  const parent = fakeSession(parentId, parentEntries, activeTail.id);
+  const parent = fakeSession(parentId, parentEntries, activeTail.id, "Parent board session");
 
   const activeRoot = customEntry("active-root", "fixture.root", undefined, null);
-  const active = fakeSession(activeChildId, [activeRoot], activeRoot.id);
+  const active = fakeSession(activeChildId, [activeRoot], activeRoot.id, "Active child session");
 
   const historyRoot = customEntry("history-root", "fixture.root", undefined, null);
   const grandchildLaunch = launchEntry(
@@ -111,10 +173,16 @@ function createFixture(options?: {
     options?.mismatchedHistorySession ? "mismatched-session" : historyChildId,
     [historyRoot, grandchildLaunch],
     grandchildLaunch.id,
+    "Historical child session",
   );
 
   const grandchildRoot = customEntry("grandchild-root", "fixture.root", undefined, null);
-  const grandchild = fakeSession(grandchildId, [grandchildRoot], grandchildRoot.id);
+  const grandchild = fakeSession(
+    grandchildId,
+    [grandchildRoot],
+    grandchildRoot.id,
+    "Grandchild session",
+  );
   const sessions = new Map([
     ["active.jsonl", active],
     ["history.jsonl", history],
@@ -151,10 +219,16 @@ function createFixture(options?: {
   return { roster };
 }
 
-function fakeSession(sessionId: string, entries: SessionEntry[], leafId: string) {
+function fakeSession(
+  sessionId: string,
+  entries: SessionEntry[],
+  leafId: string,
+  sessionName: string,
+) {
   const byId = new Map(entries.map((entry) => [entry.id, entry]));
   return {
     sessionId,
+    getSessionName: () => sessionName,
     getBranch(fromId?: string) {
       const branch: SessionEntry[] = [];
       let current = byId.get(fromId ?? leafId);
@@ -188,6 +262,11 @@ function launchEntry(
   childSessionFile: string,
   depth: number,
   parentId: string | null,
+  options?: {
+    title?: string;
+    resumeCommand?: string;
+    timestamp?: string;
+  },
 ) {
   return customEntry(
     id,
@@ -196,23 +275,30 @@ function launchEntry(
       writerSessionId,
       childSessionId,
       childSessionFile,
-      title: childSessionId,
+      title: options?.title ?? childSessionId,
       goal: "Work",
       requestResponse: true,
       cwd: "/repo",
-      resumeCommand: "resume",
+      resumeCommand: options?.resumeCommand ?? "resume",
       depth,
     },
     parentId,
+    options?.timestamp,
   );
 }
 
-function customEntry(id: string, customType: string, data: unknown, parentId: string | null) {
+function customEntry(
+  id: string,
+  customType: string,
+  data: unknown,
+  parentId: string | null,
+  timestamp = "2026-03-25T00:00:00.000Z",
+) {
   return {
     type: "custom" as const,
     id,
     parentId,
-    timestamp: "2026-03-25T00:00:00.000Z",
+    timestamp,
     customType,
     data,
   };

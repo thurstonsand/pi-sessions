@@ -1,5 +1,7 @@
 # 04 — Session handoff autocomplete text search
 
+> **Later refinement:** [Design 18, Phase 9](18-tmux-subagents.md) removes generated `nextTask` metadata and the `handoff_next_task` index field. The submitted handoff goal is the sole task and searchable handoff field.
+
 ## Context
 
 `@session` autocomplete should support two distinct workflows:

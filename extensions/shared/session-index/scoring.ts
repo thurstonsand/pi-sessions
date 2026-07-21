@@ -6,8 +6,7 @@ const RECENCY_HALF_LIFE_DAYS = 21;
 
 const TEXT_SOURCE_WEIGHTS = new Map<string, number>([
   ["session_name", 360],
-  ["handoff_next_task", 300],
-  ["handoff_goal", 260],
+  ["handoff_goal", 300],
   ["user_text", 180],
   ["assistant_text", 150],
   ["bash_command", 140],

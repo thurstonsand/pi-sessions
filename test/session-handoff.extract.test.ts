@@ -43,13 +43,11 @@ describe("session handoff extraction", () => {
       "session-123",
       "/tmp/session.jsonl",
       {
-        title: "Implement handoff command",
         summary: "Relevant context only.",
         relevantFiles: ["src/index.ts", "README.md"],
-        nextTask: "Implement the command.",
         openQuestions: [],
       },
-      "Ignored fallback goal",
+      "Implement the command.",
     );
 
     expect(draft).toContain(
@@ -61,67 +59,71 @@ describe("session handoff extraction", () => {
     expect(draft).not.toContain("## Open Questions");
   });
 
+  it("uses the exact goal as the destination task", () => {
+    const draft = assembleHandoffDraft(
+      "session-123",
+      "/tmp/session.jsonl",
+      {
+        summary: "Parent context relevant to the goal.",
+        relevantFiles: [],
+        openQuestions: [],
+      },
+      "Finish immediately without performing work.",
+    );
+
+    expect(draft).toContain("## Task\nFinish immediately without performing work.");
+  });
+
   it("makes response reporting explicit only when requested", () => {
     const draft = assembleHandoffDraft(
       "session-123",
       "/tmp/session.jsonl",
       {
-        title: "Research related work",
         summary: "Relevant context only.",
         relevantFiles: [],
-        nextTask: "Research unrelated follow-up work.",
         openQuestions: [],
       },
-      "Ignored fallback goal",
+      "Research related work.",
       true,
     );
 
-    expect(draft).toContain(
-      "When this work is complete, send that session a completion report with session_send_message.",
-    );
+    expect(draft).toContain("When this work is complete, send that session a completion report.");
   });
 
   it("extracts and normalizes structured tool-call arguments", () => {
-    const extraction = extractHandoffContext(
-      {
-        role: "assistant",
-        api: "openai-responses",
-        provider: "openai",
-        model: "gpt-5.4",
-        usage: {
-          input: 1,
-          output: 1,
-          cacheRead: 0,
-          cacheWrite: 0,
-          totalTokens: 2,
-          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-        },
-        stopReason: "toolUse",
-        timestamp: 0,
-        content: [
-          {
-            type: "toolCall",
-            id: "call-1",
-            name: "create_handoff_context",
-            arguments: {
-              title: "  Implement handoff command  ",
-              summary: "  Keep this.  ",
-              relevantFiles: [" src/index.ts ", "src/index.ts", "", 1],
-              nextTask: "  Implement the command. ",
-              openQuestions: [" Should tests cover cancel? ", "", null],
-            },
-          },
-        ],
+    const extraction = extractHandoffContext({
+      role: "assistant",
+      api: "openai-responses",
+      provider: "openai",
+      model: "gpt-5.4",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
       },
-      "fallback goal",
-    );
+      stopReason: "toolUse",
+      timestamp: 0,
+      content: [
+        {
+          type: "toolCall",
+          id: "call-1",
+          name: "create_handoff_context",
+          arguments: {
+            summary: "  Keep this.  ",
+            relevantFiles: [" src/index.ts ", "src/index.ts", ""],
+            openQuestions: [" Should tests cover cancel? ", ""],
+          },
+        },
+      ],
+    });
 
     expect(extraction).toEqual({
       context: {
-        title: "Implement handoff command",
         summary: "Keep this.",
         relevantFiles: ["src/index.ts"],
-        nextTask: "Implement the command.",
         openQuestions: ["Should tests cover cancel?"],
       },
     });
@@ -130,10 +132,8 @@ describe("session handoff extraction", () => {
   it("builds a draft from the deep extraction agent", async () => {
     createAgentSessionMock.mockResolvedValue(
       createMockAgentSession({
-        title: "Finish handoff phase 1",
         summary: "The command is partly implemented.",
         relevantFiles: ["extensions/session-handoff.ts"],
-        nextTask: "Finish phase 1 and verify it.",
         openQuestions: ["Should the preview use an overlay?"],
       }),
     );
@@ -145,8 +145,7 @@ describe("session handoff extraction", () => {
     );
 
     expect(result?.sessionId).toBe("session-123");
-    expect(result?.context.title).toBe("Finish handoff phase 1");
-    expect(result?.draft).toContain("## Task\nFinish phase 1 and verify it.");
+    expect(result?.draft).toContain("## Task\nFinish phase 1.");
     expect(result?.draft).toContain("## Relevant Files\n- extensions/session-handoff.ts");
     expect(result?.draft).toContain("## Context\nThe command is partly implemented.");
     expect(result?.draft).toContain("## Open Questions\n- Should the preview use an overlay?");
@@ -160,7 +159,19 @@ describe("session handoff extraction", () => {
       tools: ["read", "grep", "find", "ls", "create_handoff_context"],
     });
     expect(options.customTools).toHaveLength(1);
-    expect(options.resourceLoader.getSystemPrompt()).toBeTypeOf("string");
+    expect(Object.keys(options.customTools[0].parameters.properties)).toEqual([
+      "summary",
+      "relevantFiles",
+      "openQuestions",
+    ]);
+    expect(options.customTools[0].parameters.properties.relevantFiles.maxItems).toBeUndefined();
+    expect(options.customTools[0].parameters.properties.openQuestions.maxItems).toBeUndefined();
+    expect(options.resourceLoader.getSystemPrompt()).toContain(
+      "Do not continue the parent conversation, respond to any questions in it, or carry forward parent tasks",
+    );
+    expect(options.resourceLoader.getSystemPrompt()).toContain(
+      "The parent may be coordinating several parallel sessions. Do not include any references to those other sessions.",
+    );
     expect(options.resourceLoader.getAppendSystemPrompt()).toEqual([]);
   });
 
@@ -176,20 +187,19 @@ describe("session handoff extraction", () => {
       generateHandoffDraft(createGenerationContext(), "Finish phase 1.", "medium"),
     ).rejects.toThrow("Handoff extraction did not return structured context.");
 
-    expect(prompt).toContain("## Source Snapshot\n[User]: Please implement phase 1.");
-    expect(prompt).toContain("## Handoff Goal\nFinish phase 1.");
+    expect(prompt).toContain("<conversation>\n[User]: Please implement phase 1.\n</conversation>");
+    expect(prompt).toContain("<handoff-goal>\nFinish phase 1.\n</handoff-goal>");
     expect(prompt).not.toContain("Call create_handoff_context exactly once.");
   });
 
-  it("clamps generated titles to the parent tool input limit", async () => {
-    const title =
-      "This generated handoff title is intentionally much longer than sixty four characters";
+  it("does not truncate extracted files or questions", async () => {
+    const relevantFiles = Array.from({ length: 20 }, (_, index) => `file-${index}.ts`);
+    const openQuestions = Array.from({ length: 20 }, (_, index) => `Question ${index}?`);
     createAgentSessionMock.mockResolvedValue(
       createMockAgentSession({
-        title,
-        summary: "The command is partly implemented.",
-        relevantFiles: [],
-        nextTask: "Finish phase 1 and verify it.",
+        summary: "Relevant context.",
+        relevantFiles,
+        openQuestions,
       }),
     );
 
@@ -199,7 +209,8 @@ describe("session handoff extraction", () => {
       "medium",
     );
 
-    expect(result?.context.title).toBe([...title].slice(0, 64).join(""));
+    expect(result?.context.relevantFiles).toEqual(relevantFiles);
+    expect(result?.context.openQuestions).toEqual(openQuestions);
   });
 
   it("rejects extraction runs that do not call the structured tool", async () => {
@@ -213,8 +224,8 @@ describe("session handoff extraction", () => {
   it("includes the goal and source snapshot in the extraction prompt", () => {
     const prompt = buildExtractionPrompt("user: hello", "Finish phase 1.");
 
-    expect(prompt).toContain("## Source Snapshot\nuser: hello");
-    expect(prompt).toContain("## Handoff Goal\nFinish phase 1.");
+    expect(prompt).toContain("<conversation>\nuser: hello\n</conversation>");
+    expect(prompt).toContain("<handoff-goal>\nFinish phase 1.\n</handoff-goal>");
   });
 
   it("builds extraction context only from the anchored source branch", async () => {

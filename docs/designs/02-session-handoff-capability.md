@@ -1,6 +1,6 @@
 # Session Handoff Capability Plan
 
-> **Later refinement:** [Design 16](16-pi-0806-session-transcript-modernization.md) replaces this plan's native first-user-message kickoff with a model-visible handoff custom message and separates child kickoff input from parent launch receipts. The generated-draft and review model remains in force.
+> **Later refinement:** [Design 16](16-pi-0806-session-transcript-modernization.md) replaces this plan's native first-user-message kickoff with a model-visible handoff custom message and separates child kickoff input from parent launch receipts. [Design 18, Phase 9](18-tmux-subagents.md) makes the submitted goal the sole destination task, makes `session_handoff` the only launch surface, and retains bare `/handoff` only as the management board.
 
 ## Context
 

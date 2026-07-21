@@ -1,6 +1,10 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
-import { formatModelArgument, resolveModelOverride } from "../extensions/session-handoff/model.ts";
+import {
+  formatModelArgument,
+  parseModelArgument,
+  resolveModelOverride,
+} from "../extensions/session-handoff/model.ts";
 import { createFakeModelRuntime } from "./test-helpers.ts";
 
 const AVAILABLE = [model("openai", "gpt-5.4"), model("anthropic", "claude-sonnet-4-5")];
@@ -23,6 +27,16 @@ describe("handoff model resolution", () => {
 
   it("returns undefined without a model", () => {
     expect(formatModelArgument(undefined, "high")).toBeUndefined();
+  });
+
+  it("separates a persisted thinking suffix from the model identity", () => {
+    expect(parseModelArgument("openai/gpt-5.4:high")).toEqual({
+      model: "openai/gpt-5.4",
+      thinkingLevel: "high",
+    });
+    expect(parseModelArgument("provider/model:release")).toEqual({
+      model: "provider/model:release",
+    });
   });
 
   it("resolves an exact provider/id override", () => {

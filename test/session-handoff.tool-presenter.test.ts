@@ -15,12 +15,17 @@ describe("handoff-tool presenter", () => {
           launch: "deferred",
           title: "Review rendering",
           goal: "Inspect the renderer.",
+          model: "GPT 5.4",
+          thinkingLevel: "high",
           result: {
             sessionId: "child-1",
             title: "Review rendering",
             launch: "deferred",
+            childSessionFile: "/tmp/child-1.jsonl",
             resumeCommand: "pi --session-id child-1",
             model: "openai/gpt-5.4:high",
+            modelName: "GPT 5.4",
+            thinkingLevel: "high",
             cwd: "/repo/app",
           },
         },
@@ -28,7 +33,8 @@ describe("handoff-tool presenter", () => {
       ),
     ).toEqual({
       header: "session_handoff [deferred] Review rendering",
-      expandedMetadata: ["session child-1", "model openai/gpt-5.4:high", "cwd /repo/app"],
+      metadata: ["model GPT 5.4  ·  thinking high"],
+      expandedMetadata: ["session child-1", "cwd /repo/app"],
       body: {
         text: "goal Inspect the renderer.",
         collapsedRows: 1,

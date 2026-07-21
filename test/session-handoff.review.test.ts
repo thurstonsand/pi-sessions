@@ -1,8 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  HandoffPreviewComponent,
-  reviewHandoffDraft,
-} from "../extensions/session-handoff/review.ts";
+import { HandoffPreviewComponent } from "../extensions/session-handoff/review.ts";
 
 describe("session handoff review", () => {
   it("accepts the draft automatically when the timer expires", () => {
@@ -87,42 +84,6 @@ describe("session handoff review", () => {
 
     expect(onDone).toHaveBeenCalledWith("cancel");
     preview.stop();
-  });
-
-  it("returns the edited draft after preview edit mode", async () => {
-    const result = await reviewHandoffDraft(
-      {
-        ui: {
-          async custom() {
-            return "edit";
-          },
-          async editor() {
-            return "Edited draft";
-          },
-        },
-      } as never,
-      "Original draft",
-    );
-
-    expect(result).toBe("Edited draft");
-  });
-
-  it("returns undefined when the review is cancelled", async () => {
-    const result = await reviewHandoffDraft(
-      {
-        ui: {
-          async custom() {
-            return "cancel";
-          },
-          async editor() {
-            throw new Error("editor should not run");
-          },
-        },
-      } as never,
-      "Original draft",
-    );
-
-    expect(result).toBeUndefined();
   });
 });
 

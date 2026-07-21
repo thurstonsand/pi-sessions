@@ -26,12 +26,14 @@ import {
   createSubmitTaskReportTool,
   type SubagentParentSession,
 } from "./report.ts";
+import { renderSubagentReportMessage } from "./report-message-renderer.ts";
 import { openRosterSession, type SubagentRoster, TranscriptSubagentRoster } from "./roster.ts";
 import { SubagentMessageRouter } from "./wake.ts";
 
 const LINGER_POLL_MS = 1_000;
 
 interface ParentSessionState extends SubagentParentSession {
+  getSessionName(): string | undefined;
   launchState: SubagentLaunchState;
   tmuxInstalled: boolean;
   getTree(): SessionTreeNode[];
@@ -61,6 +63,8 @@ export function installSubagents(
   pi: ExtensionAPI,
   deps: { settings: SessionSettings; messaging: MessagingHandle },
 ): SubagentsHandle {
+  pi.registerMessageRenderer(SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE, renderSubagentReportMessage);
+
   let epoch = 0;
   let current: CurrentSubagentSession | undefined;
   let lingerTimer: NodeJS.Timeout | undefined;
@@ -128,7 +132,6 @@ export function installSubagents(
       },
       incoming.delivery,
     );
-    await reconciler.reconcile();
   });
 
   pi.on("before_agent_start", (event) => {
@@ -136,13 +139,10 @@ export function installSubagents(
     if (!child) {
       return;
     }
-    const reportInstructions = child.requestResponse
-      ? " When the task or requested follow-up reaches a terminal state, call submit_task_report exactly once as your final action. Report whether the work is done, blocked, or incomplete, and include enough evidence and context for the parent to act without reconstructing your investigation. Do not use session_send_message for task reports and do not end a turn with ordinary prose alone."
-      : "";
     return {
       systemPrompt: `${event.systemPrompt}
 
-You are working as a subagent on one task delegated by a parent session. The handoff defines your task. Work independently, stay within its scope, and do not duplicate work assigned to the parent or another subagent. Use the available tools to complete the task and validate your conclusions. Messages from the parent may refine the task or request a follow-up, but they do not replace your original task with unrelated work.${reportInstructions}`,
+You are working as a subagent on one task delegated by a parent session. The handoff defines your task. Work independently, stay within its scope, and do not duplicate work assigned to the parent or another subagent. Use the available tools to complete the task and validate your conclusions. Messages from the parent may refine the task or request a follow-up, but they do not replace your original task with unrelated work.`,
     };
   });
 
@@ -206,6 +206,7 @@ You are working as a subagent on one task delegated by a parent session. The han
       const sessionManager = ctx.sessionManager;
       const parent: ParentSessionState = {
         sessionId,
+        getSessionName: () => sessionManager.getSessionName(),
         getBranch: () => sessionManager.getBranch(),
         getTree: () => sessionManager.getTree(),
         isIdle: ctx.isIdle,

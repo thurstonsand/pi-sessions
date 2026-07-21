@@ -57,6 +57,10 @@ export function prepareHandoffLaunch(options: {
   return { sessionId: manager.getSessionId(), sessionFile, resumeCommand };
 }
 
+export function formatHandoffLaunchFailure(error: string, prepared: PreparedHandoff): string {
+  return `${error} Created handoff session ${prepared.sessionId}; start it manually with: ${prepared.resumeCommand}`;
+}
+
 // Pi intentionally defers writing a new session until an assistant response
 // exists, so a prepared child needs one explicit initial flush of the
 // manager-assembled state to be discoverable by `pi --session-id`.

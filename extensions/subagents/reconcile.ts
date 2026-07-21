@@ -324,6 +324,7 @@ export class SubagentReconciler {
     const message: SubagentReportMessage = {
       writerSessionId: parent.sessionId,
       childSessionId: launch.childSessionId,
+      title: launch.title,
       ...report,
       provenance: "recovered",
     };

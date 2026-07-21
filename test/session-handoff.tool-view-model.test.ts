@@ -10,6 +10,7 @@ describe("handoff-tool view model", () => {
         sessionId: "child-1",
         title: "Review rendering",
         launch: "deferred",
+        childSessionFile: "/tmp/child-1.jsonl",
         resumeCommand: "pi --session-id child-1",
         model: "openai/gpt-5.4:high",
       }),
@@ -28,11 +29,15 @@ describe("handoff-tool view model", () => {
         launch: " deferred ",
         title: " Review rendering ",
         goal: " Inspect the renderer. ",
+        model: " openai/gpt-5.4:medium ",
+        thinkingLevel: " high ",
       }),
     ).toEqual({
       launch: "deferred",
       title: "Review rendering",
       goal: "Inspect the renderer.",
+      model: "openai/gpt-5.4",
+      thinkingLevel: "high",
     });
   });
 
@@ -41,13 +46,18 @@ describe("handoff-tool view model", () => {
       sessionId: "child-1",
       title: "Review rendering",
       launch: "deferred" as const,
+      childSessionFile: "/tmp/child-1.jsonl",
       resumeCommand: "pi --session-id child-1",
       model: "openai/gpt-5.4:high",
+      modelName: "GPT 5.4",
+      thinkingLevel: "high" as const,
     };
 
     expect(buildHandoffToolView({}, result)).toEqual({
       launch: "deferred",
       title: "Review rendering",
+      model: "GPT 5.4",
+      thinkingLevel: "high",
       result,
     });
   });

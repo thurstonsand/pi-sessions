@@ -1,10 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createChildGeneratedHandoffBootstrap,
-  createHandoffBootstrap,
-  createHandoffSessionMetadata,
   HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
-  HANDOFF_STALE_SESSION_MESSAGE,
 } from "../extensions/session-handoff/metadata.ts";
 import { createFakeModelRegistry, createFakeModelRuntime } from "./test-helpers.ts";
 
@@ -47,6 +44,11 @@ vi.mock("../extensions/session-handoff/launch/deferred.ts", () => ({
 
 vi.mock("../extensions/session-handoff/spawn.ts", () => ({
   prepareHandoffLaunch: mockPrepareHandoffLaunch,
+  formatHandoffLaunchFailure: (
+    error: string,
+    prepared: { sessionId: string; resumeCommand: string },
+  ) =>
+    `${error} Created handoff session ${prepared.sessionId}; start it manually with: ${prepared.resumeCommand}`,
 }));
 
 beforeEach(() => {
@@ -78,6 +80,7 @@ beforeEach(() => {
   mockCreateDeferredLaunchBackend.mockReturnValue({ launch: mockDeferredLaunch });
   mockPrepareHandoffLaunch.mockImplementation((options: { model?: string }) => ({
     sessionId: "child-session-999",
+    sessionFile: "/tmp/child-session-999.jsonl",
     resumeCommand: `RESUME child-session-999 ${options.model ?? "inherit"}`,
   }));
 });
@@ -94,7 +97,7 @@ describe("session handoff extension", () => {
 
     expect(registerCommand).toHaveBeenCalledWith(
       "handoff",
-      expect.objectContaining({ description: "Transfer context to a new focused session" }),
+      expect.objectContaining({ description: "Open the handoff board" }),
     );
     expect(shortcuts.has("alt+o")).toBe(true);
 
@@ -414,44 +417,6 @@ describe("session handoff extension", () => {
     ).rejects.toThrow('Model "ghost/model" not found. Available models: openai/gpt-5.4.');
   });
 
-  it("materializes handoff metadata and sends the initial prompt on matching child session start", async () => {
-    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
-    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
-    const pi = createPiApi(handlers, new Map(), vi.fn());
-
-    installHandoffAndWire(installHandoff, pi);
-
-    const ctx = createSessionStartContext({
-      sessionId: "child-session-123",
-      entries: [pendingBootstrapEntry()],
-    });
-    await handlers.get("session_start")?.({}, ctx as never);
-
-    expect(pi.appendEntry).toHaveBeenCalledWith(
-      "pi-sessions.handoff",
-      expect.objectContaining({
-        origin: "handoff",
-        goal: "Finish phase 1",
-        nextTask: "Implement autocomplete",
-        title: "Implement autocomplete",
-        initial_prompt: "Approved handoff draft",
-      }),
-    );
-    expect(pi.setSessionName).toHaveBeenCalledWith("Implement autocomplete");
-    expect(pi.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({
-        customType: "pi-sessions.handoff-kickoff",
-        content: "Approved handoff draft",
-        details: expect.objectContaining({
-          title: "Implement autocomplete",
-          source: { sessionId: "parent-session-1", sessionName: "Parent Session" },
-          bootstrapEntryId: "bootstrap-1",
-        }),
-      }),
-      { triggerTurn: true },
-    );
-  });
-
   it("shuts down an automatic child when bootstrap fails before its first turn", async () => {
     const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
@@ -489,75 +454,6 @@ describe("session handoff extension", () => {
     expect(ctx.ui.notify).toHaveBeenCalledWith("bootstrap failed", "error");
     expect(ctx.shutdown).not.toHaveBeenCalled();
   });
-
-  it("refuses bootstrap when the target session already has user input", async () => {
-    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
-    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
-    const pi = createPiApi(handlers, new Map(), vi.fn());
-
-    installHandoffAndWire(installHandoff, pi);
-
-    const ctx = createSessionStartContext({
-      sessionId: "child-session-123",
-      entries: [
-        pendingBootstrapEntry(),
-        {
-          type: "message",
-          id: "user-1",
-          parentId: "bootstrap-1",
-          timestamp: "2026-03-23T00:00:00.000Z",
-          message: {
-            role: "user",
-            content: [{ type: "text", text: "Already typing here." }],
-            timestamp: 1,
-          },
-        },
-      ],
-    });
-    await handlers.get("session_start")?.({}, ctx as never);
-
-    expect(ctx.ui.notify).toHaveBeenCalledWith(HANDOFF_STALE_SESSION_MESSAGE, "error");
-    expect(pi.appendEntry).toHaveBeenCalledWith("pi-sessions.handoff-bootstrap-consumed", {
-      bootstrapEntryId: "bootstrap-1",
-      reason: "stale",
-    });
-    expect(pi.sendMessage).not.toHaveBeenCalled();
-  });
-
-  it("still sends the prompt when metadata already exists but there is no user input", async () => {
-    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
-    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
-    const pi = createPiApi(handlers, new Map(), vi.fn());
-
-    installHandoffAndWire(installHandoff, pi);
-
-    const ctx = createSessionStartContext({
-      sessionId: "child-session-123",
-      entries: [
-        pendingBootstrapEntry(),
-        {
-          type: "custom",
-          id: "custom-1",
-          parentId: "bootstrap-1",
-          timestamp: "2026-03-23T00:00:00.000Z",
-          customType: "pi-sessions.handoff",
-          data: createHandoffSessionMetadata(
-            "Finish phase 1",
-            "Implement autocomplete",
-            "Approved handoff draft",
-            "Implement autocomplete",
-          ),
-        },
-      ],
-    });
-    await handlers.get("session_start")?.({}, ctx as never);
-
-    expect(pi.appendEntry).not.toHaveBeenCalled();
-    expect(pi.sendMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ content: "Approved handoff draft" }),
-      { triggerTurn: true },
-    );
-  });
 });
 
 function installHandoffAndWire(
@@ -575,6 +471,7 @@ function installHandoffAndWire(
         available: modelRegistry.getAvailable(),
       }) as never,
     getLaunchTargets: () => additionalTargets,
+    board: {},
   });
   if (lifecycle.onSessionStart) {
     pi.on("session_start", lifecycle.onSessionStart as never);
@@ -699,26 +596,6 @@ function createToolExecuteContext(options?: { availableModels?: unknown[] }) {
   };
 }
 
-function pendingBootstrapEntry() {
-  return {
-    type: "custom",
-    id: "bootstrap-1",
-    parentId: null,
-    timestamp: "2026-03-23T00:00:00.000Z",
-    customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
-    data: createHandoffBootstrap(
-      "child-session-123",
-      createHandoffSessionMetadata(
-        "Finish phase 1",
-        "Implement autocomplete",
-        "Approved handoff draft",
-        "Implement autocomplete",
-      ),
-      { sessionId: "parent-session-1", sessionName: "Parent Session" },
-    ),
-  };
-}
-
 function pendingGeneratedBootstrapEntry(bootstrapMode: "review" | "automatic") {
   return {
     type: "custom",
@@ -732,6 +609,7 @@ function pendingGeneratedBootstrapEntry(bootstrapMode: "review" | "automatic") {
       title: "Implement autocomplete",
       parentSessionFile: "/tmp/missing-parent.jsonl",
       sourceLeafId: "source-leaf",
+      requestResponse: false,
       bootstrapMode,
     }),
   };

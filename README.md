@@ -8,7 +8,17 @@
 
 ![session picker](images/session_picker.png)
 
-### Handoffs
+### Handoff board
+
+![handoff board showing subagents](images/handoff-board-subagents.png)
+
+![handoff board showing user sessions](images/handoff-board-user-sessions.png)
+
+### Session handoff
+
+![session handoff tool call](images/session-handoff-tool.png)
+
+### Handoff prompt review
 
 ![handoff preview](images/handoff.png)
 
@@ -46,7 +56,7 @@ What session did I implement the db layer?
 ```
 
 ```text
-/handoff i want to implement the frontend component now
+Open the frontend implementation task in a session to the right.
 ```
 
 ## Features
@@ -55,7 +65,7 @@ What session did I implement the db layer?
 | ------------------ | ------------------------------------------------- | ------------------------------------------------------- |
 | Session Search     | `session_search` pi tool                          | Search through old sessions                             |
 | Session Ask        | `session_ask` pi tool                             | Ask questions about old sessions                        |
-| Session Handoff    | `/handoff`, `session_handoff` pi tool             | Start a focused new session; alternative to compaction  |
+| Session Handoff    | `session_handoff` pi tool, `/handoff` board       | Start and manage focused child sessions                 |
 | Session Messaging  | `session_send_message`, `session_cancel` pi tools | Coordinate between live Pi sessions and own subagents   |
 | Session Picker     | `Alt+O`                                           | Reference old sessions in your prompt                   |
 | Session Index      | `/session-index` slash command                    | Shows index status and rebuilds the local session index |
@@ -76,35 +86,11 @@ Use `kind: "user"` or `kind: "subagent"` to filter by session type across the wh
 
 ## Session Handoff
 
-`/handoff <goal>` starts a focused new session. Give pi a goal, and it will generate a prompt for you to review before kicking it off.
+The `session_handoff` tool lets the agent create a child session with a self-contained task. Ask for a direction when you want a visible split, ask for a deferred handoff when you only want the prepared session, or let the agent delegate suitable independent work to a background subagent.
 
-You can start a new session directly in your current one, defer it, or spawn it in a split pane and continue where you are. Split-pane uses tmux if you're inside tmux, or Ghostty if you're using Ghostty on MacOS:
+Directional launches use tmux when the current terminal is inside tmux, or Ghostty on macOS. Deferred launches create the child without starting it and copy its resume command to the clipboard. A background subagent runs in a detached tmux window and reports back when finished.
 
-- `/handoff --left <goal>`
-- `/handoff --right <goal>`
-- `/handoff --up <goal>`
-- `/handoff --down <goal>`
-- `/handoff --deferred <goal>`
-- `/handoff --subagent <goal>`
-
-The direction flags indicate the split direction. `--deferred` creates the child session without launching it and copies its resume command to the clipboard, so it works anywhere. When tmux is installed, `--subagent` starts a detached child automatically for one delegated task.
-
-By default the child inherits the current model and thinking level. Override per handoff with `--model provider/id[:thinking]`:
-
-- `/handoff --model anthropic/claude-sonnet-4-5:high <goal>`
-
-Flow:
-
-- run `/handoff [--<direction>] [--model <provider/id>] <goal>`
-- review the generated prompt preview
-- optionally edit the prompt
-- start the new session
-
-If you do nothing, the preview autostarts after a short countdown.
-
-pi-sessions also exposes a `session_handoff` tool so the agent can fork a background session on its own. Directional and deferred launches use the reviewed handoff flow. When tmux is installed, the agent can instead launch a detached subagent automatically and continue useful work while it runs.
-
-When using Ghostty, if background handoffs ever target the wrong pane, run `/handoff --identify` from the intended source pane to refresh the in-memory terminal binding.
+Run `/handoff` to open the **Handoffs** board. The Subagents and User sessions tabs show status, age, launch details, and the actions currently available: stop, copy an observation command, or copy a resume command.
 
 ## Session Messaging
 

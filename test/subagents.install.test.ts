@@ -3,8 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { installSubagents } from "../extensions/subagents/install.ts";
 import {
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
+  SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
 } from "../extensions/subagents/ledger.ts";
+import { renderSubagentReportMessage } from "../extensions/subagents/report-message-renderer.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-subagent-install-");
@@ -18,6 +20,17 @@ afterEach(() => {
 });
 
 describe("subagent installation", () => {
+  it("registers the report-message renderer", () => {
+    const { pi } = createPi({ tmuxInstalled: true });
+
+    installSubagents(pi as never, createDeps(2));
+
+    expect(pi.registerMessageRenderer).toHaveBeenCalledWith(
+      SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
+      renderSubagentReportMessage,
+    );
+  });
+
   it("offers launch only when tmux exists and durable depth is below the limit", async () => {
     const { pi } = createPi({ tmuxInstalled: true });
     const handle = installSubagents(pi as never, createDeps(2));
@@ -52,21 +65,27 @@ describe("subagent installation", () => {
 
   it("persists an incoming report before making it model-visible", async () => {
     const order: string[] = [];
+    const listSessions = vi.fn(async () => []);
     let receive: ((envelope: unknown) => void) | undefined;
     const { pi } = createPi({ tmuxInstalled: true });
     pi.appendEntry.mockImplementation(() => order.push("receipt"));
     pi.sendMessage.mockImplementation(() => order.push("message"));
     const handle = installSubagents(
       pi as never,
-      createDeps(2, (handler) => {
-        receive = handler;
-      }),
+      createDeps(
+        2,
+        (handler) => {
+          receive = handler;
+        },
+        listSessions,
+      ),
     );
     await handle.onSessionStart?.(
       { type: "session_start", reason: "startup" },
       createContext(parentId, [launchEntry()]) as never,
     );
 
+    listSessions.mockClear();
     receive?.({
       kind: "subagent_report",
       reportId: "report-1",
@@ -78,6 +97,7 @@ describe("subagent installation", () => {
     });
 
     expect(order).toEqual(["receipt", "message"]);
+    expect(listSessions).not.toHaveBeenCalled();
     expect(pi.appendEntry).toHaveBeenCalledWith(
       SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
       expect.objectContaining({ reportId: "report-1", childSessionId: childId }),
@@ -129,7 +149,7 @@ describe("subagent installation", () => {
     expect((result as { systemPrompt: string }).systemPrompt).not.toContain("submit_task_report");
   });
 
-  it("tells response-requested children to submit a task report", async () => {
+  it("does not duplicate report-tool guidance in the subagent system addition", async () => {
     const { pi, handlers } = createPi({ tmuxInstalled: true });
     const handle = installSubagents(pi as never, createDeps(2));
     const ctx = createContext(childId, childEntries(1, true));
@@ -137,9 +157,7 @@ describe("subagent installation", () => {
 
     const result = await handlers.get("before_agent_start")?.({ systemPrompt: "Base prompt" }, ctx);
 
-    expect((result as { systemPrompt: string }).systemPrompt).toContain(
-      "call submit_task_report exactly once as your final action",
-    );
+    expect((result as { systemPrompt: string }).systemPrompt).not.toContain("submit_task_report");
   });
 
   it("exits a settled child immediately when nobody is observing its tmux session", async () => {
@@ -253,6 +271,7 @@ function createPi(options: { tmuxInstalled: boolean; attachedResponses?: boolean
   const attachedResponses = [...(options.attachedResponses ?? [])];
   const pi = {
     registerTool: vi.fn(),
+    registerMessageRenderer: vi.fn(),
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
     on: vi.fn(

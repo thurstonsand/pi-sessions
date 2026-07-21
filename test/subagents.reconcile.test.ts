@@ -33,7 +33,11 @@ describe("subagent reconciliation", () => {
         message: expect.objectContaining({
           customType: SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
           content: expect.stringContaining("Complete."),
-          details: expect.objectContaining({ reportId: "report-1", provenance: "recovered" }),
+          details: expect.objectContaining({
+            reportId: "report-1",
+            title: "Child",
+            provenance: "recovered",
+          }),
         }),
         options: { triggerTurn: true },
       }),

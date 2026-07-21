@@ -381,7 +381,6 @@ describe("session-search hooks", () => {
         data: {
           origin: "handoff",
           goal: "Finish the handoff",
-          nextTask: "Implement autocomplete",
           title: "Implement autocomplete",
           initial_prompt: "Finish the handoff",
         },
@@ -396,14 +395,13 @@ describe("session-search hooks", () => {
     const indexedDb = openIndexDatabase(indexPath, { create: false });
     const childRow = indexedDb
       .prepare(
-        `SELECT parent_session_path as parentSessionPath, parent_session_id as parentSessionId, session_origin as sessionOrigin, handoff_goal as handoffGoal, handoff_next_task as handoffNextTask FROM sessions WHERE session_id = ?`,
+        `SELECT parent_session_path as parentSessionPath, parent_session_id as parentSessionId, session_origin as sessionOrigin, handoff_goal as handoffGoal FROM sessions WHERE session_id = ?`,
       )
       .get("child-session") as {
       parentSessionPath?: string;
       parentSessionId?: string;
       sessionOrigin?: string;
       handoffGoal?: string;
-      handoffNextTask?: string;
     };
     indexedDb.close();
 
@@ -412,7 +410,6 @@ describe("session-search hooks", () => {
       parentSessionId: "parent-session",
       sessionOrigin: "handoff",
       handoffGoal: "Finish the handoff",
-      handoffNextTask: "Implement autocomplete",
     });
   });
 

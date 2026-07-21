@@ -1,6 +1,6 @@
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import { Key, matchesKey } from "@earendil-works/pi-tui";
-import { renderStrongModal } from "./review.ts";
+import { renderStrongModal } from "./strong-modal.ts";
 
 export async function runHandoffTaskWithLoader<T>(
   ctx: { ui: ExtensionUIContext },

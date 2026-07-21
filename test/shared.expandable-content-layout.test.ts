@@ -31,6 +31,25 @@ describe("ExpandableContentLayout", () => {
     expect(rendered).not.toContain("...");
   });
 
+  it("includes hidden metadata in collapsed line counts", () => {
+    const layout = new ExpandableContentLayout(theme);
+    layout.update(
+      {
+        header: "header",
+        metadata: ["model"],
+        expandedMetadata: ["session", "cwd"],
+        body: {
+          text: "goal row one\ngoal row two",
+          collapsedRows: 1,
+          spacingBefore: 0,
+        },
+      },
+      false,
+    );
+
+    expect(layout.render(80).join("\n")).toContain("3 more lines, 5 total");
+  });
+
   it("adds expanded metadata and the complete body", () => {
     const layout = new ExpandableContentLayout(theme);
     layout.update(presentation, true);

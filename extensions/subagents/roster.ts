@@ -9,8 +9,8 @@ import {
   type ChildSubagentLifecycle,
   collectParentLedger,
   getChildSubagentLifecycle,
+  type ParentSubagentLaunch,
   type ParentSubagentLedger,
-  type SubagentLaunched,
 } from "./ledger.ts";
 import type { ReconcileResult } from "./reconcile.ts";
 
@@ -20,12 +20,19 @@ export interface SubagentRosterEntry {
   sessionId: string;
   sessionFile: string;
   ownerSessionId: string;
+  ownerTitle: string;
+  ownerIsCurrentSession: boolean;
   title: string;
   goal: string;
+  model?: string | undefined;
+  cwd: string;
+  resumeCommand: string;
+  launchedAt: string;
   depth: number;
   state: SubagentState;
   onActiveBranch: boolean;
   managedLive: boolean;
+  tmuxWindowId?: string | undefined;
 }
 
 export interface SubagentRosterResult {
@@ -39,6 +46,7 @@ export interface SubagentRoster {
 
 interface RosterSession {
   sessionId: string;
+  getSessionName(): string | undefined;
   getBranch(fromId?: string): readonly SessionEntry[];
   getTree(): readonly SessionTreeNode[];
 }
@@ -56,8 +64,10 @@ interface RosterDependencies {
 }
 
 interface TraversedSubagent {
-  launch: SubagentLaunched;
+  launch: ParentSubagentLaunch;
   ownerSessionId: string;
+  ownerTitle: string;
+  ownerIsCurrentSession: boolean;
   ownerActiveLedger: ParentSubagentLedger;
   onActiveBranch: boolean;
   lifecycle: ChildSubagentLifecycle | undefined;
@@ -79,23 +89,23 @@ export class TranscriptSubagentRoster implements SubagentRoster {
     const ownerSessionIds = [...new Set(traversed.map((child) => child.ownerSessionId))];
     const windowsByOwner = new Map(
       await Promise.all(
-        ownerSessionIds.map(
-          async (ownerSessionId) =>
-            [
-              ownerSessionId,
-              new Set(
-                (await listTmuxWindows(this.deps.executor, tmuxSessionName(ownerSessionId))).map(
-                  (window) => window.piSessionId,
-                ),
-              ),
-            ] as const,
-        ),
+        ownerSessionIds.map(async (ownerSessionId) => {
+          const windows = await listTmuxWindows(
+            this.deps.executor,
+            tmuxSessionName(ownerSessionId),
+          );
+          return [
+            ownerSessionId,
+            new Map(windows.map((window) => [window.piSessionId, window])),
+          ] as const;
+        }),
       ),
     );
 
     const entries = traversed.map((child): SubagentRosterEntry => {
       const childSessionId = child.launch.childSessionId;
-      const hasWindow = windowsByOwner.get(child.ownerSessionId)?.has(childSessionId) ?? false;
+      const window = windowsByOwner.get(child.ownerSessionId)?.get(childSessionId);
+      const hasWindow = window !== undefined;
       const isBrokerLive = brokerLive.has(childSessionId);
       const activeLedger = child.ownerActiveLedger;
       const lifecycle = child.lifecycle;
@@ -115,12 +125,19 @@ export class TranscriptSubagentRoster implements SubagentRoster {
         sessionId: childSessionId,
         sessionFile: child.launch.childSessionFile,
         ownerSessionId: child.ownerSessionId,
+        ownerTitle: child.ownerTitle,
+        ownerIsCurrentSession: child.ownerIsCurrentSession,
         title: child.launch.title,
         goal: child.launch.goal,
+        ...(child.launch.model ? { model: child.launch.model } : {}),
+        cwd: child.launch.cwd,
+        resumeCommand: child.launch.resumeCommand,
+        launchedAt: child.launch.launchedAt,
         depth: child.launch.depth,
         state,
         onActiveBranch: child.onActiveBranch,
         managedLive: hasWindow || isBrokerLive,
+        ...(window ? { tmuxWindowId: window.windowId } : {}),
       };
     });
 
@@ -175,6 +192,8 @@ export class TranscriptSubagentRoster implements SubagentRoster {
         const candidate: TraversedSubagent = {
           launch,
           ownerSessionId: owner.sessionId,
+          ownerTitle: owner.getSessionName()?.trim() || "Untitled session",
+          ownerIsCurrentSession: owner.sessionId === root.sessionId,
           ownerActiveLedger: activeLedger,
           onActiveBranch: activeChildIds.has(launch.childSessionId),
           lifecycle,
@@ -196,16 +215,24 @@ export function openRosterSession(path: string): RosterSession {
   const manager = SessionManager.open(path);
   return {
     sessionId: manager.getSessionId(),
+    getSessionName: () => manager.getSessionName(),
     getBranch: (fromId) => manager.getBranch(fromId),
     getTree: () => manager.getTree(),
   };
 }
 
-function collectTreeLaunches(session: RosterSession, ownerSessionId: string): SubagentLaunched[] {
-  const launches = new Map<string, SubagentLaunched>();
+function collectTreeLaunches(
+  session: RosterSession,
+  ownerSessionId: string,
+): ParentSubagentLaunch[] {
+  const launches = new Map<string, ParentSubagentLaunch>();
   for (const leafId of collectLeafIds(session.getTree())) {
-    for (const launch of collectParentLedger(session.getBranch(leafId), ownerSessionId).launches) {
-      launches.set(launch.childSessionId, launch);
+    const ledger = collectParentLedger(session.getBranch(leafId), ownerSessionId);
+    for (const launch of ledger.launches) {
+      const existing = launches.get(launch.childSessionId);
+      if (!existing || launch.launchedAt > existing.launchedAt) {
+        launches.set(launch.childSessionId, launch);
+      }
     }
   }
   return [...launches.values()];

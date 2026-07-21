@@ -14,7 +14,6 @@ import {
   HANDOFF_STALE_SESSION_MESSAGE,
   type HandoffBootstrapConsumedReason,
   hasStartedConversation,
-  isChildGeneratedHandoffBootstrap,
 } from "./metadata.ts";
 import { reviewHandoffDraftForSend } from "./review.ts";
 import { formatHandoffError, runHandoffTaskWithLoader } from "./ui.ts";
@@ -48,53 +47,14 @@ export async function consumePendingHandoffBootstrap(
     return;
   }
 
-  if (isChildGeneratedHandoffBootstrap(bootstrap)) {
-    await startChildGeneratedHandoff(
-      pi,
-      ctx,
-      bootstrap,
-      scan.entryId,
-      consumeBootstrap,
-      getModelRuntime,
-      thinkingLevel,
-    );
-    return;
-  }
-
-  const entries = ctx.sessionManager.getEntries();
-  if (hasStartedConversation(entries)) {
-    consumeBootstrap("stale");
-    if (ctx.hasUI) {
-      ctx.ui.notify(HANDOFF_STALE_SESSION_MESSAGE, "error");
-    }
-    return;
-  }
-
-  if (!getHandoffMetadataFromEntries(entries)) {
-    pi.appendEntry(
-      HANDOFF_METADATA_CUSTOM_TYPE,
-      createHandoffSessionMetadata(
-        bootstrap.goal,
-        bootstrap.nextTask,
-        bootstrap.initialPrompt,
-        bootstrap.title,
-      ),
-    );
-  }
-
-  if (!ctx.sessionManager.getSessionName()) {
-    pi.setSessionName(bootstrap.title);
-  }
-
-  // The matching kickoff itself is the durable proof of consumption.
-  pi.sendMessage(
-    buildHandoffKickoffMessage({
-      prompt: bootstrap.initialPrompt,
-      title: bootstrap.title,
-      source: bootstrap.source,
-      bootstrapEntryId: scan.entryId,
-    }),
-    { triggerTurn: true },
+  await startChildGeneratedHandoff(
+    pi,
+    ctx,
+    bootstrap,
+    scan.entryId,
+    consumeBootstrap,
+    getModelRuntime,
+    thinkingLevel,
   );
 }
 
@@ -140,7 +100,7 @@ async function startChildGeneratedHandoff(
           bootstrap.goal,
           thinkingLevel,
           signal,
-          bootstrap.requestResponse ?? false,
+          bootstrap.requestResponse,
         ),
     );
     if (!generatedDraft) {
@@ -168,12 +128,7 @@ async function startChildGeneratedHandoff(
 
     // The tool-provided bootstrap title is authoritative; extraction does not
     // replace it with a second generated title.
-    const metadata = createHandoffSessionMetadata(
-      bootstrap.goal,
-      generatedDraft.context.nextTask,
-      prompt,
-      bootstrap.title,
-    );
+    const metadata = createHandoffSessionMetadata(bootstrap.goal, prompt, bootstrap.title);
     if (!getHandoffMetadataFromEntries(ctx.sessionManager.getEntries())) {
       pi.appendEntry(HANDOFF_METADATA_CUSTOM_TYPE, metadata);
     }

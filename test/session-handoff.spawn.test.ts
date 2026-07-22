@@ -7,6 +7,7 @@ import {
   createChildGeneratedHandoffBootstrap,
   findPendingHandoffBootstrap,
   HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+  isSessionStarting,
 } from "../extensions/session-handoff/metadata.ts";
 import {
   buildPiResumeCommand,
@@ -189,6 +190,36 @@ describe("session handoff spawn helpers", () => {
       entryId: "bootstrap-1",
     });
     expect(findPendingHandoffBootstrap([pending, matchingKickoff] as never)).toBeUndefined();
+  });
+
+  it("reports a session as starting only while a well-formed bootstrap is pending", () => {
+    const pending = {
+      type: "custom",
+      id: "bootstrap-1",
+      customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+      data: createBootstrap("child-1"),
+    };
+    const kickoff = {
+      type: "custom_message",
+      id: "kickoff-1",
+      ...buildHandoffKickoffMessage({
+        prompt: "Approved prompt",
+        title: "Implement autocomplete",
+        source: createSource(),
+        bootstrapEntryId: "bootstrap-1",
+      }),
+    };
+    const invalid = {
+      type: "custom",
+      id: "bootstrap-2",
+      customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+      data: { not: "a bootstrap" },
+    };
+
+    expect(isSessionStarting([pending] as never)).toBe(true);
+    expect(isSessionStarting([pending, kickoff] as never)).toBe(false);
+    expect(isSessionStarting([invalid] as never)).toBe(false);
+    expect(isSessionStarting([] as never)).toBe(false);
   });
 
   it("round-trips the pending bootstrap through branch scanning", () => {

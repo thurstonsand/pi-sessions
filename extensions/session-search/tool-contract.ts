@@ -30,12 +30,17 @@ export interface SessionSearchScopeDetails {
   total: number;
 }
 
-export interface AnnotatedSearchResult extends SearchSessionResult {
+export interface StartingSearchResult extends SearchSessionResult {
+  state: "starting";
+}
+
+export interface RelatedSubagentSearchResult extends SearchSessionResult {
   state: SubagentState;
   depth: number;
   onActiveBranch: boolean;
 }
 
+export type AnnotatedSearchResult = StartingSearchResult | RelatedSubagentSearchResult;
 export type SessionSearchResult = SearchSessionResult | AnnotatedSearchResult;
 
 export interface SessionSearchToolDetails {

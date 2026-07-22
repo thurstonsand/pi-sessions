@@ -30,6 +30,7 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
   handoff: Type.Optional(
     Type.Object({
       pickerShortcut: Type.Optional(Type.String()),
+      persistRuns: Type.Optional(Type.Boolean()),
       deferred: Type.Optional(
         Type.Object({
           copyToClipboard: Type.Optional(Type.Boolean()),
@@ -95,6 +96,7 @@ export interface SessionSettings {
   };
   handoff: {
     pickerShortcut: KeyId;
+    persistRuns: boolean;
     deferred: {
       copyToClipboard: boolean;
     };
@@ -119,6 +121,10 @@ export function getDefaultIndexPath(): string {
 
 export function getDefaultSessionAskRunsDir(): string {
   return path.join(getDefaultIndexDir(), "session-ask");
+}
+
+export function getDefaultHandoffRunsDir(): string {
+  return path.join(getDefaultIndexDir(), "session-handoff");
 }
 
 function expandHome(rawPath: string): string {
@@ -210,6 +216,7 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
     },
     handoff: {
       pickerShortcut: normalizePickerShortcut(fileSettings.handoff?.pickerShortcut),
+      persistRuns: fileSettings.handoff?.persistRuns ?? false,
       deferred: {
         copyToClipboard: fileSettings.handoff?.deferred?.copyToClipboard ?? true,
       },

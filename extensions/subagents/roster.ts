@@ -3,6 +3,7 @@ import {
   SessionManager,
   type SessionTreeNode,
 } from "@earendil-works/pi-coding-agent";
+import { isSessionStarting } from "../session-handoff/metadata.ts";
 import { listTmuxWindows, type TmuxExecutor, tmuxSessionName } from "../shared/tmux.ts";
 import { classifySubagent, type SubagentState } from "./classify.ts";
 import {
@@ -71,6 +72,7 @@ interface TraversedSubagent {
   ownerActiveLedger: ParentSubagentLedger;
   onActiveBranch: boolean;
   lifecycle: ChildSubagentLifecycle | undefined;
+  awaitingKickoff: boolean;
 }
 
 export class TranscriptSubagentRoster implements SubagentRoster {
@@ -115,6 +117,7 @@ export class TranscriptSubagentRoster implements SubagentRoster {
           hasWindow,
           brokerLive: isBrokerLive,
           hasRegistered: reconciliation.registered.has(childSessionId),
+          awaitingKickoff: child.awaitingKickoff,
           cancelled: activeLedger.cancelledChildIds.has(childSessionId),
           suspended: activeLedger.suspendedChildIds.has(childSessionId),
           hasReportOrClosure: Boolean(lifecycle?.reports.length || lifecycle?.closed),
@@ -166,6 +169,7 @@ export class TranscriptSubagentRoster implements SubagentRoster {
       for (const launch of launches) {
         let child: RosterSession | undefined;
         let lifecycle: ChildSubagentLifecycle | undefined;
+        let awaitingKickoff = false;
         try {
           if (openedChildren.has(launch.childSessionId)) {
             child = openedChildren.get(launch.childSessionId);
@@ -182,6 +186,7 @@ export class TranscriptSubagentRoster implements SubagentRoster {
             child = undefined;
           } else {
             lifecycle = getChildSubagentLifecycle(childBranch);
+            awaitingKickoff = isSessionStarting(childBranch);
           }
         } catch {
           child = undefined;
@@ -197,6 +202,7 @@ export class TranscriptSubagentRoster implements SubagentRoster {
           ownerActiveLedger: activeLedger,
           onActiveBranch: activeChildIds.has(launch.childSessionId),
           lifecycle,
+          awaitingKickoff,
         };
         if (!existing || candidate.launch.depth < existing.launch.depth) {
           results.set(launch.childSessionId, candidate);

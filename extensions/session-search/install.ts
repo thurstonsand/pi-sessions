@@ -1,17 +1,24 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  type ExtensionAPI,
+  type ExtensionContext,
+  SessionManager,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { isSessionStarting } from "../session-handoff/metadata.ts";
 import type { MessagingHandle } from "../session-messaging/install.ts";
 import type { IndexHandle } from "../shared/composition.ts";
 import { formatError } from "../shared/errors.ts";
 import { stripSearchSnippetMarkers } from "../shared/search-snippet.ts";
 import {
+  getSessionById,
   type SearchSessionsParams,
   type SessionSearchEvidence,
   searchSessions,
   withSessionIndex,
 } from "../shared/session-index/index.ts";
 import type { SessionSettings } from "../shared/settings.ts";
-import type { SubagentRoster, SubagentRosterEntry } from "../subagents/roster.ts";
+import type { SubagentState } from "../subagents/classify.ts";
+import type { SubagentRoster } from "../subagents/roster.ts";
 import { renderSessionSearchResult } from "./renderer.ts";
 import type {
   SessionSearchResult,
@@ -141,16 +148,20 @@ export function installSearch(pi: ExtensionAPI, deps: SearchInstallDeps): void {
         const results = searchSessions(
           db,
           buildSearchParams(params, ctx, scope.includeSessionIds),
-        ).map((result) => {
+        ).map((result): SessionSearchResult => {
           const annotation = scope.annotations.get(result.sessionId);
-          return annotation
-            ? {
-                ...result,
-                state: annotation.state,
-                depth: annotation.depth,
-                onActiveBranch: annotation.onActiveBranch,
-              }
-            : result;
+          if (!annotation) {
+            return result;
+          }
+          if ("depth" in annotation) {
+            return {
+              ...result,
+              state: annotation.state,
+              depth: annotation.depth,
+              onActiveBranch: annotation.onActiveBranch,
+            };
+          }
+          return { ...result, state: annotation.state };
         });
         const details: SessionSearchToolDetails = {
           params,
@@ -198,9 +209,23 @@ function buildSearchParams(
   };
 }
 
+interface StartingSearchResultAnnotation {
+  state: "starting";
+}
+
+interface RelatedSubagentSearchResultAnnotation {
+  state: SubagentState;
+  depth: number;
+  onActiveBranch: boolean;
+}
+
+type SearchResultAnnotation =
+  | StartingSearchResultAnnotation
+  | RelatedSubagentSearchResultAnnotation;
+
 interface ResolvedSearchScope {
   includeSessionIds: string[] | undefined;
-  annotations: ReadonlyMap<string, SubagentRosterEntry>;
+  annotations: ReadonlyMap<string, SearchResultAnnotation>;
   total: number | undefined;
 }
 
@@ -217,9 +242,17 @@ async function resolveSearchScope(
       const entries = params.live
         ? roster.entries.filter((entry) => entry.managedLive)
         : roster.entries;
+      const annotations = new Map<string, SearchResultAnnotation>();
+      for (const entry of roster.entries) {
+        annotations.set(entry.sessionId, {
+          state: entry.state,
+          depth: entry.depth,
+          onActiveBranch: entry.onActiveBranch,
+        });
+      }
       return {
         includeSessionIds: entries.map((entry) => entry.sessionId),
-        annotations: new Map(roster.entries.map((entry) => [entry.sessionId, entry])),
+        annotations,
         total: roster.total,
       };
     } catch (error) {
@@ -227,11 +260,41 @@ async function resolveSearchScope(
     }
   }
 
+  if (!params.live) {
+    return {
+      includeSessionIds: undefined,
+      annotations: new Map(),
+      total: undefined,
+    };
+  }
+
+  const liveSessionIds = await getLiveSessionIds(deps.messaging);
   return {
-    includeSessionIds: params.live ? await getLiveSessionIds(deps.messaging) : undefined,
-    annotations: new Map(),
+    includeSessionIds: liveSessionIds,
+    annotations: getStartingSessionAnnotations(liveSessionIds, deps.index.path),
     total: undefined,
   };
+}
+
+function getStartingSessionAnnotations(
+  sessionIds: readonly string[],
+  indexPath: string,
+): ReadonlyMap<string, SearchResultAnnotation> {
+  return withSessionIndex(indexPath, { mode: "read", required: true }, ({ db }) => {
+    const annotations = new Map<string, SearchResultAnnotation>();
+    for (const sessionId of sessionIds) {
+      const session = getSessionById(db, sessionId);
+      if (!session) {
+        continue;
+      }
+      try {
+        if (isSessionStarting(SessionManager.open(session.sessionPath).getBranch())) {
+          annotations.set(sessionId, { state: "starting" });
+        }
+      } catch {}
+    }
+    return annotations;
+  });
 }
 
 async function getLiveSessionIds(messaging: MessagingHandle | undefined): Promise<string[]> {

@@ -1,6 +1,74 @@
 import { expect, test, vi } from "vitest";
+import { buildHandoffKickoffMessage } from "../extensions/session-handoff/kickoff.ts";
+import {
+  createChildGeneratedHandoffBootstrap,
+  HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+  SESSION_STARTING_MESSAGE,
+} from "../extensions/session-handoff/metadata.ts";
 import { IncomingSessionMessageRuntime } from "../extensions/session-messaging/pi/incoming-runtime.ts";
 import { createSessionCancelTool } from "../extensions/session-messaging/pi/tools.ts";
+
+function pendingBootstrapEntry() {
+  return {
+    type: "custom",
+    id: "bootstrap-1",
+    customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+    data: createChildGeneratedHandoffBootstrap({
+      sessionId: "child-1",
+      goal: "Finish phase 1",
+      title: "Implement autocomplete",
+      parentSessionFile: "/tmp/parent.jsonl",
+      sourceLeafId: "source-leaf",
+      requestResponse: false,
+      bootstrapMode: "review",
+    }),
+  };
+}
+
+function receivedMessage() {
+  return {
+    messageId: "m-1",
+    body: "hello",
+    source: { sessionId: "parent-1" },
+  } as never;
+}
+
+test("delivery is refused while a handoff bootstrap is still pending", () => {
+  const appendEntry = vi.fn();
+  const sendMessage = vi.fn();
+  const runtime = new IncomingSessionMessageRuntime({ appendEntry, sendMessage } as never);
+  runtime.bindContext({
+    sessionManager: { getBranch: () => [pendingBootstrapEntry()] },
+  } as never);
+
+  expect(() => runtime.deliver(receivedMessage())).toThrow(SESSION_STARTING_MESSAGE);
+  expect(appendEntry).not.toHaveBeenCalled();
+  expect(sendMessage).not.toHaveBeenCalled();
+});
+
+test("delivery proceeds once the kickoff has consumed the bootstrap", () => {
+  const appendEntry = vi.fn();
+  const sendMessage = vi.fn();
+  const runtime = new IncomingSessionMessageRuntime({ appendEntry, sendMessage } as never);
+  const kickoff = {
+    type: "custom_message",
+    id: "kickoff-1",
+    ...buildHandoffKickoffMessage({
+      prompt: "Approved prompt",
+      title: "Implement autocomplete",
+      source: { sessionId: "parent-1" },
+      bootstrapEntryId: "bootstrap-1",
+    }),
+  };
+  runtime.bindContext({
+    isIdle: () => true,
+    sessionManager: { getBranch: () => [pendingBootstrapEntry(), kickoff] },
+  } as never);
+
+  runtime.deliver(receivedMessage());
+  expect(appendEntry).toHaveBeenCalledOnce();
+  expect(sendMessage).toHaveBeenCalledOnce();
+});
 
 test("incoming cancellation aborts the target runtime before acceptance", () => {
   const abort = vi.fn();

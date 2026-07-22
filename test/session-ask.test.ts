@@ -4,6 +4,10 @@ import type { ExtensionAPI, ToolDefinition } from "@earendil-works/pi-coding-age
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installAsk } from "../extensions/session-ask/install.ts";
 import {
+  createChildGeneratedHandoffBootstrap,
+  HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+} from "../extensions/session-handoff/metadata.ts";
+import {
   initializeSchema,
   insertSession,
   openIndexDatabase,
@@ -182,6 +186,80 @@ describe("session_ask tool", () => {
       sessionPath,
     });
     expect((result.content[0] as { text: string }).text).toContain("Resolved by exact id.");
+  });
+
+  it("returns before running the agent while the target session is starting", async () => {
+    const agentDir = testFs.createTempDir();
+    const root = testFs.createTempDir();
+    const indexDir = testFs.ensureDir(path.join(root, "index"));
+    const dbPath = path.join(indexDir, "index.sqlite");
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    configureIndexSettings(agentDir, indexDir);
+
+    const sessionId = "bbbbbbbb-1234-1234-1234-123456789abc";
+    const sessionPath = testFs.writeJsonlFile(root, "starting.jsonl", [
+      {
+        type: "session",
+        id: sessionId,
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd: "/repo/app",
+      },
+      {
+        type: "custom",
+        id: "bootstrap-1",
+        parentId: null,
+        timestamp: "2026-03-22T00:00:01.000Z",
+        customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+        data: createChildGeneratedHandoffBootstrap({
+          sessionId,
+          goal: "Continue the mission",
+          title: "Starting child",
+          parentSessionFile: "/tmp/parent.jsonl",
+          sourceLeafId: "parent-leaf",
+          requestResponse: true,
+          bootstrapMode: "automatic",
+        }),
+      },
+    ]);
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    insertSession(
+      db,
+      {
+        sessionId,
+        sessionPath,
+        sessionName: "Starting child",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:00:01.000Z",
+        messageCount: 0,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    db.close();
+
+    const tool = registerSessionAskTool();
+    const result = await tool.execute(
+      "tool-1",
+      { session: sessionId, question: "What happened?" },
+      undefined,
+      undefined,
+      createToolContext(root),
+    );
+
+    expect(runSessionAskAgentMock).not.toHaveBeenCalled();
+    expect((result.content[0] as { text: string }).text).toContain("still starting");
+    expect(result.details).toMatchObject({
+      answer: expect.stringContaining("has not received its kickoff"),
+      relevantFiles: [],
+      sessionId,
+      sessionPath,
+      question: "What happened?",
+    });
   });
 
   it("includes session metadata and question in updates and final output", async () => {

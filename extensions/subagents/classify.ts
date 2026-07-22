@@ -13,6 +13,7 @@ export interface SubagentEvidence {
   hasWindow: boolean;
   brokerLive: boolean;
   hasRegistered: boolean;
+  awaitingKickoff: boolean;
   cancelled: boolean;
   suspended: boolean;
   hasReportOrClosure: boolean;
@@ -25,6 +26,9 @@ export function classifySubagent(evidence: SubagentEvidence): SubagentState {
   }
   if (evidence.hasWindow && evidence.cancelled) {
     return "stopping";
+  }
+  if (evidence.awaitingKickoff) {
+    return "starting";
   }
   if (evidence.hasWindow && !evidence.hasRegistered) {
     return "starting";

@@ -208,7 +208,13 @@ export function installHandoff(
         }),
       );
 
-      await consumePendingHandoffBootstrap(pi, ctx, deps.getModelRuntime, pi.getThinkingLevel());
+      await consumePendingHandoffBootstrap(
+        pi,
+        ctx,
+        deps.getModelRuntime,
+        pi.getThinkingLevel(),
+        settings.handoff.persistRuns,
+      );
     },
   };
 }

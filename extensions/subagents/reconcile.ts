@@ -1,4 +1,5 @@
 import { type SessionEntry, SessionManager } from "@earendil-works/pi-coding-agent";
+import { isSessionStarting } from "../session-handoff/metadata.ts";
 import {
   createTmuxWindow,
   killTmuxSession,
@@ -56,6 +57,7 @@ export interface ReconcileDependencies {
 }
 
 interface ChildLifecycle extends ChildSubagentLifecycle {
+  awaitingKickoff: boolean;
   readable: boolean;
 }
 
@@ -257,6 +259,7 @@ export class SubagentReconciler {
           hasWindow: currentWindowSessionIds.has(child.launch.childSessionId),
           brokerLive: currentLiveSessions.has(child.launch.childSessionId),
           hasRegistered: registered.has(child.launch.childSessionId),
+          awaitingKickoff: child.classification.awaitingKickoff,
         };
         child.state = classifySubagent(child.classification);
       }
@@ -280,6 +283,7 @@ export class SubagentReconciler {
       hasWindow,
       brokerLive,
       hasRegistered,
+      awaitingKickoff: lifecycle.awaitingKickoff,
       cancelled: ledger.cancelledChildIds.has(launch.childSessionId),
       suspended: ledger.suspendedChildIds.has(launch.childSessionId),
       hasReportOrClosure: lifecycle.reports.length > 0 || lifecycle.closed !== undefined,
@@ -295,12 +299,20 @@ export class SubagentReconciler {
 
   private readChildLifecycle(path: string): ChildLifecycle {
     try {
+      const branch = this.deps.openSession(path).getBranch();
       return {
-        ...getChildSubagentLifecycle(this.deps.openSession(path).getBranch()),
+        ...getChildSubagentLifecycle(branch),
+        awaitingKickoff: isSessionStarting(branch),
         readable: true,
       };
     } catch {
-      return { reports: [], closed: undefined, hasReminder: false, readable: false };
+      return {
+        reports: [],
+        closed: undefined,
+        hasReminder: false,
+        awaitingKickoff: false,
+        readable: false,
+      };
     }
   }
 

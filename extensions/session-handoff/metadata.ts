@@ -8,6 +8,8 @@ export const HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE = "pi-sessions.handoff-bootst
 export const HANDOFF_BOOTSTRAP_CONSUMED_CUSTOM_TYPE = "pi-sessions.handoff-bootstrap-consumed";
 export const HANDOFF_STALE_SESSION_MESSAGE =
   "Session handoff failed: target session already has user input.";
+export const SESSION_STARTING_MESSAGE =
+  "Target session is still starting. wait for it to show up in session_search, then resend.";
 
 export const HANDOFF_SESSION_METADATA_SCHEMA = Type.Object({
   origin: Type.Literal("handoff"),
@@ -122,6 +124,16 @@ export function findPendingHandoffBootstrap(
   }
 
   return undefined;
+}
+
+/**
+ * A session is *starting* when its active branch still carries an unconsumed,
+ * well-formed handoff bootstrap: it has been prepared but has not received its
+ * kickoff. An invalid bootstrap does not count — the child consumes it and
+ * proceeds as an ordinary session rather than kicking off a handoff.
+ */
+export function isSessionStarting(branch: readonly SessionEntry[]): boolean {
+  return findPendingHandoffBootstrap(branch)?.kind === "pending";
 }
 
 export function parseHandoffSessionMetadata(value: unknown): HandoffSessionMetadata | undefined {

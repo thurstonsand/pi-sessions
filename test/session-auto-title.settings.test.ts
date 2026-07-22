@@ -30,6 +30,7 @@ describe("pi-sessions auto-title settings", () => {
     expect(settings.autoTitle.model).toBeUndefined();
     expect(settings.autoTitle.prompt).toBe(DEFAULT_AUTO_TITLE_PROMPT);
     expect(settings.ask.persistRuns).toBe(false);
+    expect(settings.handoff.persistRuns).toBe(false);
   });
 
   it("reads explicit auto-title settings from global settings", () => {
@@ -58,6 +59,29 @@ describe("pi-sessions auto-title settings", () => {
     expect(settings.autoTitle.refreshTurns).toBe(6);
     expect(settings.autoTitle.model).toBe("openai/gpt-5.4-mini");
     expect(settings.autoTitle.prompt).toBe("Use terse subsystem titles.");
+  });
+
+  it("reads explicit handoff settings from global settings", () => {
+    const agentDir = testFs.createTempDir();
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+
+    writeFileSync(
+      path.join(agentDir, "settings.json"),
+      `${JSON.stringify(
+        {
+          sessions: {
+            handoff: {
+              persistRuns: true,
+            },
+          },
+        },
+        null,
+        2,
+      )}
+`,
+    );
+
+    expect(loadSettings().handoff.persistRuns).toBe(true);
   });
 
   it("reads explicit ask settings from global settings", () => {

@@ -9,6 +9,10 @@ import {
 import type { TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  createChildGeneratedHandoffBootstrap,
+  HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+} from "../extensions/session-handoff/metadata.ts";
 import { listSessionPickerItems } from "../extensions/session-handoff/query.ts";
 import type { MessagingHandle } from "../extensions/session-messaging/install.ts";
 import { installSearch } from "../extensions/session-search/install.ts";
@@ -411,6 +415,96 @@ describe("session_search tool", () => {
       "live-child",
       "current-session",
     ]);
+  });
+
+  it("annotates a live starting session in model output and the rendered panel", async () => {
+    const agentDir = testFs.createTempDir();
+    const root = testFs.createTempDir();
+    const dir = testFs.createTempDir();
+    process.env.PI_CODING_AGENT_DIR = agentDir;
+    writeFileSync(
+      path.join(agentDir, "settings.json"),
+      `${JSON.stringify({ sessions: { index: { dir } } }, null, 2)}\n`,
+    );
+    const dbPath = path.join(dir, "index.sqlite");
+    const sessionId = "starting-live-session";
+    const sessionPath = testFs.writeJsonlFile(root, "starting-live.jsonl", [
+      {
+        type: "session",
+        id: sessionId,
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd: "/repo/app",
+      },
+      {
+        type: "custom",
+        id: "bootstrap-1",
+        parentId: null,
+        timestamp: "2026-03-22T00:00:01.000Z",
+        customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+        data: createChildGeneratedHandoffBootstrap({
+          sessionId,
+          goal: "Continue the mission",
+          title: "Starting live",
+          parentSessionFile: "/tmp/parent.jsonl",
+          sourceLeafId: "parent-leaf",
+          requestResponse: false,
+          bootstrapMode: "automatic",
+        }),
+      },
+    ]);
+
+    const db = openIndexDatabase(dbPath, { create: true });
+    initializeSchema(db);
+    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
+    insertSession(
+      db,
+      {
+        sessionId,
+        sessionPath,
+        sessionName: "Starting live",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-22T00:00:00.000Z",
+        modifiedAt: "2026-03-22T00:00:01.000Z",
+        messageCount: 0,
+        entryCount: 1,
+      },
+      "full_reindex",
+    );
+    db.close();
+
+    const tool = registerSessionSearchTool({
+      messaging: { listSessions: async () => [sessionId] } as MessagingHandle,
+    });
+    const result = await tool.execute(
+      "tool-1",
+      { live: true },
+      undefined,
+      undefined,
+      createToolContext("/repo"),
+    );
+    const output = JSON.parse((result.content[0] as { text: string }).text) as {
+      results: Array<{ sessionId: string; state?: string }>;
+    };
+    expect(output.results).toMatchObject([{ sessionId, state: "starting" }]);
+    expect(output.results[0]).not.toHaveProperty("depth");
+    expect(output.results[0]).not.toHaveProperty("onActiveBranch");
+
+    const component = new ToolExecutionComponent(
+      tool.name,
+      "tool-1",
+      { live: true },
+      undefined,
+      tool,
+      createFakeTui(),
+      "/repo",
+    );
+    component.updateResult(
+      { content: result.content, details: result.details, isError: false },
+      false,
+    );
+    component.setExpanded(true);
+    expect(stripAnsi(component.render(120).join("\n"))).toContain("[starting]");
   });
 
   it("resolves subagent relations outside the index and reports scope totals", async () => {

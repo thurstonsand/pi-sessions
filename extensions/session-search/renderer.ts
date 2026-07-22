@@ -12,6 +12,7 @@ import {
 import { formatSessionTitleOrShortId } from "../shared/session-ui.ts";
 import type {
   AnnotatedSearchResult,
+  RelatedSubagentSearchResult,
   SessionSearchResult,
   SessionSearchToolDetails,
   SessionSearchToolParams,
@@ -113,10 +114,9 @@ function formatSessionSearchPanelResults(
   const lines = visibleResults.flatMap((result, index) => {
     const location = formatSearchResultLocation(result.cwd);
     const relation = result.relation ? ` ${theme.fg("dim", `[${result.relation}]`)}` : "";
-    const subagent = isAnnotatedSearchResult(result)
-      ? ` ${theme.fg("dim", `[${result.state} • depth ${result.depth}${result.onActiveBranch ? "" : " • history"}]`)}`
-      : "";
-    const heading = `${index + 1}. ${theme.bold(formatSearchResultLabel(result))}${relation}${subagent}${location ? ` ${theme.fg("dim", `(${location})`)}` : ""}`;
+    const annotation = formatSearchResultAnnotation(result);
+    const state = annotation.length > 0 ? ` ${theme.fg("dim", `[${annotation.join(" • ")}]`)}` : "";
+    const heading = `${index + 1}. ${theme.bold(formatSearchResultLabel(result))}${relation}${state}${location ? ` ${theme.fg("dim", `(${location})`)}` : ""}`;
     const snippets = params?.query ? formatSearchSnippets(result).slice(0, 3) : [];
     return snippets.length > 0
       ? [heading, ...snippets.map((snippet) => theme.fg("dim", `  - ${snippet}`))]
@@ -130,8 +130,24 @@ function formatSessionSearchPanelResults(
   return lines;
 }
 
+function formatSearchResultAnnotation(result: SessionSearchResult): string[] {
+  if (!isAnnotatedSearchResult(result)) {
+    return [];
+  }
+  if (!isRelatedSubagentSearchResult(result)) {
+    return [result.state];
+  }
+  return [result.state, `depth ${result.depth}`, ...(result.onActiveBranch ? [] : ["history"])];
+}
+
 function isAnnotatedSearchResult(result: SessionSearchResult): result is AnnotatedSearchResult {
   return "state" in result;
+}
+
+function isRelatedSubagentSearchResult(
+  result: AnnotatedSearchResult,
+): result is RelatedSubagentSearchResult {
+  return "depth" in result;
 }
 
 function formatSearchResultLabel(result: SessionSearchResult): string {

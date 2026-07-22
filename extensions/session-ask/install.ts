@@ -1,5 +1,6 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { isSessionStarting } from "../session-handoff/metadata.ts";
 import type { IndexHandle } from "../shared/composition.ts";
 import type { ModelRuntimeProvider } from "../shared/model-runtime.ts";
 import {
@@ -61,6 +62,34 @@ export function installAsk(
       const resolvedTarget = resolveSessionAskTarget(sessionId, indexPath);
       if (!resolvedTarget.resolved) {
         throw new Error(resolvedTarget.error ?? "Unable to resolve session id.");
+      }
+
+      const startingAnswer = getStartingSessionAnswer(resolvedTarget.resolved.sessionPath);
+      if (startingAnswer) {
+        const details: SessionAskResultDetails = {
+          answer: startingAnswer,
+          relevantFiles: [],
+          sessionId: resolvedTarget.resolved.sessionId,
+          sessionName: resolvedTarget.resolved.sessionName,
+          sessionPath: resolvedTarget.resolved.sessionPath,
+          question,
+        };
+        return {
+          content: [
+            {
+              type: "text",
+              text: [
+                formatSessionAskHeader(
+                  resolvedTarget.resolved.sessionId,
+                  resolvedTarget.resolved.sessionName,
+                  question,
+                ),
+                startingAnswer,
+              ].join("\n\n"),
+            },
+          ],
+          details,
+        };
       }
 
       const progressDetails: SessionAskProgressDetails = {
@@ -133,6 +162,17 @@ export function installAsk(
     },
     renderResult: renderSessionAskResult,
   });
+}
+
+function getStartingSessionAnswer(sessionPath: string): string | undefined {
+  try {
+    if (isSessionStarting(SessionManager.open(sessionPath).getBranch())) {
+      return "This session is still starting: a handoff is in progress and it has not received its kickoff. Retry once the session is no longer starting.";
+    }
+  } catch {
+    // The navigation agent preserves the existing failure behavior for unreadable sessions.
+  }
+  return undefined;
 }
 
 function resolveSessionAskTarget(

@@ -56,7 +56,11 @@ beforeEach(() => {
   vi.clearAllMocks();
 
   mockLoadSettings.mockReturnValue({
-    handoff: { pickerShortcut: "alt+o", deferred: { copyToClipboard: true } },
+    handoff: {
+      pickerShortcut: "alt+o",
+      persistRuns: false,
+      deferred: { copyToClipboard: true },
+    },
     index: { path: "/tmp/pi-sessions/index.sqlite" },
     autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
   });
@@ -139,7 +143,11 @@ describe("session handoff extension", () => {
 
   it("respects a custom picker shortcut", async () => {
     mockLoadSettings.mockReturnValue({
-      handoff: { pickerShortcut: "alt+p" },
+      handoff: {
+        pickerShortcut: "alt+p",
+        persistRuns: false,
+        deferred: { copyToClipboard: true },
+      },
       index: { path: "/tmp/pi-sessions/index.sqlite" },
       autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
     });

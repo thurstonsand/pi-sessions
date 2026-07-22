@@ -23,6 +23,7 @@ export async function consumePendingHandoffBootstrap(
   ctx: ExtensionContext,
   getModelRuntime: ModelRuntimeProvider,
   thinkingLevel: ThinkingLevel | undefined,
+  persistRuns: boolean,
 ): Promise<void> {
   const scan = findPendingHandoffBootstrap(ctx.sessionManager.getBranch());
   if (!scan) {
@@ -55,6 +56,7 @@ export async function consumePendingHandoffBootstrap(
     consumeBootstrap,
     getModelRuntime,
     thinkingLevel,
+    persistRuns,
   );
 }
 
@@ -66,6 +68,7 @@ async function startChildGeneratedHandoff(
   consumeBootstrap: (reason: HandoffBootstrapConsumedReason) => void,
   getModelRuntime: ModelRuntimeProvider,
   thinkingLevel: ThinkingLevel | undefined,
+  persistRuns: boolean,
 ): Promise<void> {
   const entries = ctx.sessionManager.getEntries();
   if (hasStartedConversation(entries)) {
@@ -99,6 +102,7 @@ async function startChildGeneratedHandoff(
           bootstrap.sourceLeafId,
           bootstrap.goal,
           thinkingLevel,
+          persistRuns,
           signal,
           bootstrap.requestResponse,
         ),
@@ -107,6 +111,13 @@ async function startChildGeneratedHandoff(
       consumeBootstrap("cancelled");
       ctx.ui.notify("Cancelled", "info");
       return;
+    }
+
+    if (generatedDraft.debugSessionPath) {
+      ctx.ui.notify(
+        `Handoff extraction session saved to ${generatedDraft.debugSessionPath}`,
+        "info",
+      );
     }
 
     let prompt = generatedDraft.draft;

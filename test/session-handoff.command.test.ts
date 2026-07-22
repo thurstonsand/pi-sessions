@@ -62,7 +62,11 @@ async function installCommand(): Promise<{
 
   installHandoff(pi as never, {
     settings: {
-      handoff: { pickerShortcut: "alt+o", deferred: { copyToClipboard: true } },
+      handoff: {
+        pickerShortcut: "alt+o",
+        persistRuns: false,
+        deferred: { copyToClipboard: true },
+      },
     } as never,
     index: { path: "/tmp/index.sqlite" },
     getModelRuntime: vi.fn(),

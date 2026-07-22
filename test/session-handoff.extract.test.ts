@@ -1,3 +1,4 @@
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assembleHandoffDraft,
@@ -18,6 +19,7 @@ function generateHandoffDraft(
     ctx.sessionManager.getLeafId(),
     goal,
     thinkingLevel,
+    false,
   );
 }
 
@@ -34,6 +36,7 @@ vi.mock("@earendil-works/pi-coding-agent", async () => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   createAgentSessionMock.mockReset();
 });
 
@@ -129,13 +132,17 @@ describe("session handoff extraction", () => {
     });
   });
 
-  it("builds a draft from the deep extraction agent", async () => {
+  it("builds a draft from a single extraction turn", async () => {
+    const onPrompt = vi.fn();
     createAgentSessionMock.mockResolvedValue(
-      createMockAgentSession({
-        summary: "The command is partly implemented.",
-        relevantFiles: ["extensions/session-handoff.ts"],
-        openQuestions: ["Should the preview use an overlay?"],
-      }),
+      createMockAgentSession(
+        {
+          summary: "The command is partly implemented.",
+          relevantFiles: ["extensions/session-handoff.ts"],
+          openQuestions: ["Should the preview use an overlay?"],
+        },
+        onPrompt,
+      ),
     );
 
     const result = await generateHandoffDraft(
@@ -149,6 +156,7 @@ describe("session handoff extraction", () => {
     expect(result?.draft).toContain("## Relevant Files\n- extensions/session-handoff.ts");
     expect(result?.draft).toContain("## Context\nThe command is partly implemented.");
     expect(result?.draft).toContain("## Open Questions\n- Should the preview use an overlay?");
+    expect(onPrompt).toHaveBeenCalledOnce();
 
     const [options] = createAgentSessionMock.mock.calls[0] ?? [];
     expect(options).toMatchObject({
@@ -156,7 +164,7 @@ describe("session handoff extraction", () => {
       model: { provider: "openai", id: "gpt-5.4", reasoning: true },
       modelRuntime: { getModel: expect.any(Function) },
       thinkingLevel: "medium",
-      tools: ["read", "grep", "find", "ls", "create_handoff_context"],
+      tools: ["create_handoff_context"],
     });
     expect(options.customTools).toHaveLength(1);
     expect(Object.keys(options.customTools[0].parameters.properties)).toEqual([
@@ -175,11 +183,11 @@ describe("session handoff extraction", () => {
     expect(options.resourceLoader.getAppendSystemPrompt()).toEqual([]);
   });
 
-  it("passes the serialized conversation and goal to the deep extraction agent", async () => {
-    let prompt = "";
+  it("passes the serialized conversation and goal, then uses the exact backstop prompt", async () => {
+    const prompts: string[] = [];
     createAgentSessionMock.mockResolvedValue(
       createMockAgentSession(undefined, (value) => {
-        prompt = value;
+        prompts.push(value);
       }),
     );
 
@@ -187,9 +195,15 @@ describe("session handoff extraction", () => {
       generateHandoffDraft(createGenerationContext(), "Finish phase 1.", "medium"),
     ).rejects.toThrow("Handoff extraction did not return structured context.");
 
-    expect(prompt).toContain("<conversation>\n[User]: Please implement phase 1.\n</conversation>");
-    expect(prompt).toContain("<handoff-goal>\nFinish phase 1.\n</handoff-goal>");
-    expect(prompt).not.toContain("Call create_handoff_context exactly once.");
+    expect(prompts[0]).toContain(
+      "<conversation>\n[User]: Please implement phase 1.\n</conversation>",
+    );
+    expect(prompts[0]).toContain("<handoff-goal>\nFinish phase 1.\n</handoff-goal>");
+    expect(prompts).toEqual([
+      expect.stringContaining("<handoff-goal>\nFinish phase 1.\n</handoff-goal>"),
+      "You did not call create_handoff_context. Call it exactly once now with the completed briefing.",
+      "You did not call create_handoff_context. Call it exactly once now with the completed briefing.",
+    ]);
   });
 
   it("does not truncate extracted files or questions", async () => {
@@ -213,12 +227,42 @@ describe("session handoff extraction", () => {
     expect(result?.context.openQuestions).toEqual(openQuestions);
   });
 
-  it("rejects extraction runs that do not call the structured tool", async () => {
-    createAgentSessionMock.mockResolvedValue(createMockAgentSession(undefined));
+  it("re-prompts once when the first turn omits the structured tool", async () => {
+    const prompts: string[] = [];
+    createAgentSessionMock.mockResolvedValue(
+      createMockAgentSession(
+        (promptIndex: number) =>
+          promptIndex === 1
+            ? {
+                summary: "Captured on retry.",
+                relevantFiles: [],
+              }
+            : undefined,
+        (prompt) => prompts.push(prompt),
+      ),
+    );
+
+    const result = await generateHandoffDraft(
+      createGenerationContext(),
+      "Finish phase 1.",
+      "medium",
+    );
+
+    expect(result?.context.summary).toBe("Captured on retry.");
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toBe(
+      "You did not call create_handoff_context. Call it exactly once now with the completed briefing.",
+    );
+  });
+
+  it("rejects extraction runs after three turns without the structured tool", async () => {
+    const onPrompt = vi.fn();
+    createAgentSessionMock.mockResolvedValue(createMockAgentSession(undefined, onPrompt));
 
     await expect(
       generateHandoffDraft(createGenerationContext(), "Finish phase 1.", "medium"),
     ).rejects.toThrow("Handoff extraction did not return structured context.");
+    expect(onPrompt).toHaveBeenCalledTimes(3);
   });
 
   it("includes the goal and source snapshot in the extraction prompt", () => {
@@ -232,7 +276,7 @@ describe("session handoff extraction", () => {
     let prompt = "";
     createAgentSessionMock.mockResolvedValue(
       createMockAgentSession(undefined, (value) => {
-        prompt = value;
+        prompt ||= value;
       }),
     );
 
@@ -267,6 +311,7 @@ describe("session handoff extraction", () => {
         "anchor",
         "TARGET GOAL",
         "medium",
+        false,
       ),
     ).rejects.toThrow("Handoff extraction did not return structured context.");
 
@@ -290,25 +335,89 @@ describe("session handoff extraction", () => {
         "missing-anchor",
         "TARGET GOAL",
         "medium",
+        false,
       ),
     ).rejects.toThrow("Handoff source snapshot entry missing-anchor was not found.");
 
     expect(createAgentSessionMock).not.toHaveBeenCalled();
   });
+
+  it("keeps extraction runs in memory when persistence is disabled", async () => {
+    const inMemoryManager = { getSessionFile: vi.fn() };
+    const inMemorySpy = vi
+      .spyOn(SessionManager, "inMemory")
+      .mockReturnValue(inMemoryManager as never);
+    const createSpy = vi.spyOn(SessionManager, "create");
+    createAgentSessionMock.mockResolvedValue(
+      createMockAgentSession({ summary: "In memory.", relevantFiles: [] }),
+    );
+
+    const result = await generateHandoffDraft(
+      createGenerationContext(),
+      "Finish phase 1.",
+      "medium",
+    );
+
+    expect(inMemorySpy).toHaveBeenCalledWith("/tmp/project");
+    expect(createSpy).not.toHaveBeenCalled();
+    expect(inMemoryManager.getSessionFile).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty("debugSessionPath");
+  });
+
+  it("persists extraction runs and returns their session path when enabled", async () => {
+    const persistedManager = {
+      getSessionFile: vi.fn(() => "/tmp/handoff-runs/extraction.jsonl"),
+    };
+    const createSpy = vi.spyOn(SessionManager, "create").mockReturnValue(persistedManager as never);
+    const inMemorySpy = vi.spyOn(SessionManager, "inMemory");
+    createAgentSessionMock.mockResolvedValue(
+      createMockAgentSession({ summary: "Persisted.", relevantFiles: [] }),
+    );
+    const ctx = createGenerationContext();
+    const sourceSessionManager = createSourceSessionManager(
+      [messageEntry("user-1", null, "user", "Please implement phase 1.")],
+      "user-1",
+    );
+
+    const result = await generateHandoffDraftFromSessionManager(
+      ctx,
+      createModelRuntime(),
+      sourceSessionManager as never,
+      "user-1",
+      "Finish phase 1.",
+      "medium",
+      true,
+    );
+
+    expect(createSpy).toHaveBeenCalledWith(
+      "/tmp/project",
+      expect.stringMatching(/pi-sessions\/session-handoff$/),
+    );
+    expect(inMemorySpy).not.toHaveBeenCalled();
+    expect(result?.debugSessionPath).toBe("/tmp/handoff-runs/extraction.jsonl");
+  });
 });
 
-function createMockAgentSession(toolArguments: unknown, onPrompt?: (prompt: string) => void) {
+function createMockAgentSession(
+  toolArguments: unknown | ((promptIndex: number) => unknown),
+  onPrompt?: (prompt: string) => void,
+) {
+  let promptIndex = 0;
   return {
     session: {
       async prompt(prompt: string) {
         onPrompt?.(prompt);
-        if (!toolArguments) {
+        const currentPromptIndex = promptIndex;
+        promptIndex += 1;
+        const resolvedArguments =
+          typeof toolArguments === "function" ? toolArguments(currentPromptIndex) : toolArguments;
+        if (!resolvedArguments) {
           return;
         }
 
         const [options] = createAgentSessionMock.mock.calls.at(-1) ?? [];
         const [tool] = options.customTools;
-        await tool.execute("call-1", toolArguments);
+        await tool.execute("call-1", resolvedArguments);
       },
       async abort() {},
       dispose() {},

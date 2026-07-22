@@ -24,7 +24,12 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { freshenModel } from "../shared/model-runtime.ts";
+import { getDefaultHandoffRunsDir } from "../shared/settings.ts";
 import { parseTypeBoxValue } from "../shared/typebox.ts";
+
+const MAX_HANDOFF_EXTRACTION_ATTEMPTS = 3;
+const HANDOFF_EXTRACTION_RETRY_PROMPT =
+  "You did not call create_handoff_context. Call it exactly once now with the completed briefing.";
 
 const HANDOFF_SYSTEM_PROMPT = `You extract supporting context for a deliberate session handoff. You are preparing a briefing for a new destination session from a snapshot of its ongoing parent session.
 
@@ -63,6 +68,7 @@ export interface HandoffDraftResult {
   context: HandoffContext;
   sessionId: string;
   sessionPath?: string | undefined;
+  debugSessionPath?: string | undefined;
 }
 
 /** Validate an anchored source branch and return its built context. Throws a user-facing Error otherwise. */
@@ -89,6 +95,7 @@ export async function generateHandoffDraftFromSessionManager(
   sourceLeafId: string,
   goal: string,
   thinkingLevel: ThinkingLevel | undefined,
+  persistRuns: boolean,
   signal?: AbortSignal,
   requestResponse = false,
 ): Promise<HandoffDraftResult | undefined> {
@@ -107,6 +114,7 @@ export async function generateHandoffDraftFromSessionManager(
     conversationText,
     goal,
     thinkingLevel,
+    persistRuns,
     signal,
   );
   if (!handoffContext) {
@@ -117,10 +125,19 @@ export async function generateHandoffDraftFromSessionManager(
   const sessionPath = sourceSessionManager.getSessionFile();
 
   return {
-    draft: assembleHandoffDraft(sessionId, sessionPath, handoffContext, goal, requestResponse),
-    context: handoffContext,
+    draft: assembleHandoffDraft(
+      sessionId,
+      sessionPath,
+      handoffContext.context,
+      goal,
+      requestResponse,
+    ),
+    context: handoffContext.context,
     sessionId,
     sessionPath,
+    ...(handoffContext.debugSessionPath
+      ? { debugSessionPath: handoffContext.debugSessionPath }
+      : {}),
   };
 }
 
@@ -143,15 +160,16 @@ async function runHandoffExtractionAgent(
   conversationText: string,
   goal: string,
   thinkingLevel: ThinkingLevel | undefined,
+  persistRuns: boolean,
   signal?: AbortSignal,
-): Promise<HandoffContext | undefined> {
+): Promise<{ context: HandoffContext; debugSessionPath?: string | undefined } | undefined> {
   let capturedArguments: HandoffExtractionArgs | undefined;
   // Pi does not inject promptSnippet or promptGuidelines when a custom system prompt is active.
   const createHandoffContextTool = defineTool({
     name: "create_handoff_context",
     label: "Create handoff context",
     description:
-      "Submit the completed structured briefing for the destination session. You must call this tool to complete extraction. Calling it ends the extraction run, so finish any workspace exploration first.",
+      "Submit the completed structured briefing for the destination session. Call this tool exactly once to complete extraction.",
     parameters: HANDOFF_EXTRACTION_PARAMETERS,
     execute: async (_toolCallId, params) => {
       capturedArguments = params;
@@ -173,15 +191,19 @@ async function runHandoffExtractionAgent(
   });
   await resourceLoader.reload();
 
+  const sessionManager = persistRuns
+    ? SessionManager.create(ctx.cwd, getDefaultHandoffRunsDir())
+    : SessionManager.inMemory(ctx.cwd);
+  const debugSessionPath = persistRuns ? sessionManager.getSessionFile() : undefined;
   const { session } = await createAgentSession({
     cwd: ctx.cwd,
     model,
     modelRuntime,
     ...(thinkingLevel ? { thinkingLevel } : {}),
-    tools: ["read", "grep", "find", "ls", "create_handoff_context"],
+    tools: ["create_handoff_context"],
     customTools: [createHandoffContextTool],
     resourceLoader,
-    sessionManager: SessionManager.inMemory(ctx.cwd),
+    sessionManager,
   });
 
   const abortHandler = (): void => {
@@ -195,7 +217,19 @@ async function runHandoffExtractionAgent(
       return undefined;
     }
 
-    await session.prompt(buildExtractionPrompt(conversationText, goal));
+    for (let attempt = 1; attempt <= MAX_HANDOFF_EXTRACTION_ATTEMPTS; attempt += 1) {
+      if (signal?.aborted) {
+        break;
+      }
+      await session.prompt(
+        attempt === 1
+          ? buildExtractionPrompt(conversationText, goal)
+          : HANDOFF_EXTRACTION_RETRY_PROMPT,
+      );
+      if (capturedArguments) {
+        break;
+      }
+    }
   } finally {
     signal?.removeEventListener("abort", abortHandler);
     session.dispose();
@@ -214,7 +248,10 @@ async function runHandoffExtractionAgent(
     throw new Error(extraction.error);
   }
 
-  return extraction.context;
+  return {
+    context: extraction.context,
+    ...(debugSessionPath ? { debugSessionPath } : {}),
+  };
 }
 
 export function assembleHandoffDraft(

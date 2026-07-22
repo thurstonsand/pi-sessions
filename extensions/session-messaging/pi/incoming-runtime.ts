@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { isSessionStarting, SESSION_STARTING_MESSAGE } from "../../session-handoff/metadata.ts";
 import { safeParseTypeBoxValue } from "../../shared/typebox.ts";
 import { RECEIVED_MESSAGE_ENTRY_SCHEMA, type ReceivedMessageEntry } from "./message-contracts.ts";
 
@@ -39,6 +40,12 @@ export class IncomingSessionMessageRuntime {
 
   deliver(received: ReceivedMessageEntry): void {
     const ctx = this.requireContext();
+    // A starting session is broker-reachable but has not consumed its handoff
+    // kickoff. Injecting here would land the message before the kickoff and
+    // break the first-message invariant, so refuse delivery until it kicks off.
+    if (isSessionStarting(ctx.sessionManager.getBranch())) {
+      throw new Error(SESSION_STARTING_MESSAGE);
+    }
     this.actions.appendEntry(MESSAGE_RECEIVED_CUSTOM_TYPE, received);
     this.inject(ctx, received);
   }

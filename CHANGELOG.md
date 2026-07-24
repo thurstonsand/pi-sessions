@@ -1,26 +1,33 @@
 # Changelog
 
-## [Unreleased]
+<!-- markdownlint-disable MD024 -->
+
+## [0.9.0] - 2026-07-23
+
+- **Background subagents** - Delegate work to detached tmux sessions with durable reports, follow-up messaging, cancellation, wake and recovery behavior, and lifecycle management from the handoff board.
 
 ### Added
 
-- Added support for the Pi 0.80.6 `max` thinking level across handoff, session_ask, and auto-title settings.
-- Added a required `title` parameter and live streaming call rendering to `session_handoff`.
-- Added durable handoff launch receipts for deferred, tmux split, and Ghostty split launches.
-- Added a compact renderer for durable sent session-message receipts.
-- Added `session_cancel` for aborting another live Pi session's current turn.
-- Added detached tmux subagents with durable task reports, wake-on-message, cancellation, suspend/restore, and report recovery.
-- Added `kind` and `relationScope` filters to `session_search` for global session-type filtering and branch- or tree-scoped subagent recall.
-- Added auto-title `thinkingLevel` passthrough; an explicit setting overrides a thinking suffix on the configured model.
+- Added detached tmux subagents that report results to their parent, wake when messaged, recover missed reports, and can be cancelled or resumed after interruption.
+- Added the `/handoff` board for inspecting and managing subagents and user-created child sessions.
+- Added `session_cancel` for aborting another live session or stopping an owned subagent.
+- Added `kind` and `relationScope` filters to `session_search` for finding user sessions or subagents globally, within the current branch, or across the session tree.
+- Added model, thinking-level, and launch targeting to `session_handoff`, including deferred, tmux split, Ghostty split, and background subagent launches.
+- Added durable handoff launch receipts, sent-message receipts, and model-visible handoff kickoff records.
+- Added support for Pi's `max` thinking level and configurable auto-title thinking levels.
 
 ### Changed
 
-- Renamed the `detached` launch value and flag to `deferred` (`/handoff --deferred`, `sessions.handoff.deferred.copyToClipboard`).
-- Handoff kickoffs are now model-visible custom messages with a semantic card instead of impersonated user messages.
-- Handoff bootstrap state moved from `PI_SESSIONS_HANDOFF_BOOTSTRAP` into a pending entry in the child session file, consumed append-only.
-- Cross-cwd handoff children are stored in the target project's default session directory; resume commands are self-locating and include `--session-dir` only for nondefault directories.
-- Model selection for handoff, session_ask, and auto-title now uses Pi's `resolveCliModel`, narrowed to authenticated available models.
-- `session_ask` cancellation now coordinates and awaits nested abort before disposal.
+- Changed `/handoff` to open the management board; launch new sessions through `session_handoff` instead.
+- Renamed the `detached` launch target and related settings to `deferred`; use `launch: "deferred"` and `sessions.handoff.deferred.copyToClipboard`.
+- Moved feature toggles from `sessions.features.<name>` to `sessions.<name>.enable`.
+- Raised the minimum supported Pi version to `0.80.10` and consolidated package loading behind one composition-root extension; package users do not need to change their installation.
+- Changed the session index schema to version 13; rebuild the index with `/session-index` after upgrading.
+
+### Fixed
+
+- Fixed `session_ask` cancellation leaving its nested agent running after the outer request was aborted.
+- Fixed handoff children created for another working directory to use that project's default session directory, producing self-locating resume commands.
 
 ## [0.8.0] - 2026-07-08
 

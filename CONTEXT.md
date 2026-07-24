@@ -17,5 +17,6 @@
 - **Launch backend**: A pluggable mechanism that gets a created handoff session running: a tmux split, Ghostty split, or deferred delivery. All backends consume the resume command.
 - **Background handoff**: A handoff launched through a launch backend while the current session keeps running.
 - **Deferred handoff**: A handoff that creates the child session without launching it; the resume command is returned (and copied to the clipboard) for the user to run anywhere.
-- **Subagent handoff**: A child session created by a handoff for one delegated background task. It runs in a detached tmux window while busy and exists only as a session file while dormant.
+- **Subagent**: A child session created by a handoff for one delegated background task. It is **busy** while a stamped tmux window exists and **dormant** when no process runs and only the session file remains.
+- **Ledger**: Writer-scoped lifecycle entries in the parent's session file (launched, cancelled, suspended, closed, report-received). The desired set of running subagents is reconstructed by walking the active branch back from the current leaf.
 - **Auto-title**: A generated session name based on the session conversation, refreshed over time unless the user manually renames the session.

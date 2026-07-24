@@ -21,6 +21,7 @@ function pendingBootstrapEntry() {
       sourceLeafId: "source-leaf",
       requestResponse: false,
       bootstrapMode: "review",
+      launch: "deferred",
     }),
   };
 }

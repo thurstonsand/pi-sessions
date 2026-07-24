@@ -212,6 +212,7 @@ describe("session_ask tool", () => {
         customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
         data: createChildGeneratedHandoffBootstrap({
           sessionId,
+          launch: "deferred",
           goal: "Continue the mission",
           title: "Starting child",
           parentSessionFile: "/tmp/parent.jsonl",

@@ -23,7 +23,7 @@ export function buildHandoffToolPresentation(
       theme.bold(model.title ?? PENDING),
     ].join(" "),
     metadata: [
-      `${theme.fg("muted", "model")} ${model.model ?? PENDING}  ${theme.fg("dim", "·")}  ${theme.fg("muted", "thinking")} ${model.thinkingLevel ?? PENDING}`,
+      `${theme.fg("muted", "provider")} ${model.provider ?? PENDING}  ${theme.fg("dim", "·")}  ${theme.fg("muted", "model")} ${model.model ?? PENDING}  ${theme.fg("dim", "·")}  ${theme.fg("muted", "thinking")} ${model.thinkingLevel ?? PENDING}`,
     ],
     ...(expandedMetadata.length > 0 ? { expandedMetadata } : {}),
     body: {

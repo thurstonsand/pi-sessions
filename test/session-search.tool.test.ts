@@ -449,6 +449,7 @@ describe("session_search tool", () => {
           sourceLeafId: "parent-leaf",
           requestResponse: false,
           bootstrapMode: "automatic",
+          launch: "deferred",
         }),
       },
     ]);

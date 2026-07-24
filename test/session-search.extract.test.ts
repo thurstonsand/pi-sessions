@@ -235,6 +235,7 @@ describe("extractSessionRecord", () => {
           goal: "Continue phase 3",
           title: "Implement autocomplete",
           initial_prompt: "Continue phase 3",
+          launch: "deferred",
         },
       },
     ]);

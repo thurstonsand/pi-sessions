@@ -161,6 +161,7 @@ describe("rebuildSessionIndex", () => {
           goal: "Finish the split",
           title: "Implement autocomplete",
           initial_prompt: "Finish the split",
+          launch: "deferred",
         },
       },
     ]);

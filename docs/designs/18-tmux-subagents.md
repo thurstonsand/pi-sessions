@@ -83,7 +83,7 @@ The root also owns lifecycle ordering: it subscribes to `session_start`/`session
 
 Which tool registrations happen is a root decision: with subagents enabled, the composite `session_send_message` (wake-on-send) and `session_cancel` (ownership dispatch) register instead of messaging's plain variants, and they call _down_ into the messaging handle. No upward calls exist anywhere.
 
-Settings move under `sessions.features` (booleans, default on) and `sessions.subagents` (`maxDepth`, default 2, user-settable).
+Each feature is toggled by an `enable` flag under its own `sessions.<feature>` namespace (default on), alongside its other settings (for example `sessions.subagents.enable` beside `sessions.subagents.maxDepth`, default 2).
 
 ### `session_handoff` tool
 
@@ -386,7 +386,7 @@ Every phase is independently shippable: `npm run check` green, no half-finished 
   - Future: Enter on a subagent row should open a nested live-activity modal. This needs a bounded observation stream or terminal snapshot contract; the current board has presence and commands, not live child output.
   - Validation: Component tests; terminal-control iteration against `docs/designs/18-tmux-subagents/` captures as the acceptance target.
 
-- [ ] Phase 10: Documentation and end-to-end evidence
+- [x] Phase 10: Documentation and end-to-end evidence
   - Goal: Docs match shipped behavior; the whole system demonstrated.
   - Files: `README.md`, `CHANGELOG.md`, `CONTEXT.md` (vocabulary from Exposed Shape), `DEV.md` project structure, and this doc's checkboxes.
   - Work: update-docs pass; scripted end-to-end: fan out two subagents, steer one, observe via attach, quit mid-work, resume, watch suspended restore + report recovery + reminder, follow-up on a completed child, cancel the other, verify the board reflects every state.

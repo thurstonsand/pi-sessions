@@ -1,5 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { HandoffLaunchTarget } from "../session-handoff/launch-target.ts";
+import { type HandoffLaunchTarget, SUBAGENT_LAUNCH } from "../session-handoff/launch-target.ts";
 import { formatError } from "../shared/errors.ts";
 import { createTmuxWindow, tmuxSessionName } from "../shared/tmux.ts";
 import { SUBAGENT_LAUNCHED_CUSTOM_TYPE, type SubagentLaunched } from "./ledger.ts";
@@ -16,11 +16,19 @@ export function createSubagentLaunchTarget(
   isCurrent: (epoch: number) => boolean,
 ): HandoffLaunchTarget {
   return {
-    value: "subagent",
+    value: SUBAGENT_LAUNCH,
     description:
       "'subagent' delegates one task to a detached tmux worker and requests a report by default.",
     requestResponseDefault: true,
     bootstrapMode: "automatic",
+    describeSubagentChild(input) {
+      return {
+        childSessionId: input.childSessionId,
+        ownerSessionId: input.ownerSessionId,
+        depth: state.depth + 1,
+        requestResponse: input.requestResponse,
+      };
+    },
     prepareChild(input) {
       requireCurrentParent(state, input.parentSessionId, isCurrent);
     },

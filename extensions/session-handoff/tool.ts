@@ -28,6 +28,7 @@ export interface HandoffToolParams {
   launch: HandoffLaunchValue;
   cwd?: string | undefined;
   requestResponse?: boolean | undefined;
+  provider?: string | undefined;
   model?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
 }
@@ -82,9 +83,15 @@ export async function executeSessionHandoffTool(
   resolveHandoffSource(ctx.sessionManager, sourceLeafId);
 
   const requestResponse = params.requestResponse ?? target.requestResponseDefault;
-  const override = params.model
-    ? resolveModelOverride(modelRuntime, params.model, params.thinkingLevel)
-    : undefined;
+  const provider = params.provider?.trim();
+  const modelId = params.model?.trim();
+  if (Boolean(provider) !== Boolean(modelId)) {
+    throw new Error("session_handoff requires provider and model together, or neither.");
+  }
+  const override =
+    provider && modelId
+      ? resolveModelOverride(modelRuntime, `${provider}/${modelId}`, params.thinkingLevel)
+      : undefined;
   const childModel = override?.model ?? ctx.model;
   const thinkingLevel = override?.thinkingLevel ?? params.thinkingLevel ?? pi.getThinkingLevel();
   const model = formatModelArgument(childModel, thinkingLevel);
@@ -107,6 +114,12 @@ export async function executeSessionHandoffTool(
         sourceLeafId,
         requestResponse,
         bootstrapMode: target.bootstrapMode,
+        launch: target.value,
+        subagent: target.describeSubagentChild?.({
+          childSessionId: sessionId,
+          ownerSessionId: ctx.sessionManager.getSessionId(),
+          requestResponse,
+        }),
       }),
     prepareChild: (manager, childSessionId) =>
       target.prepareChild({
@@ -145,6 +158,7 @@ export async function executeSessionHandoffTool(
       targetCwd: targetCwd.path,
       parentCwd: ctx.cwd,
       childModel: model,
+      childProvider: childModel.provider,
       childModelName: childModel.name || childModel.id,
       thinkingLevel,
     }),

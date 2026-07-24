@@ -183,7 +183,7 @@ describe("session handoff extension", () => {
     expect(pasteToEditor).not.toHaveBeenCalled();
   });
 
-  it("re-registers the tool with available models in the model description on session start", async () => {
+  it("re-registers the tool with available models in the prompt guidelines on session start", async () => {
     const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
@@ -200,12 +200,10 @@ describe("session handoff extension", () => {
     await handlers.get("session_start")?.({}, ctx as never);
 
     const registerTool = pi.registerTool as ReturnType<typeof vi.fn>;
-    const lastDefinition = registerTool.mock.calls.at(-1)?.[0] as {
-      parameters: { properties: { model: { description: string } } };
-    };
-    const modelDescription = lastDefinition.parameters.properties.model.description;
-    expect(modelDescription).toContain("openai/gpt-5.4");
-    expect(modelDescription).toContain("anthropic/claude-sonnet-4-5");
+    const lastDefinition = registerTool.mock.calls.at(-1)?.[0];
+    const guidelines = promptGuidelines(lastDefinition).join("\n");
+    expect(guidelines).toContain("openai/gpt-5.4");
+    expect(guidelines).toContain("anthropic/claude-sonnet-4-5");
   });
 
   it("registers only at session start, adding split directions when Ghostty is present", async () => {
@@ -262,6 +260,9 @@ describe("session handoff extension", () => {
     expect(launchValues(definition)).toEqual(["deferred"]);
     expect(promptGuidelines(definition)).toEqual([
       "Use session_handoff directional or deferred launches only when the user requests one.",
+      "Leave provider and model unset to run the handoff on this session's current model.",
+      "To run the handoff on a different model, set both provider and model together (both are required).",
+      "Only override the model when the task clearly warrants it.",
     ]);
   });
 
@@ -272,6 +273,16 @@ describe("session handoff extension", () => {
       description: "Detached subagent launch.",
       requestResponseDefault: true,
       bootstrapMode: "automatic" as const,
+      describeSubagentChild: (input: {
+        childSessionId: string;
+        ownerSessionId: string;
+        requestResponse: boolean;
+      }) => ({
+        childSessionId: input.childSessionId,
+        ownerSessionId: input.ownerSessionId,
+        depth: 1,
+        requestResponse: input.requestResponse,
+      }),
       prepareChild: vi.fn(),
       launch,
     };
@@ -293,11 +304,19 @@ describe("session handoff extension", () => {
     );
     expect(launch).toHaveBeenCalledWith(expect.objectContaining({ requestResponse: true }));
     const preparation = mockPrepareHandoffLaunch.mock.calls.at(-1)?.[0] as {
-      buildBootstrap: (sessionId: string) => unknown;
+      buildBootstrap: (sessionId: string) => { launch: string; subagent: unknown };
     };
-    expect(preparation.buildBootstrap("child-session-999")).toMatchObject({
+    const bootstrap = preparation.buildBootstrap("child-session-999");
+    expect(bootstrap).toMatchObject({
       requestResponse: true,
       bootstrapMode: "automatic",
+      launch: "subagent",
+    });
+    expect(bootstrap.subagent).toEqual({
+      childSessionId: "child-session-999",
+      ownerSessionId: "tool-session",
+      depth: 1,
+      requestResponse: true,
     });
     expect(result.details).toMatchObject({ launch: "subagent", backend: "tmux" });
     expect(result.content[0]?.text).toContain('"requestResponse": true');
@@ -419,10 +438,41 @@ describe("session handoff extension", () => {
       runTool(
         pi,
         handlers,
-        { goal: "Do it", title: "Do it now", launch: "deferred", model: "ghost/model" },
+        {
+          goal: "Do it",
+          title: "Do it now",
+          launch: "deferred",
+          provider: "ghost",
+          model: "model",
+        },
         { availableModels: [{ provider: "openai", id: "gpt-5.4" }] },
       ),
     ).rejects.toThrow('Model "ghost/model" not found. Available models: openai/gpt-5.4.');
+  });
+
+  it("rejects a provider without a model and a model without a provider", async () => {
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi);
+
+    await expect(
+      runTool(pi, handlers, {
+        goal: "Do it",
+        title: "Do it now",
+        launch: "deferred",
+        provider: "openai",
+      }),
+    ).rejects.toThrow("session_handoff requires provider and model together, or neither.");
+
+    await expect(
+      runTool(pi, handlers, {
+        goal: "Do it",
+        title: "Do it now",
+        launch: "deferred",
+        model: "gpt-5.4",
+      }),
+    ).rejects.toThrow("session_handoff requires provider and model together, or neither.");
   });
 
   it("shuts down an automatic child when bootstrap fails before its first turn", async () => {
@@ -619,6 +669,7 @@ function pendingGeneratedBootstrapEntry(bootstrapMode: "review" | "automatic") {
       sourceLeafId: "source-leaf",
       requestResponse: false,
       bootstrapMode,
+      launch: "deferred",
     }),
   };
 }

@@ -24,11 +24,7 @@ import {
 } from "./tool.ts";
 import { HANDOFF_TOOL_DETAILS_SCHEMA } from "./tool-contract.ts";
 import { HandoffToolComponent } from "./tool-renderer.ts";
-import {
-  buildHandoffLaunchSchema,
-  buildHandoffModelDescription,
-  buildHandoffPromptGuidelines,
-} from "./tool-schema.ts";
+import { buildHandoffLaunchSchema, buildHandoffPromptGuidelines } from "./tool-schema.ts";
 import { buildHandoffToolView } from "./tool-view-model.ts";
 import { formatHandoffError } from "./ui.ts";
 
@@ -65,7 +61,7 @@ export function installHandoff(
       description: "Start a new Pi session with a self-contained task.",
       promptSnippet:
         "Delegate bounded work to a background subagent or hand off context to another Pi session",
-      promptGuidelines: buildHandoffPromptGuidelines(launchTargets),
+      promptGuidelines: buildHandoffPromptGuidelines(launchTargets, models),
       parameters: Type.Object({
         goal: Type.String({
           description:
@@ -88,9 +84,14 @@ export function installHandoff(
               "Whether the child session should report completion/results of its task back to this session. Defaults to true for subagent launches and false otherwise.",
           }),
         ),
+        provider: Type.Optional(
+          Type.String({
+            description: "Model provider for the child session.",
+          }),
+        ),
         model: Type.Optional(
           Type.String({
-            description: buildHandoffModelDescription(models),
+            description: "Model id for the child session.",
           }),
         ),
         thinkingLevel: Type.Optional(

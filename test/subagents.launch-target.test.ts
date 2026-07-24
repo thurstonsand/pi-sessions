@@ -26,6 +26,18 @@ describe("subagent launch target", () => {
       { sessionId: parentId, depth: 0, epoch: 3 },
       (epoch) => epoch === 3,
     );
+    expect(
+      target.describeSubagentChild?.({
+        childSessionId: "child-session",
+        ownerSessionId: parentId,
+        requestResponse: true,
+      }),
+    ).toEqual({
+      childSessionId: "child-session",
+      ownerSessionId: parentId,
+      depth: 1,
+      requestResponse: true,
+    });
     target.prepareChild({
       manager: {} as never,
       childSessionId: "child-session",

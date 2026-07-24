@@ -1,17 +1,11 @@
 import { type Static, Type } from "typebox";
+import { HANDOFF_DIRECTION_LAUNCH_SCHEMA } from "./launch-target.ts";
 import { HANDOFF_LAUNCH_RECEIPT_SCHEMA } from "./receipt.ts";
 
 export const HANDOFF_TOOL_DETAILS_SCHEMA = Type.Intersect([
   HANDOFF_LAUNCH_RECEIPT_SCHEMA,
   Type.Object({
-    degradedFrom: Type.Optional(
-      Type.Union([
-        Type.Literal("left"),
-        Type.Literal("right"),
-        Type.Literal("up"),
-        Type.Literal("down"),
-      ]),
-    ),
+    degradedFrom: Type.Optional(HANDOFF_DIRECTION_LAUNCH_SCHEMA),
   }),
 ]);
 

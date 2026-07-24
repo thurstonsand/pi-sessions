@@ -38,7 +38,7 @@ describe("pi-sessions index settings", () => {
     process.env.PI_CODING_AGENT_DIR = agentDir;
     writeFileSync(
       `${agentDir}/settings.json`,
-      `${JSON.stringify({ sessions: { features: { subagents: false }, subagents: { maxDepth: 4 } } }, null, 2)}\n`,
+      `${JSON.stringify({ sessions: { subagents: { enable: false, maxDepth: 4 } } }, null, 2)}\n`,
     );
 
     const settings = loadSettings();

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { HANDOFF_METADATA_CUSTOM_TYPE } from "../extensions/session-handoff/metadata.ts";
 import { installSubagents } from "../extensions/subagents/install.ts";
 import {
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
@@ -147,6 +148,18 @@ describe("subagent installation", () => {
       ),
     });
     expect((result as { systemPrompt: string }).systemPrompt).not.toContain("submit_task_report");
+  });
+
+  it("treats a fork that inherited the subagent stamp under a fresh id as an ordinary session", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true });
+    const handle = installSubagents(pi as never, createDeps(2));
+    // childEntries stamps childSessionId=childId; a fork runs under a different id.
+    const ctx = createContext("11111111-1234-1234-1234-123456789abc", childEntries(1, true));
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+
+    const result = await handlers.get("before_agent_start")?.({ systemPrompt: "Base prompt" }, ctx);
+
+    expect(result).toBeUndefined();
   });
 
   it("does not duplicate report-tool guidance in the subagent system addition", async () => {
@@ -358,7 +371,28 @@ function childEntries(depth: number, requestResponse = true): unknown[] {
       },
     },
   ]);
-  const entries: unknown[] = [];
+  const entries: unknown[] = [
+    {
+      type: "custom",
+      id: "handoff",
+      parentId: null,
+      timestamp: "2026-03-25T00:00:02.000Z",
+      customType: HANDOFF_METADATA_CUSTOM_TYPE,
+      data: {
+        origin: "handoff",
+        goal: "Work",
+        title: "Child",
+        initial_prompt: "Work",
+        launch: "subagent",
+        subagent: {
+          childSessionId: childId,
+          ownerSessionId: parentId,
+          depth,
+          requestResponse,
+        },
+      },
+    },
+  ];
   childSessionFiles.set(entries, { parentPath, childPath });
   return entries;
 }

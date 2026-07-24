@@ -4,6 +4,7 @@ import { consumePendingHandoffBootstrap } from "../extensions/session-handoff/bo
 import {
   createChildGeneratedHandoffBootstrap,
   HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+  HANDOFF_METADATA_CUSTOM_TYPE,
 } from "../extensions/session-handoff/metadata.ts";
 
 const { generateHandoffDraftMock } = vi.hoisted(() => ({
@@ -48,6 +49,13 @@ describe("session handoff bootstrap", () => {
         sourceLeafId: "source-leaf",
         requestResponse: false,
         bootstrapMode: "automatic",
+        launch: "subagent",
+        subagent: {
+          childSessionId: "child-session",
+          ownerSessionId: "owner-session",
+          depth: 1,
+          requestResponse: false,
+        },
       }),
     };
     const notify = vi.fn();
@@ -109,5 +117,18 @@ describe("session handoff bootstrap", () => {
       "info",
     );
     expect(pi.sendMessage).toHaveBeenCalledOnce();
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      HANDOFF_METADATA_CUSTOM_TYPE,
+      expect.objectContaining({
+        origin: "handoff",
+        launch: "subagent",
+        subagent: {
+          childSessionId: "child-session",
+          ownerSessionId: "owner-session",
+          depth: 1,
+          requestResponse: false,
+        },
+      }),
+    );
   });
 });

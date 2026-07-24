@@ -2,6 +2,11 @@ import type { CustomEntry, SessionEntry } from "@earendil-works/pi-coding-agent"
 import { type Static, Type } from "typebox";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
 import { HANDOFF_KICKOFF_CUSTOM_TYPE, HANDOFF_KICKOFF_DETAILS_SCHEMA } from "./kickoff.ts";
+import {
+  HANDOFF_NON_SUBAGENT_LAUNCH_SCHEMA,
+  type HandoffLaunchValue,
+  SUBAGENT_LAUNCH,
+} from "./launch-target.ts";
 
 export const HANDOFF_METADATA_CUSTOM_TYPE = "pi-sessions.handoff";
 export const HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE = "pi-sessions.handoff-bootstrap";
@@ -11,14 +16,36 @@ export const HANDOFF_STALE_SESSION_MESSAGE =
 export const SESSION_STARTING_MESSAGE =
   "Target session is still starting. wait for it to show up in session_search, then resend.";
 
-export const HANDOFF_SESSION_METADATA_SCHEMA = Type.Object({
+// A subagent's self-knowledge, stamped into the durable handoff record so the
+// child never opens the parent transcript to learn who it is.
+export const HANDOFF_SUBAGENT_SCHEMA = Type.Object({
+  childSessionId: Type.String(),
+  ownerSessionId: Type.String(),
+  depth: Type.Integer({ minimum: 1 }),
+  requestResponse: Type.Boolean(),
+});
+
+const HANDOFF_METADATA_BASE = {
   origin: Type.Literal("handoff"),
   goal: Type.String(),
   title: Type.String(),
   initial_prompt: Type.String(),
-});
+};
 
-export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
+export const HANDOFF_SESSION_METADATA_SCHEMA = Type.Union([
+  Type.Object({
+    ...HANDOFF_METADATA_BASE,
+    launch: Type.Literal(SUBAGENT_LAUNCH),
+    subagent: HANDOFF_SUBAGENT_SCHEMA,
+  }),
+  Type.Object({
+    ...HANDOFF_METADATA_BASE,
+    launch: HANDOFF_NON_SUBAGENT_LAUNCH_SCHEMA,
+    subagent: Type.Optional(Type.Never()),
+  }),
+]);
+
+const HANDOFF_BOOTSTRAP_BASE = {
   mode: Type.Literal("generate"),
   sessionId: Type.String(),
   goal: Type.String(),
@@ -27,7 +54,20 @@ export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Object({
   sourceLeafId: Type.String(),
   requestResponse: Type.Boolean(),
   bootstrapMode: Type.Union([Type.Literal("review"), Type.Literal("automatic")]),
-});
+};
+
+export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Union([
+  Type.Object({
+    ...HANDOFF_BOOTSTRAP_BASE,
+    launch: Type.Literal(SUBAGENT_LAUNCH),
+    subagent: HANDOFF_SUBAGENT_SCHEMA,
+  }),
+  Type.Object({
+    ...HANDOFF_BOOTSTRAP_BASE,
+    launch: HANDOFF_NON_SUBAGENT_LAUNCH_SCHEMA,
+    subagent: Type.Optional(Type.Never()),
+  }),
+]);
 
 export const HANDOFF_BOOTSTRAP_CONSUMED_SCHEMA = Type.Object({
   bootstrapEntryId: Type.String(),
@@ -39,6 +79,7 @@ export const HANDOFF_BOOTSTRAP_CONSUMED_SCHEMA = Type.Object({
   ]),
 });
 
+export type HandoffSubagent = Static<typeof HANDOFF_SUBAGENT_SCHEMA>;
 export type HandoffSessionMetadata = Static<typeof HANDOFF_SESSION_METADATA_SCHEMA>;
 export type HandoffBootstrap = Static<typeof HANDOFF_BOOTSTRAP_SCHEMA>;
 export type ChildGeneratedHandoffBootstrap = HandoffBootstrap;
@@ -49,13 +90,22 @@ export function createHandoffSessionMetadata(
   goal: string,
   initialPrompt: string,
   title: string,
+  launch: HandoffLaunchValue,
+  subagent: HandoffSubagent | undefined,
 ): HandoffSessionMetadata {
-  return {
-    origin: "handoff",
+  const base = {
+    origin: "handoff" as const,
     goal: goal.trim(),
     title,
     initial_prompt: initialPrompt.trim(),
   };
+  if (launch === SUBAGENT_LAUNCH) {
+    if (!subagent) {
+      throw new Error("A subagent handoff requires a subagent identity block.");
+    }
+    return { ...base, launch, subagent };
+  }
+  return { ...base, launch };
 }
 
 export function createChildGeneratedHandoffBootstrap(options: {
@@ -66,9 +116,11 @@ export function createChildGeneratedHandoffBootstrap(options: {
   sourceLeafId: string;
   requestResponse: boolean;
   bootstrapMode: "review" | "automatic";
+  launch: HandoffLaunchValue;
+  subagent?: HandoffSubagent | undefined;
 }): ChildGeneratedHandoffBootstrap {
-  return {
-    mode: "generate",
+  const base = {
+    mode: "generate" as const,
     sessionId: options.sessionId,
     goal: options.goal.trim(),
     title: options.title.trim(),
@@ -77,6 +129,13 @@ export function createChildGeneratedHandoffBootstrap(options: {
     requestResponse: options.requestResponse,
     bootstrapMode: options.bootstrapMode,
   };
+  if (options.launch === SUBAGENT_LAUNCH) {
+    if (!options.subagent) {
+      throw new Error("A subagent handoff requires a subagent identity block.");
+    }
+    return { ...base, launch: options.launch, subagent: options.subagent };
+  }
+  return { ...base, launch: options.launch };
 }
 
 export type PendingHandoffBootstrapScan =

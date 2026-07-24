@@ -1,5 +1,9 @@
 import type { ExtensionAPI, SessionEntry, SessionTreeNode } from "@earendil-works/pi-coding-agent";
-import type { HandoffLaunchTarget } from "../session-handoff/launch-target.ts";
+import { type HandoffLaunchTarget, SUBAGENT_LAUNCH } from "../session-handoff/launch-target.ts";
+import {
+  getHandoffMetadataFromEntries,
+  type HandoffSubagent,
+} from "../session-handoff/metadata.ts";
 import type {
   MessagingHandle,
   SendMessageRequest,
@@ -9,7 +13,6 @@ import type { SessionLifecycle } from "../shared/composition.ts";
 import type { SessionSettings } from "../shared/settings.ts";
 import { hasAttachedTmuxClients, isTmuxInstalled, tmuxSessionName } from "../shared/tmux.ts";
 import { SubagentCancellationRouter, type SubagentCancelResult } from "./cancel.ts";
-import { findSubagentIdentity, type SubagentIdentity } from "./identity.ts";
 import { createSubagentLaunchTarget, type SubagentLaunchState } from "./launch-target.ts";
 import {
   getChildSubagentLifecycle,
@@ -42,7 +45,7 @@ interface ParentSessionState extends SubagentParentSession {
 }
 
 interface ChildSessionState {
-  identity: SubagentIdentity;
+  identity: HandoffSubagent;
   requestResponse: boolean;
   reportsAtTurnStart: number;
 }
@@ -202,7 +205,7 @@ You are working as a subagent on one task delegated by a parent session. The han
       clearLinger();
       epoch += 1;
       const sessionId = ctx.sessionManager.getSessionId();
-      const identity = findSubagentIdentity(ctx.sessionManager);
+      const identity = findSelfSubagentIdentity(ctx.sessionManager);
       const sessionManager = ctx.sessionManager;
       const parent: ParentSessionState = {
         sessionId,
@@ -267,12 +270,16 @@ function settleChild(
     return true;
   }
   if (!child.requestResponse) {
-    pi.appendEntry(SUBAGENT_CLOSED_CUSTOM_TYPE, { reason: "no_response_expected" });
+    pi.appendEntry(SUBAGENT_CLOSED_CUSTOM_TYPE, {
+      reason: "no_response_expected",
+    });
     return true;
   }
 
   if (lifecycle.hasReminder) {
-    pi.appendEntry(SUBAGENT_CLOSED_CUSTOM_TYPE, { reason: "no_report_after_reminder" });
+    pi.appendEntry(SUBAGENT_CLOSED_CUSTOM_TYPE, {
+      reason: "no_report_after_reminder",
+    });
     return true;
   }
 
@@ -292,10 +299,23 @@ function countReports(branch: readonly SessionEntry[]): number {
   return getChildSubagentLifecycle(branch).reports.length;
 }
 
+function findSelfSubagentIdentity(session: {
+  getSessionId(): string;
+  getBranch(): readonly SessionEntry[];
+}): HandoffSubagent | undefined {
+  const metadata = getHandoffMetadataFromEntries(session.getBranch());
+  if (metadata?.launch !== SUBAGENT_LAUNCH) {
+    return undefined;
+  }
+  return metadata.subagent.childSessionId === session.getSessionId()
+    ? metadata.subagent
+    : undefined;
+}
+
 async function exitWhenUnobserved(
   executor: ExtensionAPI,
   parent: ParentSessionState,
-  identity: SubagentIdentity,
+  identity: HandoffSubagent,
   isCurrentSession: (epoch: number) => boolean,
   setTimer: (timer: NodeJS.Timeout) => void,
 ): Promise<void> {

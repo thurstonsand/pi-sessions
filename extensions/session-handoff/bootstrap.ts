@@ -4,6 +4,7 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ModelRuntimeProvider } from "../shared/model-runtime.ts";
 import { generateHandoffDraftFromSessionManager } from "./extract.ts";
 import { buildHandoffKickoffMessage, buildHandoffKickoffSource } from "./kickoff.ts";
+import { SUBAGENT_LAUNCH } from "./launch-target.ts";
 import {
   type ChildGeneratedHandoffBootstrap,
   createHandoffSessionMetadata,
@@ -139,7 +140,14 @@ async function startChildGeneratedHandoff(
 
     // The tool-provided bootstrap title is authoritative; extraction does not
     // replace it with a second generated title.
-    const metadata = createHandoffSessionMetadata(bootstrap.goal, prompt, bootstrap.title);
+    const subagent = bootstrap.launch === SUBAGENT_LAUNCH ? bootstrap.subagent : undefined;
+    const metadata = createHandoffSessionMetadata(
+      bootstrap.goal,
+      prompt,
+      bootstrap.title,
+      bootstrap.launch,
+      subagent,
+    );
     if (!getHandoffMetadataFromEntries(ctx.sessionManager.getEntries())) {
       pi.appendEntry(HANDOFF_METADATA_CUSTOM_TYPE, metadata);
     }

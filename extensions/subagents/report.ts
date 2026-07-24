@@ -1,12 +1,12 @@
 import { randomUUID } from "node:crypto";
 import { defineTool, type ExtensionAPI, type SessionEntry } from "@earendil-works/pi-coding-agent";
+import type { HandoffSubagent } from "../session-handoff/metadata.ts";
 import type { MessagingHandle } from "../session-messaging/install.ts";
 import { formatError } from "../shared/errors.ts";
 import {
   type SessionSubagentReportEnvelope,
   TASK_REPORT_SCHEMA,
 } from "../shared/session-broker/protocol.ts";
-import type { SubagentIdentity } from "./identity.ts";
 import {
   collectParentLedger,
   SUBAGENT_REPORT_CUSTOM_TYPE,
@@ -23,7 +23,7 @@ export interface SubagentParentSession {
 }
 
 export interface ReportingSubagentSession extends SubagentParentSession {
-  identity: SubagentIdentity;
+  identity: HandoffSubagent;
 }
 
 export interface IncomingSubagentReport {

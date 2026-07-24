@@ -263,6 +263,7 @@ function createBootstrap(sessionId: string) {
     sourceLeafId: "source-leaf",
     requestResponse: false,
     bootstrapMode: "review",
+    launch: "right",
   });
 }
 

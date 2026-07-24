@@ -12,6 +12,7 @@ describe("handoff launch receipt", () => {
       targetCwd: "/repo/app",
       parentCwd: "/repo/app",
       childModel: "openai/gpt-5.4:high",
+      childProvider: "openai",
       childModelName: "GPT 5.4",
       thinkingLevel: "high",
     });
@@ -23,6 +24,7 @@ describe("handoff launch receipt", () => {
       launch: "deferred",
       resumeCommand: "pi --session-id 'child-1'",
       model: "openai/gpt-5.4:high",
+      provider: "openai",
       modelName: "GPT 5.4",
       thinkingLevel: "high",
     });
@@ -39,12 +41,14 @@ describe("handoff launch receipt", () => {
       targetCwd: "/other",
       parentCwd: "/repo/app",
       childModel: "anthropic/claude-sonnet-4-5",
+      childProvider: "anthropic",
       childModelName: "Claude Sonnet 4.5",
     });
 
     expect(receipt).toMatchObject({
       cwd: "/other",
       model: "anthropic/claude-sonnet-4-5",
+      provider: "anthropic",
       modelName: "Claude Sonnet 4.5",
       backend: "Ghostty",
     });

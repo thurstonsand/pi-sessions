@@ -14,6 +14,10 @@
 
 ![handoff board showing user sessions](images/handoff-board-user-sessions.png)
 
+### Subagent report
+
+![subagent report card in the parent session](images/handoff-subagent-report.png)
+
 ### Session handoff
 
 ![session handoff tool call](images/session-handoff-tool.png)
@@ -30,7 +34,7 @@
 
 ## Install
 
-Requires Pi `0.80.2` or newer and Node `>=24 <26`.
+Requires Pi `0.80.10` or newer and Node `>=24 <26`.
 
 **From npm** (recommended):
 
@@ -70,6 +74,22 @@ Open the frontend implementation task in a session to the right.
 | Session Picker     | `Alt+O`                                           | Reference old sessions in your prompt                   |
 | Session Index      | `/session-index` slash command                    | Shows index status and rebuilds the local session index |
 | Session Auto Title | in background, `/title` slash command             | Give sessions titles                                    |
+
+Every feature is on by default. Turn one off with `enable: false` under its own settings namespace, which unregisters its tools and hooks.
+
+```json
+{
+  "sessions": {
+    "messaging": { "enable": true },
+    "subagents": { "enable": true },
+    "handoff": { "enable": true },
+    "search": { "enable": true },
+    "ask": { "enable": true },
+    "autoTitle": { "enable": true },
+    "hooks": { "enable": true }
+  }
+}
+```
 
 ## Session Search
 
@@ -130,7 +150,7 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
 
 `deferred.copyToClipboard` (default `true`) controls whether deferred handoffs copy the resume command to the clipboard. When off, the resume command is only shown in the tool call.
 
-Subagents are enabled by default and require the handoff and messaging features. Limit recursive delegation depth with `sessions.subagents.maxDepth` (default `2`):
+Subagents require the handoff and messaging features. Limit recursive delegation depth with `sessions.subagents.maxDepth` (default `2`):
 
 ```json
 {

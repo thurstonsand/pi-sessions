@@ -383,6 +383,7 @@ describe("session-search hooks", () => {
           goal: "Finish the handoff",
           title: "Implement autocomplete",
           initial_prompt: "Finish the handoff",
+          launch: "deferred",
         },
       },
     ]);

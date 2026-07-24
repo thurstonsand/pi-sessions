@@ -6,7 +6,7 @@ import type { RenderTheme } from "../shared/rendering/theme.ts";
 import { THINKING_LEVELS } from "../shared/thinking-levels.ts";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
 import type { ClipboardStatus } from "./launch/backend.ts";
-import type { HandoffLaunchValue } from "./launch-target.ts";
+import { HANDOFF_LAUNCH_VALUE_SCHEMA, type HandoffLaunchValue } from "./launch-target.ts";
 
 const THINKING_LEVEL_SCHEMAS = THINKING_LEVELS.map((level) => Type.Literal(level)) as [
   TLiteral<ThinkingLevel>,
@@ -17,18 +17,12 @@ export const HANDOFF_LAUNCH_RECEIPT_SCHEMA = Type.Object({
   sessionId: Type.String(),
   childSessionFile: Type.String(),
   title: Type.String(),
-  launch: Type.Union([
-    Type.Literal("deferred"),
-    Type.Literal("left"),
-    Type.Literal("right"),
-    Type.Literal("up"),
-    Type.Literal("down"),
-    Type.Literal("subagent"),
-  ]),
+  launch: HANDOFF_LAUNCH_VALUE_SCHEMA,
   resumeCommand: Type.String(),
   backend: Type.Optional(Type.String()),
   cwd: Type.Optional(Type.String()),
   model: Type.String(),
+  provider: Type.Optional(Type.String()),
   modelName: Type.Optional(Type.String()),
   thinkingLevel: Type.Optional(Type.Union(THINKING_LEVEL_SCHEMAS)),
 });
@@ -58,6 +52,7 @@ export function buildLaunchReceipt(options: {
   targetCwd: string;
   parentCwd: string;
   childModel: string;
+  childProvider: string;
   childModelName: string;
   thinkingLevel?: ThinkingLevel | undefined;
 }): HandoffLaunchReceipt {
@@ -70,6 +65,7 @@ export function buildLaunchReceipt(options: {
     ...(options.backend ? { backend: options.backend } : {}),
     ...(options.targetCwd !== options.parentCwd ? { cwd: options.targetCwd } : {}),
     model: options.childModel,
+    provider: options.childProvider,
     modelName: options.childModelName,
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
   };

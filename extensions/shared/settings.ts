@@ -27,6 +27,8 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
       enable: Type.Optional(Type.Boolean()),
       pickerShortcut: Type.Optional(Type.String()),
       persistRuns: Type.Optional(Type.Boolean()),
+      model: Type.Optional(Type.String()),
+      thinkingLevel: Type.Optional(Type.String()),
       deferred: Type.Optional(
         Type.Object({
           copyToClipboard: Type.Optional(Type.Boolean()),
@@ -87,6 +89,14 @@ export interface AskSettings extends AgentModelSettings {
   persistRuns: boolean;
 }
 
+export interface HandoffSettings extends AgentModelSettings {
+  pickerShortcut: KeyId;
+  persistRuns: boolean;
+  deferred: {
+    copyToClipboard: boolean;
+  };
+}
+
 export interface FeatureToggles {
   messaging: boolean;
   subagents: boolean;
@@ -102,13 +112,7 @@ export interface SessionSettings {
   subagents: {
     maxDepth: number;
   };
-  handoff: {
-    pickerShortcut: KeyId;
-    persistRuns: boolean;
-    deferred: {
-      copyToClipboard: boolean;
-    };
-  };
+  handoff: HandoffSettings;
   index: {
     path: string;
   };
@@ -222,6 +226,7 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
       maxDepth: fileSettings.subagents?.maxDepth ?? 2,
     },
     handoff: {
+      ...resolveAgentModelSettings(fileSettings.handoff),
       pickerShortcut: normalizePickerShortcut(fileSettings.handoff?.pickerShortcut),
       persistRuns: fileSettings.handoff?.persistRuns ?? false,
       deferred: {

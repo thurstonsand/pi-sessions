@@ -6,6 +6,7 @@ import {
   HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
   HANDOFF_METADATA_CUSTOM_TYPE,
 } from "../extensions/session-handoff/metadata.ts";
+import { createFakeModelRuntime } from "./test-helpers.ts";
 
 const { generateHandoffDraftMock } = vi.hoisted(() => ({
   generateHandoffDraftMock: vi.fn(),
@@ -21,7 +22,7 @@ afterEach(() => {
 });
 
 describe("session handoff bootstrap", () => {
-  it("passes persistence through extraction and notifies the child of the debug path", async () => {
+  it("uses the configured extraction model and notifies the child of persisted runs", async () => {
     const sourceSessionManager = {
       getSessionId: () => "parent-session",
       getSessionName: () => "Parent",
@@ -91,27 +92,39 @@ describe("session handoff bootstrap", () => {
       setSessionName: vi.fn(),
       sendMessage: vi.fn(),
     };
-    const getModelRuntime = vi.fn().mockResolvedValue({});
+    const extractionModel = {
+      provider: "openai-codex",
+      id: "gpt-5.6-terra",
+    };
+    const modelRuntime = createFakeModelRuntime({ available: [extractionModel as never] });
+    const getModelRuntime = vi.fn().mockResolvedValue(modelRuntime);
+    const handoffSettings = {
+      pickerShortcut: "alt+o" as const,
+      model: "openai-codex/gpt-5.6-terra",
+      thinkingLevel: "low" as const,
+      persistRuns: true,
+      deferred: { copyToClipboard: true },
+    };
 
     await consumePendingHandoffBootstrap(
       pi as never,
       ctx as never,
       getModelRuntime,
       "medium",
-      true,
+      handoffSettings,
     );
 
-    expect(generateHandoffDraftMock).toHaveBeenCalledWith(
+    expect(generateHandoffDraftMock).toHaveBeenCalledWith({
       ctx,
-      {},
+      modelRuntime,
       sourceSessionManager,
-      "source-leaf",
-      "Finish phase 1",
-      "medium",
-      true,
-      expect.any(AbortSignal),
-      false,
-    );
+      sourceLeafId: "source-leaf",
+      goal: "Finish phase 1",
+      settings: handoffSettings,
+      destinationThinkingLevel: "medium",
+      signal: expect.any(AbortSignal),
+      requestResponse: false,
+    });
     expect(notify).toHaveBeenCalledWith(
       "Handoff extraction session saved to /tmp/handoff-runs/extraction.jsonl",
       "info",
@@ -122,13 +135,11 @@ describe("session handoff bootstrap", () => {
       expect.objectContaining({
         origin: "handoff",
         launch: "subagent",
-        subagent: {
-          childSessionId: "child-session",
-          ownerSessionId: "owner-session",
-          depth: 1,
-          requestResponse: false,
-        },
       }),
     );
+    const metadata = pi.appendEntry.mock.calls.find(
+      ([customType]) => customType === HANDOFF_METADATA_CUSTOM_TYPE,
+    )?.[1];
+    expect(metadata).not.toHaveProperty("subagent");
   });
 });

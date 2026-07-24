@@ -24,8 +24,9 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { freshenModel } from "../shared/model-runtime.ts";
-import { getDefaultHandoffRunsDir } from "../shared/settings.ts";
+import { getDefaultHandoffRunsDir, type HandoffSettings } from "../shared/settings.ts";
 import { parseTypeBoxValue } from "../shared/typebox.ts";
+import { resolveModelOverride } from "./model.ts";
 
 const MAX_HANDOFF_EXTRACTION_ATTEMPTS = 3;
 const HANDOFF_EXTRACTION_RETRY_PROMPT =
@@ -88,22 +89,39 @@ export function resolveHandoffSource(
   return sessionContext;
 }
 
-export async function generateHandoffDraftFromSessionManager(
-  ctx: ExtensionContext,
-  modelRuntime: ModelRuntime,
-  sourceSessionManager: ExtensionContext["sessionManager"],
-  sourceLeafId: string,
-  goal: string,
-  thinkingLevel: ThinkingLevel | undefined,
-  persistRuns: boolean,
-  signal?: AbortSignal,
+export async function generateHandoffDraftFromSessionManager({
+  ctx,
+  modelRuntime,
+  sourceSessionManager,
+  sourceLeafId,
+  goal,
+  settings,
+  destinationThinkingLevel,
+  signal,
   requestResponse = false,
-): Promise<HandoffDraftResult | undefined> {
-  if (!ctx.model) {
-    throw new Error("No model is available for handoff.");
+}: {
+  ctx: ExtensionContext;
+  modelRuntime: ModelRuntime;
+  sourceSessionManager: ExtensionContext["sessionManager"];
+  sourceLeafId: string;
+  goal: string;
+  settings: HandoffSettings;
+  destinationThinkingLevel: ThinkingLevel | undefined;
+  signal?: AbortSignal | undefined;
+  requestResponse?: boolean | undefined;
+}): Promise<HandoffDraftResult | undefined> {
+  const modelOverride = settings.model
+    ? resolveModelOverride(modelRuntime, settings.model, settings.thinkingLevel)
+    : undefined;
+  let model = modelOverride?.model;
+  if (!model) {
+    if (!ctx.model) {
+      throw new Error("No model is available for handoff.");
+    }
+    model = freshenModel(modelRuntime, ctx.model);
   }
-
-  const model = freshenModel(modelRuntime, ctx.model);
+  const thinkingLevel =
+    modelOverride?.thinkingLevel ?? settings.thinkingLevel ?? destinationThinkingLevel;
   const sessionContext = resolveHandoffSource(sourceSessionManager, sourceLeafId);
 
   const conversationText = serializeConversation(convertToLlm(sessionContext.messages));
@@ -114,7 +132,7 @@ export async function generateHandoffDraftFromSessionManager(
     conversationText,
     goal,
     thinkingLevel,
-    persistRuns,
+    settings.persistRuns,
     signal,
   );
   if (!handoffContext) {

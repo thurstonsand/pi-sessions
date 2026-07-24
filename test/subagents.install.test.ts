@@ -1,6 +1,11 @@
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { HANDOFF_METADATA_CUSTOM_TYPE } from "../extensions/session-handoff/metadata.ts";
+import { buildHandoffKickoffMessage } from "../extensions/session-handoff/kickoff.ts";
+import {
+  HANDOFF_BOOTSTRAP_CONSUMED_CUSTOM_TYPE,
+  HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+  HANDOFF_METADATA_CUSTOM_TYPE,
+} from "../extensions/session-handoff/metadata.ts";
 import { installSubagents } from "../extensions/subagents/install.ts";
 import {
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
@@ -134,6 +139,73 @@ describe("subagent installation", () => {
     expect(pi.exec).not.toHaveBeenCalled();
   });
 
+  it("recognizes a child from its pending bootstrap before handoff metadata exists", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true });
+    const handle = installSubagents(pi as never, createDeps(2));
+    const ctx = createContext(childId, pendingChildEntries(1, true));
+
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    const result = await handlers.get("before_agent_start")?.({ systemPrompt: "Base prompt" }, ctx);
+
+    expect(pi.registerTool).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "submit_task_report" }),
+    );
+    expect(result).toEqual({
+      systemPrompt: expect.stringContaining(
+        "You are working as a subagent on one task delegated by a parent session.",
+      ),
+    });
+  });
+
+  it("does not recognize a child from a cancelled bootstrap", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true });
+    const handle = installSubagents(pi as never, createDeps(2));
+    const entries = [
+      ...pendingChildEntries(1, true),
+      {
+        type: "custom",
+        id: "consumed",
+        parentId: "bootstrap",
+        timestamp: "2026-03-25T00:00:03.000Z",
+        customType: HANDOFF_BOOTSTRAP_CONSUMED_CUSTOM_TYPE,
+        data: { bootstrapEntryId: "bootstrap", reason: "cancelled" },
+      },
+    ];
+    const ctx = createContext(childId, entries);
+
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    const result = await handlers.get("before_agent_start")?.({ systemPrompt: "Base prompt" }, ctx);
+
+    expect(result).toBeUndefined();
+    expect(pi.registerTool).not.toHaveBeenCalledWith(
+      expect.objectContaining({ name: "submit_task_report" }),
+    );
+  });
+
+  it("does not recognize a child from a stale bootstrap", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true });
+    const handle = installSubagents(pi as never, createDeps(2));
+    const entries = [
+      ...pendingChildEntries(1, true),
+      {
+        type: "message",
+        id: "user-message",
+        parentId: "bootstrap",
+        timestamp: "2026-03-25T00:00:03.000Z",
+        message: { role: "user", content: "This session already started." },
+      },
+    ];
+    const ctx = createContext(childId, entries);
+
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    const result = await handlers.get("before_agent_start")?.({ systemPrompt: "Base prompt" }, ctx);
+
+    expect(result).toBeUndefined();
+    expect(pi.registerTool).not.toHaveBeenCalledWith(
+      expect.objectContaining({ name: "submit_task_report" }),
+    );
+  });
+
   it("gives fire-and-forget children scope guidance without report instructions", async () => {
     const { pi, handlers } = createPi({ tmuxInstalled: true });
     const handle = installSubagents(pi as never, createDeps(2));
@@ -150,16 +222,21 @@ describe("subagent installation", () => {
     expect((result as { systemPrompt: string }).systemPrompt).not.toContain("submit_task_report");
   });
 
-  it("treats a fork that inherited the subagent stamp under a fresh id as an ordinary session", async () => {
+  it.each([
+    ["an established bootstrap", () => childEntries(1, true)],
+    ["a pending bootstrap", () => pendingChildEntries(1, true)],
+  ])("treats a fork that inherited %s under a fresh id as ordinary", async (_source, entries) => {
     const { pi, handlers } = createPi({ tmuxInstalled: true });
     const handle = installSubagents(pi as never, createDeps(2));
-    // childEntries stamps childSessionId=childId; a fork runs under a different id.
-    const ctx = createContext("11111111-1234-1234-1234-123456789abc", childEntries(1, true));
+    const ctx = createContext("11111111-1234-1234-1234-123456789abc", entries());
     await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
 
     const result = await handlers.get("before_agent_start")?.({ systemPrompt: "Base prompt" }, ctx);
 
     expect(result).toBeUndefined();
+    expect(pi.registerTool).not.toHaveBeenCalledWith(
+      expect.objectContaining({ name: "submit_task_report" }),
+    );
   });
 
   it("does not duplicate report-tool guidance in the subagent system addition", async () => {
@@ -349,6 +426,35 @@ function launchEntry() {
   };
 }
 
+function pendingChildEntries(depth: number, requestResponse: boolean): unknown[] {
+  return [
+    {
+      type: "custom",
+      id: "bootstrap",
+      parentId: null,
+      timestamp: "2026-03-25T00:00:02.000Z",
+      customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
+      data: {
+        mode: "generate",
+        sessionId: childId,
+        goal: "Work",
+        title: "Child",
+        parentSessionFile: "/tmp/parent.jsonl",
+        sourceLeafId: "source-leaf",
+        requestResponse,
+        bootstrapMode: "automatic",
+        launch: "subagent",
+        subagent: {
+          childSessionId: childId,
+          ownerSessionId: parentId,
+          depth,
+          requestResponse,
+        },
+      },
+    },
+  ];
+}
+
 function childEntries(depth: number, requestResponse = true): unknown[] {
   const root = testFs.createTempDir();
   const parentPath = join(root, "parent.jsonl");
@@ -371,12 +477,14 @@ function childEntries(depth: number, requestResponse = true): unknown[] {
       },
     },
   ]);
+  const [bootstrap] = pendingChildEntries(depth, requestResponse);
   const entries: unknown[] = [
+    bootstrap,
     {
       type: "custom",
       id: "handoff",
-      parentId: null,
-      timestamp: "2026-03-25T00:00:02.000Z",
+      parentId: "bootstrap",
+      timestamp: "2026-03-25T00:00:03.000Z",
       customType: HANDOFF_METADATA_CUSTOM_TYPE,
       data: {
         origin: "handoff",
@@ -384,13 +492,19 @@ function childEntries(depth: number, requestResponse = true): unknown[] {
         title: "Child",
         initial_prompt: "Work",
         launch: "subagent",
-        subagent: {
-          childSessionId: childId,
-          ownerSessionId: parentId,
-          depth,
-          requestResponse,
-        },
       },
+    },
+    {
+      type: "custom_message",
+      id: "kickoff",
+      parentId: "handoff",
+      timestamp: "2026-03-25T00:00:04.000Z",
+      ...buildHandoffKickoffMessage({
+        prompt: "Work",
+        title: "Child",
+        source: { sessionId: parentId },
+        bootstrapEntryId: "bootstrap",
+      }),
     },
   ];
   childSessionFiles.set(entries, { parentPath, childPath });

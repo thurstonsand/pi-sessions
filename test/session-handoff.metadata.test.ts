@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  createHandoffSessionMetadata,
   HANDOFF_BOOTSTRAP_SCHEMA,
   parseHandoffSessionMetadata,
 } from "../extensions/session-handoff/metadata.ts";
@@ -18,19 +19,13 @@ const bootstrapBase = {
 };
 const block = { childSessionId: "child", ownerSessionId: "owner", depth: 1, requestResponse: true };
 
-describe("handoff record discriminated union", () => {
-  it("accepts a subagent record only with its identity block", () => {
-    expect(
-      parseHandoffSessionMetadata({ ...metadataBase, launch: "subagent", subagent: block }),
-    ).toBeTruthy();
-    expect(parseHandoffSessionMetadata({ ...metadataBase, launch: "subagent" })).toBeUndefined();
-  });
-
-  it("accepts a non-subagent record and rejects a stray subagent block on it", () => {
+describe("handoff records", () => {
+  it("keeps subagent identity out of authored handoff metadata", () => {
+    expect(createHandoffSessionMetadata("g", "p", "t", "subagent")).toEqual({
+      ...metadataBase,
+      launch: "subagent",
+    });
     expect(parseHandoffSessionMetadata({ ...metadataBase, launch: "deferred" })).toBeTruthy();
-    expect(
-      parseHandoffSessionMetadata({ ...metadataBase, launch: "deferred", subagent: block }),
-    ).toBeUndefined();
   });
 
   it("enforces the same invariant on the pending bootstrap", () => {

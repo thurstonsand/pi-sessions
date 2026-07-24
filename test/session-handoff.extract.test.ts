@@ -6,21 +6,23 @@ import {
   extractHandoffContext,
   generateHandoffDraftFromSessionManager,
 } from "../extensions/session-handoff/extract.ts";
+import type { HandoffSettings } from "../extensions/shared/settings.ts";
+import { createFakeModelRuntime } from "./test-helpers.ts";
 
 function generateHandoffDraft(
   ctx: { sessionManager: { getLeafId(): string } },
   goal: string,
   thinkingLevel: "medium",
 ) {
-  return generateHandoffDraftFromSessionManager(
-    ctx as never,
-    createModelRuntime(),
-    ctx.sessionManager as never,
-    ctx.sessionManager.getLeafId(),
+  return generateHandoffDraftFromSessionManager({
+    ctx: ctx as never,
+    modelRuntime: createModelRuntime(),
+    sourceSessionManager: ctx.sessionManager as never,
+    sourceLeafId: ctx.sessionManager.getLeafId(),
     goal,
-    thinkingLevel,
-    false,
-  );
+    settings: createHandoffSettings(),
+    destinationThinkingLevel: thinkingLevel,
+  });
 }
 
 const { createAgentSessionMock } = vi.hoisted(() => ({
@@ -183,6 +185,43 @@ describe("session handoff extraction", () => {
     expect(options.resourceLoader.getAppendSystemPrompt()).toEqual([]);
   });
 
+  it("uses the configured model and thinking level", async () => {
+    const extractionModel = {
+      provider: "openai-codex",
+      id: "gpt-5.6-terra",
+    };
+    const modelRuntime = createFakeModelRuntime({ available: [extractionModel as never] });
+    createAgentSessionMock.mockResolvedValue(
+      createMockAgentSession({ summary: "Configured extraction.", relevantFiles: [] }),
+    );
+    const ctx = createGenerationContext();
+    const sourceSessionManager = createSourceSessionManager(
+      [messageEntry("user-1", null, "user", "Please implement phase 1.")],
+      "user-1",
+    );
+
+    await generateHandoffDraftFromSessionManager({
+      ctx,
+      modelRuntime: modelRuntime as never,
+      sourceSessionManager: sourceSessionManager as never,
+      sourceLeafId: "user-1",
+      goal: "Finish phase 1.",
+      settings: {
+        ...createHandoffSettings(),
+        model: "openai-codex/gpt-5.6-terra",
+        thinkingLevel: "low",
+      },
+      destinationThinkingLevel: "medium",
+    });
+
+    expect(createAgentSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: extractionModel,
+        thinkingLevel: "low",
+      }),
+    );
+  });
+
   it("passes the serialized conversation and goal, then uses the exact backstop prompt", async () => {
     const prompts: string[] = [];
     createAgentSessionMock.mockResolvedValue(
@@ -304,15 +343,15 @@ describe("session handoff extraction", () => {
     const sourceSessionManager = createSourceSessionManager(entries, "later");
 
     await expect(
-      generateHandoffDraftFromSessionManager(
-        createGenerationContext(),
-        createModelRuntime(),
-        sourceSessionManager as never,
-        "anchor",
-        "TARGET GOAL",
-        "medium",
-        false,
-      ),
+      generateHandoffDraftFromSessionManager({
+        ctx: createGenerationContext(),
+        modelRuntime: createModelRuntime(),
+        sourceSessionManager: sourceSessionManager as never,
+        sourceLeafId: "anchor",
+        goal: "TARGET GOAL",
+        settings: createHandoffSettings(),
+        destinationThinkingLevel: "medium",
+      }),
     ).rejects.toThrow("Handoff extraction did not return structured context.");
 
     expect(prompt).toContain("ROOT SOURCE");
@@ -328,15 +367,15 @@ describe("session handoff extraction", () => {
     const entries = [messageEntry("latest", null, "user", "LATEST CONTENT")];
 
     await expect(
-      generateHandoffDraftFromSessionManager(
-        createGenerationContext(),
-        createModelRuntime(),
-        createSourceSessionManager(entries, "latest") as never,
-        "missing-anchor",
-        "TARGET GOAL",
-        "medium",
-        false,
-      ),
+      generateHandoffDraftFromSessionManager({
+        ctx: createGenerationContext(),
+        modelRuntime: createModelRuntime(),
+        sourceSessionManager: createSourceSessionManager(entries, "latest") as never,
+        sourceLeafId: "missing-anchor",
+        goal: "TARGET GOAL",
+        settings: createHandoffSettings(),
+        destinationThinkingLevel: "medium",
+      }),
     ).rejects.toThrow("Handoff source snapshot entry missing-anchor was not found.");
 
     expect(createAgentSessionMock).not.toHaveBeenCalled();
@@ -379,15 +418,15 @@ describe("session handoff extraction", () => {
       "user-1",
     );
 
-    const result = await generateHandoffDraftFromSessionManager(
+    const result = await generateHandoffDraftFromSessionManager({
       ctx,
-      createModelRuntime(),
-      sourceSessionManager as never,
-      "user-1",
-      "Finish phase 1.",
-      "medium",
-      true,
-    );
+      modelRuntime: createModelRuntime(),
+      sourceSessionManager: sourceSessionManager as never,
+      sourceLeafId: "user-1",
+      goal: "Finish phase 1.",
+      settings: createHandoffSettings(true),
+      destinationThinkingLevel: "medium",
+    });
 
     expect(createSpy).toHaveBeenCalledWith(
       "/tmp/project",
@@ -423,6 +462,14 @@ function createMockAgentSession(
       dispose() {},
     },
     extensionsResult: { extensions: [], errors: [] },
+  };
+}
+
+function createHandoffSettings(persistRuns = false): HandoffSettings {
+  return {
+    pickerShortcut: "alt+o",
+    persistRuns,
+    deferred: { copyToClipboard: true },
   };
 }
 

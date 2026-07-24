@@ -140,6 +140,8 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
   "sessions": {
     "handoff": {
       "pickerShortcut": "alt+p",
+      "model": "openai-codex/gpt-5.6-terra",
+      "thinkingLevel": "low",
       "deferred": {
         "copyToClipboard": true
       }
@@ -147,6 +149,8 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
   }
 }
 ```
+
+`model` and `thinkingLevel` configure the agent that builds handoff prompts. They default to the new session's values when absent.
 
 `deferred.copyToClipboard` (default `true`) controls whether deferred handoffs copy the resume command to the clipboard. When off, the resume command is only shown in the tool call.
 

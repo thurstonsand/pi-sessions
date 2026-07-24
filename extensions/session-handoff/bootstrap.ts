@@ -2,9 +2,9 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ModelRuntimeProvider } from "../shared/model-runtime.ts";
+import type { HandoffSettings } from "../shared/settings.ts";
 import { generateHandoffDraftFromSessionManager } from "./extract.ts";
 import { buildHandoffKickoffMessage, buildHandoffKickoffSource } from "./kickoff.ts";
-import { SUBAGENT_LAUNCH } from "./launch-target.ts";
 import {
   type ChildGeneratedHandoffBootstrap,
   createHandoffSessionMetadata,
@@ -23,8 +23,8 @@ export async function consumePendingHandoffBootstrap(
   pi: ExtensionAPI,
   ctx: ExtensionContext,
   getModelRuntime: ModelRuntimeProvider,
-  thinkingLevel: ThinkingLevel | undefined,
-  persistRuns: boolean,
+  destinationThinkingLevel: ThinkingLevel | undefined,
+  handoffSettings: HandoffSettings,
 ): Promise<void> {
   const scan = findPendingHandoffBootstrap(ctx.sessionManager.getBranch());
   if (!scan) {
@@ -56,8 +56,8 @@ export async function consumePendingHandoffBootstrap(
     scan.entryId,
     consumeBootstrap,
     getModelRuntime,
-    thinkingLevel,
-    persistRuns,
+    destinationThinkingLevel,
+    handoffSettings,
   );
 }
 
@@ -68,8 +68,8 @@ async function startChildGeneratedHandoff(
   bootstrapEntryId: string,
   consumeBootstrap: (reason: HandoffBootstrapConsumedReason) => void,
   getModelRuntime: ModelRuntimeProvider,
-  thinkingLevel: ThinkingLevel | undefined,
-  persistRuns: boolean,
+  destinationThinkingLevel: ThinkingLevel | undefined,
+  handoffSettings: HandoffSettings,
 ): Promise<void> {
   const entries = ctx.sessionManager.getEntries();
   if (hasStartedConversation(entries)) {
@@ -96,17 +96,17 @@ async function startChildGeneratedHandoff(
       ctx,
       "Generating handoff draft...",
       async (signal: AbortSignal) =>
-        generateHandoffDraftFromSessionManager(
+        generateHandoffDraftFromSessionManager({
           ctx,
           modelRuntime,
           sourceSessionManager,
-          bootstrap.sourceLeafId,
-          bootstrap.goal,
-          thinkingLevel,
-          persistRuns,
+          sourceLeafId: bootstrap.sourceLeafId,
+          goal: bootstrap.goal,
+          settings: handoffSettings,
+          destinationThinkingLevel,
           signal,
-          bootstrap.requestResponse,
-        ),
+          requestResponse: bootstrap.requestResponse,
+        }),
     );
     if (!generatedDraft) {
       consumeBootstrap("cancelled");
@@ -140,13 +140,11 @@ async function startChildGeneratedHandoff(
 
     // The tool-provided bootstrap title is authoritative; extraction does not
     // replace it with a second generated title.
-    const subagent = bootstrap.launch === SUBAGENT_LAUNCH ? bootstrap.subagent : undefined;
     const metadata = createHandoffSessionMetadata(
       bootstrap.goal,
       prompt,
       bootstrap.title,
       bootstrap.launch,
-      subagent,
     );
     if (!getHandoffMetadataFromEntries(ctx.sessionManager.getEntries())) {
       pi.appendEntry(HANDOFF_METADATA_CUSTOM_TYPE, metadata);

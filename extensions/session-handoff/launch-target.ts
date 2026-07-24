@@ -59,7 +59,7 @@ export interface HandoffLaunchTarget {
   description?: string | undefined;
   requestResponseDefault: boolean;
   bootstrapMode: "review" | "automatic";
-  /** Subagent launches stamp their child's identity into the durable handoff record. */
+  /** Subagent launches stamp their child's identity into the child bootstrap. */
   describeSubagentChild?(input: {
     childSessionId: string;
     ownerSessionId: string;

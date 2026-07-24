@@ -214,7 +214,7 @@ export function installHandoff(
         ctx,
         deps.getModelRuntime,
         pi.getThinkingLevel(),
-        settings.handoff.persistRuns,
+        settings.handoff,
       );
     },
   };

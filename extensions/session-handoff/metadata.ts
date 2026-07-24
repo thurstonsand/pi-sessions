@@ -3,6 +3,7 @@ import { type Static, Type } from "typebox";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
 import { HANDOFF_KICKOFF_CUSTOM_TYPE, HANDOFF_KICKOFF_DETAILS_SCHEMA } from "./kickoff.ts";
 import {
+  HANDOFF_LAUNCH_VALUE_SCHEMA,
   HANDOFF_NON_SUBAGENT_LAUNCH_SCHEMA,
   type HandoffLaunchValue,
   SUBAGENT_LAUNCH,
@@ -16,7 +17,7 @@ export const HANDOFF_STALE_SESSION_MESSAGE =
 export const SESSION_STARTING_MESSAGE =
   "Target session is still starting. wait for it to show up in session_search, then resend.";
 
-// A subagent's self-knowledge, stamped into the durable handoff record so the
+// A subagent's self-knowledge, stamped into its child-local bootstrap so the
 // child never opens the parent transcript to learn who it is.
 export const HANDOFF_SUBAGENT_SCHEMA = Type.Object({
   childSessionId: Type.String(),
@@ -32,18 +33,10 @@ const HANDOFF_METADATA_BASE = {
   initial_prompt: Type.String(),
 };
 
-export const HANDOFF_SESSION_METADATA_SCHEMA = Type.Union([
-  Type.Object({
-    ...HANDOFF_METADATA_BASE,
-    launch: Type.Literal(SUBAGENT_LAUNCH),
-    subagent: HANDOFF_SUBAGENT_SCHEMA,
-  }),
-  Type.Object({
-    ...HANDOFF_METADATA_BASE,
-    launch: HANDOFF_NON_SUBAGENT_LAUNCH_SCHEMA,
-    subagent: Type.Optional(Type.Never()),
-  }),
-]);
+export const HANDOFF_SESSION_METADATA_SCHEMA = Type.Object({
+  ...HANDOFF_METADATA_BASE,
+  launch: HANDOFF_LAUNCH_VALUE_SCHEMA,
+});
 
 const HANDOFF_BOOTSTRAP_BASE = {
   mode: Type.Literal("generate"),
@@ -91,21 +84,14 @@ export function createHandoffSessionMetadata(
   initialPrompt: string,
   title: string,
   launch: HandoffLaunchValue,
-  subagent: HandoffSubagent | undefined,
 ): HandoffSessionMetadata {
-  const base = {
-    origin: "handoff" as const,
+  return {
+    origin: "handoff",
     goal: goal.trim(),
     title,
     initial_prompt: initialPrompt.trim(),
+    launch,
   };
-  if (launch === SUBAGENT_LAUNCH) {
-    if (!subagent) {
-      throw new Error("A subagent handoff requires a subagent identity block.");
-    }
-    return { ...base, launch, subagent };
-  }
-  return { ...base, launch };
 }
 
 export function createChildGeneratedHandoffBootstrap(options: {
@@ -193,6 +179,69 @@ export function findPendingHandoffBootstrap(
  */
 export function isSessionStarting(branch: readonly SessionEntry[]): boolean {
   return findPendingHandoffBootstrap(branch)?.kind === "pending";
+}
+
+/**
+ * Folds the bootstrap lifecycle in one transcript pass. The bootstrap owns its
+ * data; kickoff and consumed entries only establish whether it started or ended.
+ */
+export function findCurrentHandoffBootstrap(
+  branch: readonly SessionEntry[],
+): HandoffBootstrap | undefined {
+  const bootstrapsById = new Map<string, HandoffBootstrap>();
+  const bootstrapIds: string[] = [];
+  const startedBootstrapIds: string[] = [];
+  const endedBootstrapIds = new Set<string>();
+  let conversationStarted = false;
+
+  for (const entry of branch) {
+    if (entry.type === "message" && entry.message.role === "user") {
+      conversationStarted = true;
+      continue;
+    }
+    if (entry.type === "custom_message" && entry.customType === HANDOFF_KICKOFF_CUSTOM_TYPE) {
+      conversationStarted = true;
+      const details = safeParseTypeBoxValue(HANDOFF_KICKOFF_DETAILS_SCHEMA, entry.details);
+      if (details?.bootstrapEntryId) {
+        startedBootstrapIds.push(details.bootstrapEntryId);
+      }
+      continue;
+    }
+    if (entry.type !== "custom") {
+      continue;
+    }
+    if (entry.customType === HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE) {
+      const bootstrap = safeParseTypeBoxValue(HANDOFF_BOOTSTRAP_SCHEMA, entry.data);
+      if (bootstrap) {
+        bootstrapsById.set(entry.id, bootstrap);
+        bootstrapIds.push(entry.id);
+      }
+      continue;
+    }
+    if (entry.customType === HANDOFF_BOOTSTRAP_CONSUMED_CUSTOM_TYPE) {
+      const consumed = safeParseTypeBoxValue(HANDOFF_BOOTSTRAP_CONSUMED_SCHEMA, entry.data);
+      if (consumed) {
+        endedBootstrapIds.add(consumed.bootstrapEntryId);
+      }
+    }
+  }
+
+  for (let index = startedBootstrapIds.length - 1; index >= 0; index -= 1) {
+    const bootstrap = bootstrapsById.get(startedBootstrapIds[index] ?? "");
+    if (bootstrap) {
+      return bootstrap;
+    }
+  }
+  if (conversationStarted) {
+    return undefined;
+  }
+  for (let index = bootstrapIds.length - 1; index >= 0; index -= 1) {
+    const bootstrapId = bootstrapIds[index];
+    if (bootstrapId && !endedBootstrapIds.has(bootstrapId)) {
+      return bootstrapsById.get(bootstrapId);
+    }
+  }
+  return undefined;
 }
 
 export function parseHandoffSessionMetadata(value: unknown): HandoffSessionMetadata | undefined {

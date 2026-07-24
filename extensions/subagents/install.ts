@@ -1,9 +1,6 @@
 import type { ExtensionAPI, SessionEntry, SessionTreeNode } from "@earendil-works/pi-coding-agent";
 import { type HandoffLaunchTarget, SUBAGENT_LAUNCH } from "../session-handoff/launch-target.ts";
-import {
-  getHandoffMetadataFromEntries,
-  type HandoffSubagent,
-} from "../session-handoff/metadata.ts";
+import { findCurrentHandoffBootstrap, type HandoffSubagent } from "../session-handoff/metadata.ts";
 import type {
   MessagingHandle,
   SendMessageRequest,
@@ -205,8 +202,9 @@ You are working as a subagent on one task delegated by a parent session. The han
       clearLinger();
       epoch += 1;
       const sessionId = ctx.sessionManager.getSessionId();
-      const identity = findSelfSubagentIdentity(ctx.sessionManager);
       const sessionManager = ctx.sessionManager;
+      const sessionStartBranch = sessionManager.getBranch();
+      const identity = findSelfSubagentIdentity(sessionId, sessionStartBranch);
       const parent: ParentSessionState = {
         sessionId,
         getSessionName: () => sessionManager.getSessionName(),
@@ -227,7 +225,7 @@ You are working as a subagent on one task delegated by a parent session. The han
               child: {
                 identity,
                 requestResponse: identity.requestResponse,
-                reportsAtTurnStart: countReports(sessionManager.getBranch()),
+                reportsAtTurnStart: countReports(sessionStartBranch),
               },
             }
           : {}),
@@ -299,17 +297,19 @@ function countReports(branch: readonly SessionEntry[]): number {
   return getChildSubagentLifecycle(branch).reports.length;
 }
 
-function findSelfSubagentIdentity(session: {
-  getSessionId(): string;
-  getBranch(): readonly SessionEntry[];
-}): HandoffSubagent | undefined {
-  const metadata = getHandoffMetadataFromEntries(session.getBranch());
-  if (metadata?.launch !== SUBAGENT_LAUNCH) {
+function findSelfSubagentIdentity(
+  sessionId: string,
+  branch: readonly SessionEntry[],
+): HandoffSubagent | undefined {
+  const bootstrap = findCurrentHandoffBootstrap(branch);
+  if (
+    bootstrap?.launch !== SUBAGENT_LAUNCH ||
+    bootstrap.sessionId !== sessionId ||
+    bootstrap.subagent.childSessionId !== sessionId
+  ) {
     return undefined;
   }
-  return metadata.subagent.childSessionId === session.getSessionId()
-    ? metadata.subagent
-    : undefined;
+  return bootstrap.subagent;
 }
 
 async function exitWhenUnobserved(

@@ -71,6 +71,8 @@ describe("pi-sessions auto-title settings", () => {
         {
           sessions: {
             handoff: {
+              model: " openai-codex/gpt-5.6-terra ",
+              thinkingLevel: "low",
               persistRuns: true,
             },
           },
@@ -81,7 +83,10 @@ describe("pi-sessions auto-title settings", () => {
 `,
     );
 
-    expect(loadSettings().handoff.persistRuns).toBe(true);
+    const settings = loadSettings();
+    expect(settings.handoff.model).toBe("openai-codex/gpt-5.6-terra");
+    expect(settings.handoff.thinkingLevel).toBe("low");
+    expect(settings.handoff.persistRuns).toBe(true);
   });
 
   it("reads explicit ask settings from global settings", () => {

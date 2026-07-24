@@ -1,6 +1,5 @@
-import type { ExtensionAPI, SessionEntry, SessionTreeNode } from "@earendil-works/pi-coding-agent";
-import { type HandoffLaunchTarget, SUBAGENT_LAUNCH } from "../session-handoff/launch-target.ts";
-import { findCurrentHandoffBootstrap, type HandoffSubagent } from "../session-handoff/metadata.ts";
+import type { ExtensionAPI, SessionTreeNode } from "@earendil-works/pi-coding-agent";
+import type { HandoffLaunchTarget } from "../session-handoff/launch-target.ts";
 import type {
   MessagingHandle,
   SendMessageRequest,
@@ -8,17 +7,14 @@ import type {
 } from "../session-messaging/install.ts";
 import type { SessionLifecycle } from "../shared/composition.ts";
 import type { SessionSettings } from "../shared/settings.ts";
-import { hasAttachedTmuxClients, isTmuxInstalled, tmuxSessionName } from "../shared/tmux.ts";
+import { isTmuxInstalled } from "../shared/tmux.ts";
 import { SubagentCancellationRouter, type SubagentCancelResult } from "./cancel.ts";
 import { createSubagentLaunchTarget, type SubagentLaunchState } from "./launch-target.ts";
 import {
-  getChildSubagentLifecycle,
   hasSubagentLaunchEntries,
-  SUBAGENT_CLOSED_CUSTOM_TYPE,
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
   SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
-  SUBAGENT_REPORT_REMINDER_MESSAGE_CUSTOM_TYPE,
 } from "./ledger.ts";
 import { openReconcileSession, SubagentReconciler } from "./reconcile.ts";
 import {
@@ -28,9 +24,13 @@ import {
 } from "./report.ts";
 import { renderSubagentReportMessage } from "./report-message-renderer.ts";
 import { openRosterSession, type SubagentRoster, TranscriptSubagentRoster } from "./roster.ts";
+import {
+  countSubagentReports,
+  createSettledChildLifecycle,
+  findSelfSubagentIdentity,
+  type SubagentChildSessionState,
+} from "./settle.ts";
 import { SubagentMessageRouter } from "./wake.ts";
-
-const LINGER_POLL_MS = 1_000;
 
 interface ParentSessionState extends SubagentParentSession {
   getSessionName(): string | undefined;
@@ -41,15 +41,9 @@ interface ParentSessionState extends SubagentParentSession {
   shutdown(): void;
 }
 
-interface ChildSessionState {
-  identity: HandoffSubagent;
-  requestResponse: boolean;
-  reportsAtTurnStart: number;
-}
-
 interface CurrentSubagentSession {
   parent: ParentSessionState;
-  child?: ChildSessionState | undefined;
+  child?: SubagentChildSessionState | undefined;
 }
 
 export interface SubagentsHandle extends SessionLifecycle {
@@ -67,16 +61,9 @@ export function installSubagents(
 
   let epoch = 0;
   let current: CurrentSubagentSession | undefined;
-  let lingerTimer: NodeJS.Timeout | undefined;
 
   const isCurrentSession = (candidateEpoch: number): boolean =>
     current?.parent.epoch === candidateEpoch;
-  const clearLinger = (): void => {
-    if (lingerTimer) {
-      clearTimeout(lingerTimer);
-      lingerTimer = undefined;
-    }
-  };
   const reconciler = new SubagentReconciler({
     executor: pi,
     messaging: deps.messaging,
@@ -84,6 +71,7 @@ export function installSubagents(
     isCurrent: isCurrentSession,
     openSession: openReconcileSession,
   });
+  const settledChildLifecycle = createSettledChildLifecycle(pi, reconciler, isCurrentSession);
   const roster = new TranscriptSubagentRoster({
     executor: pi,
     messaging: deps.messaging,
@@ -147,9 +135,9 @@ You are working as a subagent on one task delegated by a parent session. The han
   });
 
   pi.on("agent_start", (_event, ctx) => {
-    clearLinger();
+    settledChildLifecycle.cancel();
     if (current?.child) {
-      current.child.reportsAtTurnStart = countReports(ctx.sessionManager.getBranch());
+      current.child.reportsAtTurnStart = countSubagentReports(ctx.sessionManager.getBranch());
     }
   });
 
@@ -158,28 +146,11 @@ You are working as a subagent on one task delegated by a parent session. The han
     if (!session || session.parent.sessionId !== ctx.sessionManager.getSessionId()) {
       return;
     }
-    if (hasSubagentLaunchEntries(session.parent.getBranch())) {
-      await reconciler.reconcile();
-    }
+    const reconciliation = hasSubagentLaunchEntries(session.parent.getBranch())
+      ? await reconciler.reconcile()
+      : undefined;
     if (session.child) {
-      if (ctx.hasPendingMessages()) {
-        return;
-      }
-      const shouldExit = settleChild(pi, session.child, ctx.sessionManager.getBranch());
-      if (!shouldExit) {
-        return;
-      }
-      await exitWhenUnobserved(
-        pi,
-        session.parent,
-        session.child.identity,
-        isCurrentSession,
-        (timer) => {
-          clearLinger();
-          lingerTimer = timer;
-        },
-      );
-      return;
+      await settledChildLifecycle.settle(session.parent, session.child, reconciliation);
     }
   });
 
@@ -199,7 +170,7 @@ You are working as a subagent on one task delegated by a parent session. The han
       return [createSubagentLaunchTarget(pi, parent.launchState, isCurrentSession)];
     },
     async onSessionStart(_event, ctx) {
-      clearLinger();
+      settledChildLifecycle.cancel();
       epoch += 1;
       const sessionId = ctx.sessionManager.getSessionId();
       const sessionManager = ctx.sessionManager;
@@ -225,7 +196,7 @@ You are working as a subagent on one task delegated by a parent session. The han
               child: {
                 identity,
                 requestResponse: identity.requestResponse,
-                reportsAtTurnStart: countReports(sessionStartBranch),
+                reportsAtTurnStart: countSubagentReports(sessionStartBranch),
               },
             }
           : {}),
@@ -247,7 +218,7 @@ You are working as a subagent on one task delegated by a parent session. The han
       }
     },
     async onSessionShutdown(event) {
-      clearLinger();
+      settledChildLifecycle.cancel();
       if (current && event.reason !== "reload") {
         await reconciler.suspendForShutdown();
       }
@@ -255,90 +226,4 @@ You are working as a subagent on one task delegated by a parent session. The han
       current = undefined;
     },
   };
-}
-
-function settleChild(
-  pi: ExtensionAPI,
-  child: ChildSessionState,
-  branch: readonly SessionEntry[],
-): boolean {
-  const lifecycle = getChildSubagentLifecycle(branch);
-  const reports = lifecycle.reports.length;
-  if (reports > child.reportsAtTurnStart) {
-    return true;
-  }
-  if (!child.requestResponse) {
-    pi.appendEntry(SUBAGENT_CLOSED_CUSTOM_TYPE, {
-      reason: "no_response_expected",
-    });
-    return true;
-  }
-
-  if (lifecycle.hasReminder) {
-    pi.appendEntry(SUBAGENT_CLOSED_CUSTOM_TYPE, {
-      reason: "no_report_after_reminder",
-    });
-    return true;
-  }
-
-  pi.sendMessage(
-    {
-      customType: SUBAGENT_REPORT_REMINDER_MESSAGE_CUSTOM_TYPE,
-      content:
-        "[system] Your delegated turn settled without a task report. Call submit_task_report now with done, blocked, or incomplete status.",
-      display: true,
-    },
-    { triggerTurn: true },
-  );
-  return false;
-}
-
-function countReports(branch: readonly SessionEntry[]): number {
-  return getChildSubagentLifecycle(branch).reports.length;
-}
-
-function findSelfSubagentIdentity(
-  sessionId: string,
-  branch: readonly SessionEntry[],
-): HandoffSubagent | undefined {
-  const bootstrap = findCurrentHandoffBootstrap(branch);
-  if (
-    bootstrap?.launch !== SUBAGENT_LAUNCH ||
-    bootstrap.sessionId !== sessionId ||
-    bootstrap.subagent.childSessionId !== sessionId
-  ) {
-    return undefined;
-  }
-  return bootstrap.subagent;
-}
-
-async function exitWhenUnobserved(
-  executor: ExtensionAPI,
-  parent: ParentSessionState,
-  identity: HandoffSubagent,
-  isCurrentSession: (epoch: number) => boolean,
-  setTimer: (timer: NodeJS.Timeout) => void,
-): Promise<void> {
-  const check = async (): Promise<void> => {
-    if (!isCurrentSession(parent.epoch) || parent.hasPendingMessages() || !parent.isIdle()) {
-      return;
-    }
-
-    let attached = false;
-    try {
-      attached = await hasAttachedTmuxClients(executor, tmuxSessionName(identity.ownerSessionId));
-    } catch {
-      attached = false;
-    }
-    if (!isCurrentSession(parent.epoch)) {
-      return;
-    }
-    if (!attached) {
-      parent.shutdown();
-      return;
-    }
-    setTimer(setTimeout(() => void check(), LINGER_POLL_MS));
-  };
-
-  await check();
 }

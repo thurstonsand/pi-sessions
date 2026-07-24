@@ -23,12 +23,11 @@ No build/compile step — The pi framework loads extensions directly from TypeSc
 
 ## Code Style
 
-- All extension registration (`pi.on`, `pi.register*`) should exist only in `install.ts` files
+- All extension registration (`pi.on`, `pi.register*`) should exist only in `install.ts` files. Implementations should be in sibling modules.
 - Use TypeBox to ensure runtime type safety
 - Do not change production types to make tests easier; mock the real type instead.
 - Treat the SQLite index as a read-layer cache; anything durable must be stored within the session file directly
 - Never be afraid to break backwards compatibility if it serves to better solve the current goal
-- Avoid `Pick`, `Omit`, `Partial`, `ReturnType`, indexed-access type derivations like `Foo["bar"]`, other kinds of utility-type derivations unless they are clearly justified.
 
 ## Gotchas
 
@@ -48,5 +47,5 @@ No build/compile step — The pi framework loads extensions directly from TypeSc
 - **Session messaging**: `extensions/session-messaging/install.ts`; broker/client/runtime logic at `extensions/session-messaging/`.
 - **Session reference picker**: `extensions/session-handoff/install.ts`; core logic at `extensions/session-handoff/picker.ts` and `extensions/session-handoff/query.ts`.
 - **Session auto-title**: `extensions/session-auto-title/install.ts`; core logic at `extensions/session-auto-title/`.
-- **Subagents**: `extensions/subagents/install.ts`; tmux launch and wake behavior, task reporting, classification, roster traversal, and lifecycle reconciliation at `extensions/subagents/`.
+- **Subagents**: `extensions/subagents/install.ts`; tmux launch and wake behavior, task reporting, recursive child lifecycle, classification, roster traversal, and lifecycle reconciliation at `extensions/subagents/`.
 - **Shared utilities**: no primary entrypoint; core logic at `extensions/shared/`.

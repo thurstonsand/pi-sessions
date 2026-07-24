@@ -19,6 +19,7 @@ const testFs = createTestFilesystem("pi-sessions-subagent-install-");
 const childSessionFiles = new WeakMap<unknown[], { parentPath: string; childPath: string }>();
 const parentId = "12345678-1234-1234-1234-123456789abc";
 const childId = "87654321-1234-1234-1234-123456789abc";
+const grandchildId = "aaaaaaaa-1234-1234-1234-123456789abc";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -284,6 +285,83 @@ describe("subagent installation", () => {
     );
   });
 
+  it("keeps a settled child resident without a reminder while its owned subagent runs", async () => {
+    vi.useFakeTimers();
+    const entries = childEntriesWithGrandchild();
+    const listSessions = vi.fn(async () => []);
+    const { pi, handlers } = createPi({
+      tmuxInstalled: true,
+      ownedWindowSessionIds: () => [grandchildId],
+    });
+    const handle = installSubagents(pi as never, createDeps(2, undefined, listSessions));
+    const ctx = createContext(childId, entries);
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    pi.sendMessage.mockClear();
+
+    await handlers.get("agent_settled")?.({}, ctx);
+    listSessions.mockClear();
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    expect(listSessions).not.toHaveBeenCalled();
+    expect(pi.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ customType: "pi-sessions.report_reminder_message" }),
+      expect.anything(),
+    );
+    expect(ctx.shutdown).not.toHaveBeenCalled();
+  });
+
+  it("keeps a reported child resident while its owned subagent runs", async () => {
+    vi.useFakeTimers();
+    const entries = childEntriesWithGrandchild();
+    const { pi, handlers } = createPi({
+      tmuxInstalled: true,
+      ownedWindowSessionIds: () => [grandchildId],
+    });
+    const handle = installSubagents(pi as never, createDeps(2));
+    const ctx = createContext(childId, entries);
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    await handlers.get("agent_start")?.({}, ctx);
+    entries.push({
+      type: "custom",
+      id: "report",
+      parentId: "grandchild-launch",
+      customType: "pi-sessions.subagent_report",
+      data: { reportId: "report-1", status: "done", summary: "Complete." },
+    } as never);
+
+    await handlers.get("agent_settled")?.({}, ctx);
+
+    expect(pi.sendMessage).not.toHaveBeenCalledWith(
+      expect.objectContaining({ customType: "pi-sessions.report_reminder_message" }),
+      expect.anything(),
+    );
+    expect(ctx.shutdown).not.toHaveBeenCalled();
+  });
+
+  it("kicks a waiting child once its owned subagent closes without a report", async () => {
+    vi.useFakeTimers();
+    let grandchildRunning = true;
+    const entries = childEntriesWithGrandchild();
+    const { pi, handlers } = createPi({
+      tmuxInstalled: true,
+      ownedWindowSessionIds: () => (grandchildRunning ? [grandchildId] : []),
+    });
+    const handle = installSubagents(pi as never, createDeps(2));
+    const ctx = createContext(childId, entries);
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+
+    await handlers.get("agent_settled")?.({}, ctx);
+    grandchildRunning = false;
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(pi.sendMessage).toHaveBeenCalledTimes(1);
+    expect(pi.sendMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ customType: "pi-sessions.report_reminder_message" }),
+      { triggerTurn: true },
+    );
+    expect(ctx.shutdown).not.toHaveBeenCalled();
+  });
+
   it("reminds a response-requested child once before closing it reportless", async () => {
     const { pi, handlers } = createPi({ tmuxInstalled: true, attachedResponses: [false] });
     const entries = childEntries(1, true);
@@ -353,7 +431,11 @@ function createDeps(
   } as never;
 }
 
-function createPi(options: { tmuxInstalled: boolean; attachedResponses?: boolean[] }) {
+function createPi(options: {
+  tmuxInstalled: boolean;
+  attachedResponses?: boolean[];
+  ownedWindowSessionIds?: () => readonly string[];
+}) {
   const handlers = new Map<
     string,
     (event: unknown, ctx: ReturnType<typeof createContext>) => unknown
@@ -379,6 +461,16 @@ function createPi(options: { tmuxInstalled: boolean; attachedResponses?: boolean
       if (args[0] === "list-clients") {
         const attached = attachedResponses.shift() ?? false;
         return { code: 0, stdout: attached ? "/dev/ttys001\n" : "", stderr: "" };
+      }
+      if (args[0] === "list-windows") {
+        const windows = options.ownedWindowSessionIds?.() ?? [];
+        return {
+          code: 0,
+          stdout: windows
+            .map((sessionId, index) => `@${index + 1}\tChild\t${sessionId}\n`)
+            .join(""),
+          stderr: "",
+        };
       }
       return { code: 0, stdout: "", stderr: "" };
     }),
@@ -424,6 +516,46 @@ function launchEntry() {
       depth: 1,
     },
   };
+}
+
+function childEntriesWithGrandchild(): unknown[] {
+  const root = testFs.createTempDir();
+  const grandchildPath = testFs.writeJsonlFile(root, "grandchild.jsonl", [
+    {
+      type: "session",
+      id: grandchildId,
+      timestamp: "2026-03-25T00:00:05.000Z",
+      cwd: "/repo",
+    },
+    {
+      type: "custom",
+      id: "grandchild-closed",
+      parentId: null,
+      timestamp: "2026-03-25T00:00:06.000Z",
+      customType: "pi-sessions.subagent_closed",
+      data: { reason: "no_report_after_reminder" },
+    },
+  ]);
+  const entries = childEntries(1, true);
+  entries.push({
+    type: "custom",
+    id: "grandchild-launch",
+    parentId: "kickoff",
+    timestamp: "2026-03-25T00:00:05.000Z",
+    customType: SUBAGENT_LAUNCHED_CUSTOM_TYPE,
+    data: {
+      writerSessionId: childId,
+      childSessionId: grandchildId,
+      childSessionFile: grandchildPath,
+      title: "Grandchild",
+      goal: "Work",
+      requestResponse: true,
+      cwd: "/repo",
+      resumeCommand: "resume",
+      depth: 2,
+    },
+  } as never);
+  return entries;
 }
 
 function pendingChildEntries(depth: number, requestResponse: boolean): unknown[] {

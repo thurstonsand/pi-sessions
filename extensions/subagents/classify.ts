@@ -9,6 +9,8 @@ export type SubagentState =
   | "interrupted"
   | "unknown";
 
+const RUNNING_SUBAGENT_STATES: ReadonlySet<SubagentState> = new Set(["starting", "busy", "active"]);
+
 export interface SubagentEvidence {
   hasWindow: boolean;
   brokerLive: boolean;
@@ -18,6 +20,10 @@ export interface SubagentEvidence {
   suspended: boolean;
   hasReportOrClosure: boolean;
   childReadable: boolean;
+}
+
+export function isRunningSubagentState(state: SubagentState): boolean {
+  return RUNNING_SUBAGENT_STATES.has(state);
 }
 
 export function classifySubagent(evidence: SubagentEvidence): SubagentState {

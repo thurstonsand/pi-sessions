@@ -1,10 +1,8 @@
 import { tmuxSessionName } from "../shared/tmux.ts";
-import type { SubagentState } from "../subagents/classify.ts";
+import { isRunningSubagentState, type SubagentState } from "../subagents/classify.ts";
 import type { SubagentRosterEntry } from "../subagents/roster.ts";
 import { shellQuote } from "./launch/shell.ts";
 import type { HandoffLaunchReceipt } from "./receipt.ts";
-
-const RUNNING_SUBAGENT_STATES: ReadonlySet<SubagentState> = new Set(["starting", "busy", "active"]);
 
 export type HandoffBoardTab = "subagents" | "user-sessions";
 export type UserSessionStatus = "live" | "ready" | "starting" | "closed" | "unknown";
@@ -169,7 +167,7 @@ function buildUserSessionAction(
 function buildSubagentAction(entry: SubagentRosterEntry, insideTmux: boolean): HandoffBoardAction {
   return {
     subagent: entry,
-    canStop: RUNNING_SUBAGENT_STATES.has(entry.state),
+    canStop: isRunningSubagentState(entry.state),
     ...(entry.tmuxWindowId ? { observeCommand: buildObserveCommand(entry, insideTmux) } : {}),
     ...(!entry.managedLive ? { resumeCommand: entry.resumeCommand } : {}),
   };

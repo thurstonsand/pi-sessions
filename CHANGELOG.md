@@ -2,6 +2,17 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.10.0] - 2026-07-26
+
+### Added
+
+- Added `sessions.handoff.model` and `sessions.handoff.thinkingLevel` settings for choosing the agent that builds handoff prompts.
+
+### Fixed
+
+- Fixed subagents shutting down while their own delegated children were still running, allowing nested delegation chains to wait for reports and complete normally.
+- Fixed the session messaging broker failing to start from npm installations on Node.js 24 by packaging and consistently launching a compiled JavaScript broker.
+
 ## [0.9.0] - 2026-07-23
 
 - **Background subagents** - Delegate work to detached tmux sessions with durable reports, follow-up messaging, cancellation, wake and recovery behavior, and lifecycle management from the handoff board.

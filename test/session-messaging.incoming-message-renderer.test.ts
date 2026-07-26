@@ -21,13 +21,13 @@ const received = {
 function getRenderer() {
   return renderIncomingSessionMessage as unknown as (
     message: unknown,
-    options: { expanded: boolean },
+    options: { expanded: boolean; outputPad: number },
     rendererTheme: typeof theme,
   ) => { render(width: number): string[] } | undefined;
 }
 
-function renderIncoming(expanded: boolean): string {
-  const component = getRenderer()({ details: received }, { expanded }, theme);
+function renderIncoming(expanded: boolean, outputPad = 1): string {
+  const component = getRenderer()({ details: received }, { expanded, outputPad }, theme);
   if (!component) {
     throw new Error("Incoming message renderer returned no component.");
   }
@@ -51,7 +51,21 @@ describe("incoming session-message renderer", () => {
     expect(renderIncoming(true)).toContain("Fourth row.");
   });
 
+  it("honors the configured output padding", () => {
+    const paddedHeader = renderIncoming(false, 1)
+      .split("\n")
+      .find((line) => line.includes("incoming_message"));
+    const unpaddedHeader = renderIncoming(false, 0)
+      .split("\n")
+      .find((line) => line.includes("incoming_message"));
+
+    expect(paddedHeader).toMatch(/^ /);
+    expect(unpaddedHeader).toMatch(/^incoming_message/);
+  });
+
   it("returns no component for malformed details", () => {
-    expect(getRenderer()({ details: null }, { expanded: false }, theme)).toBeUndefined();
+    expect(
+      getRenderer()({ details: null }, { expanded: false, outputPad: 1 }, theme),
+    ).toBeUndefined();
   });
 });

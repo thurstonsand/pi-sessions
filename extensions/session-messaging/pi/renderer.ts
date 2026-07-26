@@ -17,7 +17,7 @@ export const renderIncomingSessionMessage: MessageRenderer = (message, options, 
     buildIncomingMessagePresentation(buildIncomingMessageView(details), theme),
     options.expanded,
   );
-  const box = new Box(1, 1, (text) => theme.bg("toolSuccessBg", text));
+  const box = new Box(options.outputPad, 1, (text) => theme.bg("toolSuccessBg", text));
   box.addChild(layout);
   return box;
 };

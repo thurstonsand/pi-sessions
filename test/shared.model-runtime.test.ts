@@ -16,12 +16,14 @@ describe("createSessionModelRuntime", () => {
     };
     const modelRegistry = {
       getRegisteredProviderIds: () => ["anthropic"],
+      getRegisteredNativeProvider: () => undefined,
       getRegisteredProviderConfig: () => providerConfig,
     } as unknown as ModelRegistry;
     const registerProvider = vi.fn();
     const refresh = vi.fn().mockResolvedValue({ aborted: false, errors: new Map() });
     const modelRuntime = {
       registerProvider,
+      registerNativeProvider: vi.fn(),
       refresh,
     } as unknown as ModelRuntime;
     vi.spyOn(ModelRuntime, "create").mockResolvedValue(modelRuntime);
@@ -41,11 +43,13 @@ describe("createSessionModelRuntime", () => {
     const registeredConfigs = new Map([["anthropic", { apiKey: "first" }]]);
     const modelRegistry = {
       getRegisteredProviderIds: () => [...registeredConfigs.keys()],
+      getRegisteredNativeProvider: () => undefined,
       getRegisteredProviderConfig: (providerId: string) => registeredConfigs.get(providerId),
     } as unknown as ModelRegistry;
     const registerProvider = vi.fn();
     const modelRuntime = {
       registerProvider,
+      registerNativeProvider: vi.fn(),
       refresh: vi.fn().mockResolvedValue({ aborted: false, errors: new Map() }),
     } as unknown as ModelRuntime;
     vi.spyOn(ModelRuntime, "create").mockResolvedValue(modelRuntime);
@@ -57,5 +61,33 @@ describe("createSessionModelRuntime", () => {
 
     expect(registerProvider).toHaveBeenCalledTimes(2);
     expect(registerProvider).toHaveBeenLastCalledWith("anthropic", replacement);
+  });
+
+  // pi-claude-bridge registers a native Provider, which the facade reports in
+  // getRegisteredProviderIds but never in getRegisteredProviderConfig.
+  it("mirrors natively registered providers", async () => {
+    const nativeProvider = { id: "anthropic-agent-sdk", stream: vi.fn() };
+    const modelRegistry = {
+      getRegisteredProviderIds: () => ["anthropic-agent-sdk", "legacy"],
+      getRegisteredNativeProvider: (providerId: string) =>
+        providerId === "anthropic-agent-sdk" ? nativeProvider : undefined,
+      getRegisteredProviderConfig: (providerId: string) =>
+        providerId === "legacy" ? { apiKey: "legacy" } : undefined,
+    } as unknown as ModelRegistry;
+    const registerProvider = vi.fn();
+    const registerNativeProvider = vi.fn();
+    const modelRuntime = {
+      registerProvider,
+      registerNativeProvider,
+      refresh: vi.fn().mockResolvedValue({ aborted: false, errors: new Map() }),
+    } as unknown as ModelRuntime;
+    vi.spyOn(ModelRuntime, "create").mockResolvedValue(modelRuntime);
+
+    await createSessionModelRuntime(modelRegistry);
+
+    expect(registerNativeProvider).toHaveBeenCalledOnce();
+    expect(registerNativeProvider).toHaveBeenCalledWith(nativeProvider);
+    expect(registerProvider).toHaveBeenCalledOnce();
+    expect(registerProvider).toHaveBeenCalledWith("legacy", { apiKey: "legacy" });
   });
 });

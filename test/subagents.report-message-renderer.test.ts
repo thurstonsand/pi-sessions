@@ -7,18 +7,25 @@ const theme = {
   bg: (_token: string, text: string) => text,
 };
 
-function render(details: unknown): string | undefined {
+function renderLines(details: unknown, outputPad = 1): string[] | undefined {
   const component = (
     renderSubagentReportMessage as unknown as (
       message: unknown,
-      options: { expanded: boolean },
+      options: { expanded: boolean; outputPad: number },
       rendererTheme: typeof theme,
     ) => { render(width: number): string[] } | undefined
-  )({ content: "model-facing provenance must not render", details }, { expanded: false }, theme);
+  )(
+    { content: "model-facing provenance must not render", details },
+    { expanded: false, outputPad },
+    theme,
+  );
 
-  return component
-    ?.render(80)
-    .map((line) => line.trim())
+  return component?.render(80);
+}
+
+function render(details: unknown): string | undefined {
+  return renderLines(details)
+    ?.map((line) => line.trim())
     .join("\n");
 }
 
@@ -61,6 +68,14 @@ describe("subagent report-message renderer", () => {
     "incomplete",
   ] as const)("includes [%s] in a non-done report header", (status) => {
     expect(render(report(status))).toContain(`Report from subagent [${status}] “Implement phase”`);
+  });
+
+  it("honors the configured output padding", () => {
+    const paddedHeader = renderLines(report(), 1)?.find((line) => line.includes("Report from"));
+    const unpaddedHeader = renderLines(report(), 0)?.find((line) => line.includes("Report from"));
+
+    expect(paddedHeader).toMatch(/^ /);
+    expect(unpaddedHeader).toMatch(/^Report from/);
   });
 
   it("returns no component for malformed or legacy details", () => {

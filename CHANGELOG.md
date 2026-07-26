@@ -2,6 +2,17 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [Unreleased]
+
+### Changed
+
+- Raised the minimum supported Pi version to 0.82.1 and made custom message renderers honor Pi's configured output padding.
+
+### Fixed
+
+- Fixed handoff, session_ask, and auto-title dropping natively registered extension providers such as pi-claude-bridge, which made their models unresolvable in nested sessions.
+- Fixed a full reindex aborting with `FOREIGN KEY constraint failed` when a session's parent transcript was not itself indexed.
+
 ## [0.10.0] - 2026-07-26
 
 ### Added

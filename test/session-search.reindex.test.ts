@@ -212,6 +212,60 @@ describe("rebuildSessionIndex", () => {
     });
   });
 
+  it("does not materialize lineage to sessions excluded from the reindex", async () => {
+    const root = testFs.createTempDir();
+    const nestedDir = path.join(root, "sessions", "--repo--");
+    const indexPath = path.join(root, "index.sqlite");
+    const cwd = "/repo/app";
+
+    const parentPath = testFs.writeJsonlFile(nestedDir, "parent.jsonl", [
+      {
+        type: "session",
+        id: "excluded-parent",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd,
+      },
+    ]);
+    const childPath = testFs.writeJsonlFile(nestedDir, "child.jsonl", [
+      {
+        type: "session",
+        id: "indexed-child",
+        timestamp: "2026-03-22T00:10:00.000Z",
+        cwd,
+        parentSession: parentPath,
+      },
+    ]);
+
+    vi.spyOn(SessionManager, "listAll").mockResolvedValue([
+      {
+        path: childPath,
+        id: "indexed-child",
+        cwd,
+        created: new Date("2026-03-22T00:10:00.000Z"),
+        modified: new Date("2026-03-22T00:10:00.000Z"),
+        messageCount: 0,
+        firstMessage: "",
+        allMessagesText: "",
+      } satisfies SessionInfo,
+    ]);
+
+    await rebuildSessionIndex({ indexPath });
+
+    const db = openIndexDatabase(indexPath, { create: false });
+    const child = db
+      .prepare(`SELECT parent_session_id as parentSessionId FROM sessions WHERE session_id = ?`)
+      .get("indexed-child");
+    const relations = db
+      .prepare(
+        `SELECT related_session_id as relatedSessionId FROM session_lineage_relations WHERE session_id = ?`,
+      )
+      .all("indexed-child");
+    db.close();
+
+    expect(child).toEqual({ parentSessionId: "excluded-parent" });
+    expect(relations).toEqual([{ relatedSessionId: "indexed-child" }]);
+  });
+
   it("rebuilds in place so connections opened before the rebuild see the new data", async () => {
     const root = testFs.createTempDir();
     const sessionsDir = path.join(root, "sessions");

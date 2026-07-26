@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildHandoffKickoffMessage,
   HANDOFF_KICKOFF_CUSTOM_TYPE,
+  renderHandoffKickoffMessage,
   renderHandoffKickoffView,
 } from "../extensions/session-handoff/kickoff.ts";
 import { hasStartedConversation } from "../extensions/session-handoff/metadata.ts";
@@ -59,6 +60,26 @@ describe("handoff kickoff message", () => {
     );
     expect(view).toContain("from parent-1");
     expect(view).not.toContain("(parent-1)");
+  });
+
+  it("honors the configured output padding", () => {
+    const renderer = renderHandoffKickoffMessage as unknown as (
+      message: unknown,
+      options: { expanded: boolean; outputPad: number },
+      rendererTheme: typeof theme,
+    ) => { render(width: number): string[] } | undefined;
+    const message = buildHandoffKickoffMessage({
+      prompt: "Prompt",
+      title: "Title",
+      source: { sessionId: "parent-1" },
+    });
+    const renderHeader = (outputPad: number) =>
+      renderer(message, { expanded: false, outputPad }, theme)
+        ?.render(80)
+        .find((line) => line.includes("handoff Title"));
+
+    expect(renderHeader(1)).toMatch(/^ /);
+    expect(renderHeader(0)).toMatch(/^handoff Title/);
   });
 });
 

@@ -55,22 +55,23 @@ export function buildHandoffKickoffSource(source: HandoffKickoffSource): Handoff
   };
 }
 
-export const renderHandoffKickoffMessage: MessageRenderer = (message, _options, theme) => {
+export const renderHandoffKickoffMessage: MessageRenderer = (message, options, theme) => {
   const details = safeParseTypeBoxValue(HANDOFF_KICKOFF_DETAILS_SCHEMA, message.details);
   if (!details) {
     return undefined;
   }
 
   const prompt = typeof message.content === "string" ? message.content : "";
-  return createHandoffKickoffComponent(details, prompt, theme);
+  return createHandoffKickoffComponent(details, prompt, options.outputPad, theme);
 };
 
 export function createHandoffKickoffComponent(
   details: HandoffKickoffDetails,
   prompt: string,
+  outputPad: number,
   theme: RenderTheme,
 ): Component {
-  const box = new Box(1, 1, (text: string) => theme.bg("customMessageBg", text));
+  const box = new Box(outputPad, 1, (text: string) => theme.bg("customMessageBg", text));
   box.addChild(new Text(renderHandoffKickoffView(details, prompt, theme), 0, 0));
   return box;
 }

@@ -239,6 +239,7 @@ function buildSessionGraph(db: SessionIndexDatabase): SessionGraph {
     "Invalid session graph rows",
   );
 
+  const sessionIds = new Set(rows.map((row) => row.sessionId));
   const pathToId = new Map(rows.map((row) => [row.sessionPath, row.sessionId]));
   const nodes = new Map<string, SessionGraphNode>(
     rows.map((row) => [
@@ -246,8 +247,11 @@ function buildSessionGraph(db: SessionIndexDatabase): SessionGraph {
       {
         ...row,
         resolvedParentSessionId:
-          row.parentSessionId ??
-          (row.parentSessionPath ? pathToId.get(row.parentSessionPath) : undefined),
+          row.parentSessionId && sessionIds.has(row.parentSessionId)
+            ? row.parentSessionId
+            : row.parentSessionPath
+              ? pathToId.get(row.parentSessionPath)
+              : undefined,
       },
     ]),
   );

@@ -19,6 +19,7 @@
     "node": ">=24 <26"
   },
   "files": [
+    "dist",
     "extensions",
     "images"
   ],
@@ -28,12 +29,15 @@
     ]
   },
   "scripts": {
+    "build:broker": "tsc --project tsconfig.broker.json",
     "lint": "biome check .",
     "format": "biome format --write .",
     "typecheck": "tsc --noEmit",
+    "pretest": "npm run build:broker",
     "test": "vitest run",
-    "check": "biome check . && tsc --noEmit && vitest run",
-    "prepare": "husky || true"
+    "check": "biome check . && tsc --noEmit && npm test",
+    "prepare": "npm run build:broker && npm run prepare:husky",
+    "prepare:husky": "husky || true"
   },
   "dependencies": {
     "typebox": "^1.1.38"

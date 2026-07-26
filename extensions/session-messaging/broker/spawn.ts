@@ -34,7 +34,15 @@ export async function spawnSessionMessagingBrokerIfNeeded(): Promise<void> {
       return;
     }
 
-    const brokerPath = join(dirname(fileURLToPath(import.meta.url)), "process.ts");
+    const brokerPath = join(
+      dirname(fileURLToPath(import.meta.url)),
+      "../../../dist/session-messaging/broker/process.js",
+    );
+    if (!existsSync(brokerPath)) {
+      throw new Error(
+        `Session messaging broker build not found: ${brokerPath}. Run npm install in the pi-sessions package directory.`,
+      );
+    }
     const child = spawn(process.execPath, [brokerPath], {
       detached: true,
       stdio: "ignore",
@@ -164,15 +172,12 @@ function releaseSpawnLock(): void {
 }
 
 function brokerSpawnEnv(): NodeJS.ProcessEnv {
-  // NODE_NO_WARNINGS silences Node's experimental-TypeScript warning when the
-  // broker is launched as `node process.ts`. Redundant while stdio is ignored,
-  // but cheap insurance if that changes or an older Node revives the warning.
-  const env: NodeJS.ProcessEnv = { ...process.env, NODE_NO_WARNINGS: "1" };
+  const env: NodeJS.ProcessEnv = { ...process.env };
   // process.execPath is the Pi executable. As a Bun-compiled binary it treats a
   // positional path as a file argument to the agent, not a script to run, which
   // would relaunch a full agent session and recurse. BUN_BE_BUN makes it behave
-  // as the Bun CLI and execute process.ts directly. It is set whenever Bun is the
-  // runtime (compiled binary or `bun run`) and ignored by a plain Node launch.
+  // as the Bun CLI and execute the broker. It is set whenever Bun is the runtime
+  // (compiled binary or `bun run`) and ignored by a plain Node launch.
   if (process.versions.bun) {
     env.BUN_BE_BUN = "1";
   }

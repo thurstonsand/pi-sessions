@@ -72,7 +72,7 @@ npm run check
 npm pack --dry-run
 ```
 
-Read the tarball contents. Make sure expected source files are included and obvious junk is absent. The version shown here is `package.json`'s current (stale) version, not the version being released — that's expected; CI sets the real version from the tag.
+Read the tarball contents. Make sure expected source files and `dist/session-messaging/broker/process.js` are included and obvious junk is absent. The version shown here is `package.json`'s current (stale) version, not the version being released — that's expected; CI sets the real version from the tag.
 
 Do not proceed on failures. Fix them or report the blocker.
 

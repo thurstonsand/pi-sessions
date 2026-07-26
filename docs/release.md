@@ -11,7 +11,7 @@ How `pi-sessions` is released to npm. This is the human companion to the `npm-re
 ## Release flow
 
 1. Add a new `## [X.Y.Z] - YYYY-MM-DD` entry to the top of `CHANGELOG.md`.
-2. Verify locally with `npm run check` and `npm pack --dry-run`.
+2. Verify locally with `npm run check` and `npm pack --dry-run`; confirm the package contains `dist/session-messaging/broker/process.js`.
 3. Commit the release prep.
 4. Push `main`.
 5. Create an annotated `vX.Y.Z` tag using the matching `CHANGELOG.md` entry as the tag body.

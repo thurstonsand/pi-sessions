@@ -7,6 +7,7 @@
 npm run check
 
 # Individual steps
+npm run build:broker
 npm run lint
 npm run format
 npm run typecheck
@@ -19,7 +20,7 @@ npm test -- -t "creates schema and reports status"
 npm test -- test/session-search.extract.test.ts
 ```
 
-No build/compile step — The pi framework loads extensions directly from TypeScript source.
+Pi loads extension code directly from TypeScript source. `prepare` and `pretest` compile only the detached messaging broker.
 
 ## Code Style
 

@@ -189,6 +189,7 @@ Delegate two subagents: one to summarize README.md, and one to summarize CHANGEL
 Expected:
 
 - two `session_handoff` calls with `launch: "subagent"`
+- both launches succeed on the first attempt; neither fails with `duplicate session: pi-<parent-id-prefix>`
 - `tmux ls` shows a detached `pi-<parent-id-prefix>` session with one window per worker
 - `/handoff` opens the **Handoffs** board with both workers on the **Subagents** tab, showing `starting` then `busy`
 

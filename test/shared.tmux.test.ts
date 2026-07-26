@@ -123,6 +123,26 @@ describe("tmux substrate", () => {
     expect(executor.exec).toHaveBeenCalledTimes(1);
   });
 
+  it("serializes concurrent launches so siblings never both create the session", async () => {
+    const executor = statefulExecutor();
+
+    const windows = await Promise.all(
+      ["child-1", "child-2", "child-3"].map((piSessionId) =>
+        createTmuxWindow(executor, {
+          tmuxSession: "pi-88171ce49021",
+          name: `Worker ${piSessionId}`,
+          cwd: "/tmp/project",
+          command: `pi --session-id ${piSessionId}`,
+          piSessionId,
+        }),
+      ),
+    );
+
+    expect(windows.map((window) => window.piSessionId)).toEqual(["child-1", "child-2", "child-3"]);
+    expect(executor.commands.filter((command) => command === "new-session")).toHaveLength(1);
+    expect(executor.commands.filter((command) => command === "new-window")).toHaveLength(2);
+  });
+
   it("verifies window and session teardown", async () => {
     const executor = fakeExecutor(ok("@4\tWorker\tchild-1\n"), ok(), missing(), ok(), missing());
 
@@ -137,5 +157,61 @@ describe("tmux substrate", () => {
 function fakeExecutor(...results: ExecResult[]): TmuxExecutor & { exec: ReturnType<typeof vi.fn> } {
   return {
     exec: vi.fn(async () => results.shift() ?? ok()),
+  };
+}
+
+// Mimics the tmux server closely enough to reproduce the `duplicate session` race.
+function statefulExecutor(): TmuxExecutor & { commands: string[] } {
+  const windows: { windowId: string; name: string; piSessionId: string }[] = [];
+  const commands: string[] = [];
+  let sessionExists = false;
+
+  return {
+    commands,
+    async exec(_command, args) {
+      const at = (index: number): string => {
+        const value = args[index];
+        if (value === undefined) {
+          throw new Error(`fake tmux invoked without argument ${index}: ${args.join(" ")}`);
+        }
+        return value;
+      };
+      const subcommand = at(0);
+      commands.push(subcommand);
+      await new Promise((resolve) => setTimeout(resolve, 1));
+      switch (subcommand) {
+        case "list-windows":
+          return ok(
+            windows.map((w) => `${w.windowId}\t${w.name}\t${w.piSessionId}`).join("\n") + "\n",
+          );
+        case "has-session":
+          return sessionExists ? ok() : missing();
+        case "new-session":
+          if (sessionExists) {
+            return {
+              stdout: "",
+              stderr: "duplicate session: pi-88171ce49021",
+              code: 1,
+              killed: false,
+            };
+          }
+          sessionExists = true;
+          windows.push({ windowId: `@${windows.length + 1}`, name: at(8), piSessionId: "" });
+          return ok(`@${windows.length}\n`);
+        case "new-window":
+          windows.push({ windowId: `@${windows.length + 1}`, name: at(8), piSessionId: "" });
+          return ok(`@${windows.length}\n`);
+        case "set-option": {
+          const window = windows.find((candidate) => candidate.windowId === at(3));
+          if (!window) {
+            return missing();
+          }
+          window.piSessionId = at(5);
+          return ok();
+        }
+        default:
+          return ok();
+      }
+    },
   };
 }

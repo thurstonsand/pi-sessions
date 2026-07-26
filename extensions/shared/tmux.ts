@@ -81,7 +81,29 @@ export async function hasAttachedTmuxClients(
   return result.stdout.split("\n").some((line) => line.trim().length > 0);
 }
 
+const pendingCreations = new Map<string, Promise<unknown>>();
+
+// Creating a window is check-then-act: it asks whether the tmux session exists and then either
+// creates it or adds to it. Sibling subagents launched in one turn share a session name and race,
+// so all but the winner get `duplicate session`. Only the parent's process ever creates its own
+// session name, so serializing here is enough to close the window.
 export async function createTmuxWindow(
+  executor: TmuxExecutor,
+  options: CreateTmuxWindowOptions,
+): Promise<TmuxWindow> {
+  const preceding = pendingCreations.get(options.tmuxSession) ?? Promise.resolve();
+  const creation = preceding.catch(() => {}).then(() => createWindow(executor, options));
+  pendingCreations.set(options.tmuxSession, creation);
+  try {
+    return await creation;
+  } finally {
+    if (pendingCreations.get(options.tmuxSession) === creation) {
+      pendingCreations.delete(options.tmuxSession);
+    }
+  }
+}
+
+async function createWindow(
   executor: TmuxExecutor,
   options: CreateTmuxWindowOptions,
 ): Promise<TmuxWindow> {

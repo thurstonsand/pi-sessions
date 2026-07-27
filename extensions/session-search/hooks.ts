@@ -228,7 +228,7 @@ function syncSessionFileWithDb(
   const stat = statSync(sessionFile);
 
   if (baseline && isIndexCurrent(baseline, stat, sessionOrigin)) {
-    db.transaction(() => writeHookSyncMetadata(db, eventType)).immediate();
+    db.transaction(() => writeHookSyncMetadata(db, eventType));
     return true;
   }
 
@@ -279,11 +279,6 @@ function isIndexCurrent(
   );
 }
 
-// All write transactions are immediate: they read before they write, and a
-// deferred transaction whose snapshot goes stale fails with SQLITE_BUSY on the
-// read-to-write upgrade without ever invoking the busy handler. Immediate mode
-// takes the write lock at BEGIN, where busy_timeout queues us behind concurrent
-// writers from other pi processes.
 function applyFullSync(
   db: SessionIndexDatabase,
   extracted: ExtractedSessionRecord,
@@ -312,7 +307,7 @@ function applyFullSync(
     }
 
     writeHookSyncMetadata(db, eventType);
-  }).immediate();
+  });
 }
 
 function applyTailSync(
@@ -322,60 +317,58 @@ function applyTailSync(
   eventType: string,
   sessionOrigin?: SessionOrigin,
 ): boolean {
-  return db
-    .transaction((): boolean => {
-      // Another process may have advanced the index between our baseline read
-      // and this transaction; the tail deltas would then double-count.
-      const current = getSessionRowByPath(db, baseline.sessionPath);
-      if (
-        !current ||
-        current.sessionId !== baseline.sessionId ||
-        current.indexedFileSize !== baseline.indexedFileSize
-      ) {
-        return false;
-      }
+  return db.transaction((): boolean => {
+    // Another process may have advanced the index between our baseline read
+    // and this transaction; the tail deltas would then double-count.
+    const current = getSessionRowByPath(db, baseline.sessionPath);
+    if (
+      !current ||
+      current.sessionId !== baseline.sessionId ||
+      current.indexedFileSize !== baseline.indexedFileSize
+    ) {
+      return false;
+    }
 
-      const scan = tail.scan;
-      upsertSession(db, buildTailSessionRow(baseline, tail, sessionOrigin), "hook");
+    const scan = tail.scan;
+    upsertSession(db, buildTailSessionRow(baseline, tail, sessionOrigin), "hook");
 
-      if (scan.sessionName !== undefined && scan.sessionName !== baseline.sessionName) {
-        clearSessionChunksBySourceKind(db, baseline.sessionId, "session_name");
-        if (scan.sessionName && scan.sessionNameEntryId) {
-          insertTextChunk(db, {
-            sessionId: baseline.sessionId,
-            ...createSessionNameChunk(
-              scan.sessionName,
-              scan.sessionNameTs ?? baseline.startedAt,
-              scan.sessionNameEntryId,
-            ),
-          });
-        }
-      }
-
-      if (!baseline.handoffGoal && scan.handoffMetadata) {
-        const { entryId, ts, metadata } = scan.handoffMetadata;
+    if (scan.sessionName !== undefined && scan.sessionName !== baseline.sessionName) {
+      clearSessionChunksBySourceKind(db, baseline.sessionId, "session_name");
+      if (scan.sessionName && scan.sessionNameEntryId) {
         insertTextChunk(db, {
           sessionId: baseline.sessionId,
-          entryId,
-          entryType: "custom",
-          ts,
-          sourceKind: "handoff_goal",
-          text: metadata.goal,
+          ...createSessionNameChunk(
+            scan.sessionName,
+            scan.sessionNameTs ?? baseline.startedAt,
+            scan.sessionNameEntryId,
+          ),
         });
       }
+    }
 
-      for (const chunk of scan.chunks) {
-        insertTextChunk(db, { sessionId: baseline.sessionId, ...chunk });
-      }
+    if (!baseline.handoffGoal && scan.handoffMetadata) {
+      const { entryId, ts, metadata } = scan.handoffMetadata;
+      insertTextChunk(db, {
+        sessionId: baseline.sessionId,
+        entryId,
+        entryType: "custom",
+        ts,
+        sourceKind: "handoff_goal",
+        text: metadata.goal,
+      });
+    }
 
-      for (const fileTouch of scan.fileTouches) {
-        insertSessionFileTouch(db, { sessionId: baseline.sessionId, ...fileTouch });
-      }
+    for (const chunk of scan.chunks) {
+      insertTextChunk(db, { sessionId: baseline.sessionId, ...chunk });
+    }
 
-      writeHookSyncMetadata(db, eventType);
-      return true;
-    })
-    .immediate();
+    for (const fileTouch of scan.fileTouches) {
+      insertSessionFileTouch(db, { sessionId: baseline.sessionId, ...fileTouch });
+    }
+
+    writeHookSyncMetadata(db, eventType);
+    return true;
+  });
 }
 
 function buildTailSessionRow(

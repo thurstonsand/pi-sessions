@@ -1,5 +1,4 @@
 import { appendFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { afterEach, describe, expect, it } from "vitest";
@@ -887,8 +886,8 @@ describe("session-search hooks", () => {
 
 const WRITE_LOCK_HOLDER_SCRIPT = `
 const { parentPort, workerData } = require("node:worker_threads");
-const Database = require(workerData.driverPath);
-const db = new Database(workerData.dbPath);
+const { DatabaseSync } = require("node:sqlite");
+const db = new DatabaseSync(workerData.dbPath);
 db.exec("PRAGMA busy_timeout = 0");
 db.exec("BEGIN IMMEDIATE");
 db.prepare(
@@ -905,10 +904,9 @@ async function holdWriteLockInWorker(
   dbPath: string,
   holdMs: number,
 ): Promise<{ released: Promise<void> }> {
-  const driverPath = createRequire(import.meta.url).resolve("better-sqlite3");
   const worker = new Worker(WRITE_LOCK_HOLDER_SCRIPT, {
     eval: true,
-    workerData: { dbPath, driverPath, holdMs },
+    workerData: { dbPath, holdMs },
   });
 
   await new Promise<void>((resolve, reject) => {

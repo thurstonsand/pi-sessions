@@ -35,8 +35,8 @@ Pi loads extension code directly from TypeScript source. Only the detached messa
 
 ## Gotchas
 
-- Wrap multi-step writes in transactions and run them with `db.transaction(fn).immediate()` — a deferred read-then-write transaction fails with `SQLITE_BUSY` on the snapshot upgrade
-- SQLite is accessed via `bun:sqlite` when using bun as the runtime, `better-sqlite3` otherwise
+- Wrap multi-step writes in `db.transaction(fn)` which enforces immediate — a deferred read-then-write transaction fails with `SQLITE_BUSY` on the snapshot upgrade
+- SQLite is accessed via each runtime's built-in driver: `bun:sqlite` under bun, `node:sqlite` otherwise
 - use `.ts` extensions for repo-local imports
 - the broker runs under raw Node with no `node_modules` beside it; nothing in its import graph may import a package, TypeBox included
 - pi tracks `main` for git installs, so every commit must carry a `dist/` that matches its source; the pre-commit hook rejects a stale one

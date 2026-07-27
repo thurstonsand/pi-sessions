@@ -34,7 +34,7 @@ export async function rebuildSessionIndex(options: ReindexOptions): Promise<Rein
     db.transaction(() => {
       dropIndexTables(db);
       initializeSchema(db);
-    }).immediate();
+    });
 
     let sessionCount = 0;
     let chunkCount = 0;
@@ -44,7 +44,7 @@ export async function rebuildSessionIndex(options: ReindexOptions): Promise<Rein
         continue;
       }
 
-      db.transaction(() => indexSession(db, extracted)).immediate();
+      db.transaction(() => indexSession(db, extracted));
       sessionCount += 1;
       chunkCount += extracted.chunks.length;
     }
@@ -53,7 +53,7 @@ export async function rebuildSessionIndex(options: ReindexOptions): Promise<Rein
       rebuildSessionLineageRelations(db);
       setMetadata(db, "indexed_at", new Date().toISOString());
       setMetadata(db, "session_source", "SessionManager.listAll()");
-    }).immediate();
+    });
 
     return { sessionCount, chunkCount, indexPath };
   } finally {

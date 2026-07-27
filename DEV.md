@@ -1,26 +1,29 @@
 # DEV.md
 
-## Commands
+## Setup
 
-```bash
-# Full quality gate — run before committing
-npm run check
-
-# Individual steps
-npm run build:broker
-npm run lint
-npm run format
-npm run typecheck
-npm test
-
-# Single test by name pattern
-npm test -- -t "creates schema and reports status"
-
-# Single test file
-npm test -- test/session-search.extract.test.ts
+```sh
+mise trust && mise bootstrap
 ```
 
-Pi loads extension code directly from TypeScript source. `prepare` and `pretest` compile only the detached messaging broker.
+## Commands
+
+```sh
+mise run lint
+mise run format
+mise run typecheck
+mise run test
+mise run build:broker
+mise run check      # full verification gate
+```
+
+Single test file:
+
+```sh
+mise run test -- test/session-search.extract.test.ts
+```
+
+Pi loads extension code directly from TypeScript source. Only the detached messaging broker is compiled, by `build:broker`, and committed to repo in `dist/`.
 
 ## Code Style
 
@@ -35,6 +38,8 @@ Pi loads extension code directly from TypeScript source. `prepare` and `pretest`
 - Wrap multi-step writes in transactions and run them with `db.transaction(fn).immediate()` — a deferred read-then-write transaction fails with `SQLITE_BUSY` on the snapshot upgrade
 - SQLite is accessed via `bun:sqlite` when using bun as the runtime, `better-sqlite3` otherwise
 - use `.ts` extensions for repo-local imports
+- the broker runs under raw Node with no `node_modules` beside it; nothing in its import graph may import a package, TypeBox included
+- pi tracks `main` for git installs, so every commit must carry a `dist/` that matches its source; the pre-commit hook rejects a stale one
 
 ## Project structure
 

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { EventEmitter } from "node:events";
 import net from "node:net";
+import { parseTypeBoxValue } from "../typebox.ts";
 import { readFrames, writeFrame } from "./framing.ts";
 import {
   BROKER_FRAME_SCHEMA,
@@ -176,10 +177,8 @@ export class SessionMessagingClient extends EventEmitter {
 
   private async readSocket(socket: net.Socket): Promise<void> {
     try {
-      for await (const frame of readFrames(
-        socket,
-        BROKER_FRAME_SCHEMA,
-        "Invalid session messaging broker frame",
+      for await (const frame of readFrames(socket, (value) =>
+        parseTypeBoxValue(BROKER_FRAME_SCHEMA, value, "Invalid session messaging broker frame"),
       )) {
         this.handleFrame(frame);
       }

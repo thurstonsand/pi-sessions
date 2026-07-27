@@ -1,7 +1,5 @@
 import type { Socket } from "node:net";
 import { createInterface } from "node:readline";
-import type { Static, TSchema } from "typebox";
-import { parseTypeBoxValue } from "../typebox.ts";
 
 const MAX_FRAME_BYTES = 256 * 1024;
 
@@ -9,11 +7,12 @@ export function writeFrame<T>(socket: Socket, frame: T): void {
   socket.write(`${JSON.stringify(frame)}\n`);
 }
 
-export async function* readFrames<T extends TSchema>(
+// The parser is injected so the detached broker can run with no dependencies
+// installed alongside it, while Pi-side callers keep using TypeBox schemas.
+export async function* readFrames<T>(
   socket: Socket,
-  schema: T,
-  context: string,
-): AsyncGenerator<Static<T>> {
+  parseFrame: (value: unknown) => T,
+): AsyncGenerator<T> {
   const reader = createInterface({ input: socket, crlfDelay: Number.POSITIVE_INFINITY });
   const lines: string[] = [];
   const waiters: Array<() => void> = [];
@@ -64,7 +63,7 @@ export async function* readFrames<T extends TSchema>(
         throw parseError instanceof Error ? parseError : new Error(String(parseError));
       }
 
-      yield parseTypeBoxValue(schema, parsed, context);
+      yield parseFrame(parsed);
     }
   } finally {
     reader.close();

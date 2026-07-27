@@ -238,9 +238,9 @@ To change auto-titling settings, edit `~/.pi/agent/settings.json`:
 ## Development
 
 ```bash
-npm install
-npm run check
-npm test
+mise trust && mise bootstrap
+mise run check
+mise run test
 ```
 
 For an end-to-end manual flow, see [SMOKE.md](./SMOKE.md).

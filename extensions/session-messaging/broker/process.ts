@@ -3,17 +3,16 @@ import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { readFrames, writeFrame } from "../../shared/session-broker/framing.ts";
 import {
-  CLIENT_FRAME_SCHEMA,
-  type OutboundSessionEnvelope,
-  type SessionEnvelope,
-  type SessionMessagingClientFrame,
-  type SessionMessagingIncomingAckClientFrame,
-  type SessionMessagingSendClientFrame,
-} from "../../shared/session-broker/protocol.ts";
-import {
   getSessionMessagingDir,
   getSessionMessagingSocketPath,
 } from "../../shared/session-broker/socket-path.ts";
+import {
+  type BrokerClientFrame,
+  type IncomingAckClientFrame,
+  parseClientFrame,
+  type RoutedEnvelope,
+  type SendClientFrame,
+} from "./client-frame.ts";
 
 const SEND_TIMEOUT_MS = 10_000;
 const EXIT_IDLE_MS = 5_000;
@@ -71,7 +70,7 @@ function resolveTarget(target: string): { sessionId: string; socket: Socket } | 
 
 function handleFrame(
   socket: Socket,
-  message: SessionMessagingClientFrame,
+  message: BrokerClientFrame,
   getSessionId: () => string | undefined,
   setSessionId: (sessionId: string | undefined) => void,
 ): void {
@@ -129,7 +128,7 @@ function handleFrame(
 function handleSend(
   socket: Socket,
   currentSessionId: string | undefined,
-  message: SessionMessagingSendClientFrame,
+  message: SendClientFrame,
 ): void {
   const source = currentSessionId ? sessions.get(currentSessionId) : undefined;
 
@@ -206,7 +205,7 @@ function failPendingSendsTo(targetSessionId: string): void {
   }
 }
 
-function handleIncomingAck(socket: Socket, message: SessionMessagingIncomingAckClientFrame): void {
+function handleIncomingAck(socket: Socket, message: IncomingAckClientFrame): void {
   const pending = pendingSends.get(message.requestId);
   if (!pending || pending.target !== socket) return;
 
@@ -220,11 +219,7 @@ function handleIncomingAck(socket: Socket, message: SessionMessagingIncomingAckC
   });
 }
 
-function stampEnvelope(
-  envelope: OutboundSessionEnvelope,
-  source: string,
-  target: string,
-): SessionEnvelope {
+function stampEnvelope(envelope: RoutedEnvelope, source: string, target: string): RoutedEnvelope {
   return { ...envelope, source, target };
 }
 
@@ -251,11 +246,7 @@ async function readConnection(
   setSessionId: (sessionId: string | undefined) => void,
 ): Promise<void> {
   try {
-    for await (const frame of readFrames(
-      socket,
-      CLIENT_FRAME_SCHEMA,
-      "Invalid session messaging client frame",
-    )) {
+    for await (const frame of readFrames(socket, parseClientFrame)) {
       handleFrame(socket, frame, getSessionId, setSessionId);
     }
   } catch (error) {

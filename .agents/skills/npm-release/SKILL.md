@@ -68,7 +68,7 @@ If release mechanics change, update this skill and `docs/release.md`.
 Run the full gate and inspect package contents:
 
 ```sh
-npm run check
+mise run check
 npm pack --dry-run
 ```
 
@@ -80,7 +80,7 @@ Do not proceed on failures. Fix them or report the blocker.
 
 Stage only release-relevant files (release notes, code changes — not a `package.json` version bump) and commit.
 
-If hooks modify staged files, the commit will fail. Ensure the hook is resolved, then recommit.
+The pre-commit hook rejects the commit on issues. Raise any issues to the user to decide how to proceed.
 
 ## 5. Push main
 

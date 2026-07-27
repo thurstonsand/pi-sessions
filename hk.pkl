@@ -1,0 +1,12 @@
+amends "package://github.com/jdx/hk/releases/download/v1.53.0/hk@1.53.0#/Config.pkl"
+
+hooks {
+    ["pre-commit"] {
+        steps {
+            ["lint"] {
+                check = "mise run lint"
+                exclusive = true
+            }
+        }
+    }
+}

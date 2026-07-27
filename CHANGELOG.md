@@ -7,6 +7,7 @@
 ### Changed
 
 - Raised the minimum supported Pi version to 0.82.1 and made custom message renderers honor Pi's configured output padding.
+- Changed the package to install with no runtime dependencies; the detached broker now validates protocol frames itself instead of loading TypeBox.
 
 ### Fixed
 
@@ -23,6 +24,7 @@
 
 - Fixed subagents shutting down while their own delegated children were still running, allowing nested delegation chains to wait for reports and complete normally.
 - Fixed the session messaging broker failing to start from npm installations on Node.js 24 by packaging and consistently launching a compiled JavaScript broker.
+- Fixed git installations never producing the compiled broker, which left session messaging and subagents unavailable; the compiled broker is now committed to the repository instead of built during installation.
 
 ## [0.9.0] - 2026-07-23
 

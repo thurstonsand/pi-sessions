@@ -5,6 +5,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
 } from "node:fs";
@@ -20,37 +21,37 @@ interface NpmPackResult {
   files: Array<{ path: string }>;
 }
 
-test("package includes the compiled session messaging broker", () => {
+// The runner may be npm or mise, so npm is located through npm_execpath when
+// present and otherwise resolved from PATH.
+function runNpmPack(): string {
+  const args = ["pack", "--dry-run", "--json", "--ignore-scripts"];
   const npmCliPath = process.env.npm_execpath;
-  if (!npmCliPath) {
-    throw new Error("npm_execpath is required to inspect the package contents.");
-  }
+  const [command, commandArgs] = npmCliPath
+    ? [process.execPath, [npmCliPath, ...args]]
+    : ["npm", args];
 
-  const output = execFileSync(
-    process.execPath,
-    [npmCliPath, "pack", "--dry-run", "--json", "--ignore-scripts"],
-    { cwd: packageRoot, encoding: "utf8" },
-  );
+  return execFileSync(command, commandArgs, { cwd: packageRoot, encoding: "utf8" });
+}
+
+test("package includes the compiled session messaging broker", () => {
+  const output = runNpmPack();
   const result = JSON.parse(output) as NpmPackResult[] | { "pi-sessions": NpmPackResult };
   const pack = Array.isArray(result) ? result[0] : result["pi-sessions"];
 
   expect(pack?.files.map((file) => file.path)).toContain(compiledBrokerPath);
 });
 
-test("compiled broker starts beneath node_modules with raw Node", async () => {
+test("compiled broker starts with no dependencies installed", async () => {
   const fixtureDir = mkdtempSync(join(tmpdir(), "pi-sessions-packed-broker-"));
   const installedPackageDir = join(fixtureDir, "node_modules", "pi-sessions");
   const messagingDir = join(fixtureDir, "messaging");
   mkdirSync(installedPackageDir, { recursive: true });
   cpSync(join(packageRoot, "dist"), join(installedPackageDir, "dist"), { recursive: true });
   copyFileSync(join(packageRoot, "package.json"), join(installedPackageDir, "package.json"));
-  cpSync(
-    join(packageRoot, "node_modules", "typebox"),
-    join(fixtureDir, "node_modules", "typebox"),
-    {
-      recursive: true,
-    },
-  );
+
+  // The broker must boot from a checkout whose `npm install` never ran, so the
+  // fixture deliberately holds nothing but the package itself.
+  expect(readdirSync(join(fixtureDir, "node_modules"))).toEqual(["pi-sessions"]);
 
   const child = spawn(process.execPath, [join(installedPackageDir, compiledBrokerPath)], {
     env: { ...process.env, PI_SESSIONS_MESSAGING_DIR: messagingDir },

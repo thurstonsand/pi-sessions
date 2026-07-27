@@ -1,2 +1,65 @@
+min_version = "2026.7.4"
+
+[settings]
+experimental = true
+
+[hooks]
+enter = "mise bootstrap --yes --quiet"
+
 [tools]
+actionlint = "1.7.12"
+hk = "1.53.0"
 node = "24"
+
+[env]
+HK_MISE = "1"
+_.path = ["{{config_root}}/node_modules/.bin"]
+
+[tasks.bootstrap]
+description = "Install project dependencies and git hooks"
+run = [
+    "npm ci --quiet --no-fund --no-audit",
+    "hk install --mise --quiet",
+    "mkdir -p .mise && touch .mise/bootstrap",
+]
+sources = ["mise.toml", "hk.pkl", "package.json", "package-lock.json"]
+outputs = ["node_modules/.package-lock.json", ".mise/bootstrap"]
+quiet = true
+
+[tasks."build:broker"]
+description = "Compile the detached messaging broker into dist/"
+run = "tsc --project tsconfig.broker.json"
+
+[tasks.lint]
+description = "Lint"
+depends = ["lint:biome", "lint:actions", "lint:broker"]
+
+[tasks."lint:biome"]
+description = "Lint TypeScript and JSON"
+run = "biome check ."
+
+[tasks."lint:actions"]
+description = "Lint GitHub Actions workflows"
+run = "actionlint"
+
+[tasks."lint:broker"]
+description = "Verify the committed broker build matches its source"
+depends = ["build:broker"]
+run = "git diff --exit-code -- dist"
+
+[tasks.format]
+description = "Format and apply safe fixes"
+run = "biome check --write ."
+
+[tasks.typecheck]
+description = "Type-check TypeScript"
+run = "tsc --noEmit"
+
+[tasks.test]
+description = "Run tests"
+depends = ["build:broker"]
+run = "vitest run"
+
+[tasks.check]
+description = "Run full verification"
+depends = ["lint", "typecheck", "test"]

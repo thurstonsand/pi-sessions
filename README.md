@@ -65,15 +65,15 @@ Open the frontend implementation task in a session to the right.
 
 ## Features
 
-| Extension          | Surface                                           | What it does                                            |
-| ------------------ | ------------------------------------------------- | ------------------------------------------------------- |
-| Session Search     | `session_search` pi tool                          | Search through old sessions                             |
-| Session Ask        | `session_ask` pi tool                             | Ask questions about old sessions                        |
-| Session Handoff    | `session_handoff` pi tool, `/handoff` board       | Start and manage focused child sessions                 |
-| Session Messaging  | `session_send_message`, `session_cancel` pi tools | Coordinate between live Pi sessions and own subagents   |
-| Session Picker     | `Alt+O`                                           | Reference old sessions in your prompt                   |
-| Session Index      | `/session-index` slash command                    | Shows index status and rebuilds the local session index |
-| Session Auto Title | in background, `/title` slash command             | Give sessions titles                                    |
+| Extension          | Surface                                                                | What it does                                            |
+| ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------- |
+| Session Search     | `session_search` pi tool                                               | Search through old sessions                             |
+| Session Ask        | `session_ask` pi tool                                                  | Ask questions about old sessions                        |
+| Session Handoff    | `session_handoff` pi tool, `/handoff` board                            | Start and manage focused child sessions                 |
+| Session Messaging  | `session_reachable`, `session_send_message`, `session_cancel` pi tools | Coordinate between live Pi sessions and own subagents   |
+| Session Picker     | `Alt+O`                                                                | Reference old sessions in your prompt                   |
+| Session Index      | `/session-index` slash command                                         | Shows index status and rebuilds the local session index |
+| Session Auto Title | in background, `/title` slash command                                  | Give sessions titles                                    |
 
 Every feature is on by default. Turn one off with `enable: false` under its own settings namespace, which unregisters its tools and hooks.
 
@@ -93,16 +93,16 @@ Every feature is on by default. Turn one off with `enable: false` under its own 
 
 ## Session Search
 
-`session_search` searches the local session index by text, repo, cwd, time range, file evidence, and whether a session is currently running.
+`session_search` searches the local session index by text, repo, cwd, time range, and file evidence.
 
-Queries support regular text for normal usage, quoted phrases, `AND` / `OR` / `NOT`, parentheses, and `-term` negation when matching needs to be stricter. Unquoted terms use prefix matching, quoted terms are exact. A search with no query returns matching sessions chronologically, newest first. Use `live: true` to restrict results to currently running sessions.
+Queries support regular text for normal usage, quoted phrases, `AND` / `OR` / `NOT`, parentheses, and `-term` negation when matching needs to be stricter. Unquoted terms use prefix matching, quoted terms are exact. A search with no query returns matching sessions chronologically, newest first.
 
 File filters distinguish read-or-write evidence from write-only evidence:
 
 - `files.touched`: sessions that read or changed a path
 - `files.changed`: sessions that changed a path
 
-Use `kind: "user"` or `kind: "subagent"` to filter by session type across the whole index. Use `relationScope: "branch"` to search subagents launched from the current conversation branch, or `relationScope: "tree"` to include subagents launched from abandoned branches as well.
+Use `kind: "user"` or `kind: "subagent"` to filter by session type across the whole index. Searching for sessions that can be addressed right now is a different question, answered by `session_reachable`.
 
 ## Session Handoff
 
@@ -116,7 +116,7 @@ Run `/handoff` to open the **Handoffs** board. The Subagents and User sessions t
 
 Agents can coordinate with live Pi sessions and their own subagents:
 
-- `session_search` with `live: true` lists live sessions
+- `session_reachable` lists the sessions this session can send messages to
 - `session_send_message` sends a message to a live session or own subagent
 - `session_cancel` aborts another live session's current turn
 

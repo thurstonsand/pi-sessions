@@ -9,6 +9,7 @@ import { installHandoff } from "./session-handoff/install.ts";
 import { installHooks } from "./session-hooks/install.ts";
 import { installIndex } from "./session-index/install.ts";
 import { installMessaging } from "./session-messaging/install.ts";
+import { createSessionReachableTool } from "./session-messaging/pi/reachable-tool.ts";
 import {
   createSessionCancelTool,
   createSessionSendMessageTool,
@@ -67,6 +68,18 @@ export default function piSessions(pi: ExtensionAPI): void {
       }),
     );
     pi.registerTool(createSessionCancelTool(subagents ?? messaging));
+    pi.registerTool(
+      createSessionReachableTool({
+        indexPath: index.path,
+        listSessions: () => messaging.listSessions(),
+        getRelationTo: messaging.getCachedRelationTo,
+        ...(subagents
+          ? {
+              listSubagents: async (scope) => (await subagents.roster.resolve(scope)).entries,
+            }
+          : {}),
+      }),
+    );
   }
   if (settings.features.handoff) {
     const board = {
@@ -88,7 +101,7 @@ export default function piSessions(pi: ExtensionAPI): void {
     );
   }
   if (settings.features.search) {
-    installSearch(pi, { settings, index, messaging, roster: subagents?.roster });
+    installSearch(pi, { settings, index });
   }
   if (settings.features.ask) {
     installAsk(pi, { settings, index, getModelRuntime });

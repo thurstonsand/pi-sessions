@@ -8,13 +8,8 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import type { TUI } from "@earendil-works/pi-tui";
 import stripAnsi from "strip-ansi";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import {
-  createChildGeneratedHandoffBootstrap,
-  HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
-} from "../extensions/session-handoff/metadata.ts";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 import { listSessionPickerItems } from "../extensions/session-handoff/query.ts";
-import type { MessagingHandle } from "../extensions/session-messaging/install.ts";
 import { installSearch } from "../extensions/session-search/install.ts";
 import {
   SEARCH_SNIPPET_MATCH_END,
@@ -29,7 +24,6 @@ import {
   setMetadata,
 } from "../extensions/shared/session-index/index.ts";
 import { loadSettings } from "../extensions/shared/settings.ts";
-import type { SubagentRoster } from "../extensions/subagents/roster.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-search-tool-");
@@ -328,342 +322,6 @@ describe("session_search tool", () => {
     expect(results).toMatchObject([{ sessionId: "current-session", relation: "self" }]);
   });
 
-  it("filters live searches through the active broker connection and returns relation metadata", async () => {
-    const agentDir = testFs.createTempDir();
-    const dir = testFs.createTempDir();
-    process.env.PI_CODING_AGENT_DIR = agentDir;
-    writeFileSync(
-      path.join(agentDir, "settings.json"),
-      `${JSON.stringify({ sessions: { index: { dir } } }, null, 2)}\n`,
-    );
-    const dbPath = path.join(dir, "index.sqlite");
-
-    const db = openIndexDatabase(dbPath, { create: true });
-    initializeSchema(db);
-    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
-    insertSession(
-      db,
-      {
-        sessionId: "current-session",
-        sessionPath: "/tmp/current.jsonl",
-        sessionName: "Current",
-        cwd: "/repo/app",
-        repoRoots: ["/repo"],
-        startedAt: "2026-03-22T00:00:00.000Z",
-        modifiedAt: "2026-03-22T00:10:00.000Z",
-        messageCount: 1,
-        entryCount: 1,
-      },
-      "full_reindex",
-    );
-    insertSession(
-      db,
-      {
-        sessionId: "live-child",
-        sessionPath: "/tmp/live-child.jsonl",
-        sessionName: "Live child",
-        cwd: "/repo/app",
-        repoRoots: ["/repo"],
-        startedAt: "2026-03-22T00:20:00.000Z",
-        modifiedAt: "2026-03-22T00:30:00.000Z",
-        messageCount: 2,
-        entryCount: 2,
-        parentSessionPath: "/tmp/current.jsonl",
-        parentSessionId: "current-session",
-        sessionOrigin: "handoff",
-      },
-      "full_reindex",
-    );
-    insertSession(
-      db,
-      {
-        sessionId: "offline-session",
-        sessionPath: "/tmp/offline.jsonl",
-        sessionName: "Offline",
-        cwd: "/repo/app",
-        repoRoots: ["/repo"],
-        startedAt: "2026-03-22T00:40:00.000Z",
-        modifiedAt: "2026-03-22T00:50:00.000Z",
-        messageCount: 3,
-        entryCount: 3,
-      },
-      "full_reindex",
-    );
-    rebuildSessionLineageRelations(db);
-    db.close();
-
-    const brokerConnection = {
-      listSessions: async () => ["current-session", "live-child", "missing-live"],
-    } as MessagingHandle;
-    const tool = registerSessionSearchTool({ messaging: brokerConnection });
-    const result = await tool.execute(
-      "tool-1",
-      { cwd: "/repo", live: true },
-      undefined,
-      undefined,
-      createToolContext("/repo", "current-session"),
-    );
-    const modelOutput = JSON.parse((result.content[0] as { text: string }).text) as {
-      results: Array<{ sessionId: string; relation?: string }>;
-    };
-
-    expect(modelOutput.results).toMatchObject([
-      { sessionId: "live-child", relation: "child" },
-      { sessionId: "current-session", relation: "self" },
-    ]);
-    expect(modelOutput.results.map((result) => result.sessionId)).toEqual([
-      "live-child",
-      "current-session",
-    ]);
-  });
-
-  it("annotates a live starting session in model output and the rendered panel", async () => {
-    const agentDir = testFs.createTempDir();
-    const root = testFs.createTempDir();
-    const dir = testFs.createTempDir();
-    process.env.PI_CODING_AGENT_DIR = agentDir;
-    writeFileSync(
-      path.join(agentDir, "settings.json"),
-      `${JSON.stringify({ sessions: { index: { dir } } }, null, 2)}\n`,
-    );
-    const dbPath = path.join(dir, "index.sqlite");
-    const sessionId = "starting-live-session";
-    const sessionPath = testFs.writeJsonlFile(root, "starting-live.jsonl", [
-      {
-        type: "session",
-        id: sessionId,
-        timestamp: "2026-03-22T00:00:00.000Z",
-        cwd: "/repo/app",
-      },
-      {
-        type: "custom",
-        id: "bootstrap-1",
-        parentId: null,
-        timestamp: "2026-03-22T00:00:01.000Z",
-        customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
-        data: createChildGeneratedHandoffBootstrap({
-          sessionId,
-          goal: "Continue the mission",
-          title: "Starting live",
-          parentSessionFile: "/tmp/parent.jsonl",
-          sourceLeafId: "parent-leaf",
-          requestResponse: false,
-          bootstrapMode: "automatic",
-          launch: "deferred",
-        }),
-      },
-    ]);
-
-    const db = openIndexDatabase(dbPath, { create: true });
-    initializeSchema(db);
-    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
-    insertSession(
-      db,
-      {
-        sessionId,
-        sessionPath,
-        sessionName: "Starting live",
-        cwd: "/repo/app",
-        repoRoots: ["/repo"],
-        startedAt: "2026-03-22T00:00:00.000Z",
-        modifiedAt: "2026-03-22T00:00:01.000Z",
-        messageCount: 0,
-        entryCount: 1,
-      },
-      "full_reindex",
-    );
-    db.close();
-
-    const tool = registerSessionSearchTool({
-      messaging: { listSessions: async () => [sessionId] } as MessagingHandle,
-    });
-    const result = await tool.execute(
-      "tool-1",
-      { live: true },
-      undefined,
-      undefined,
-      createToolContext("/repo"),
-    );
-    const output = JSON.parse((result.content[0] as { text: string }).text) as {
-      results: Array<{ sessionId: string; state?: string }>;
-    };
-    expect(output.results).toMatchObject([{ sessionId, state: "starting" }]);
-    expect(output.results[0]).not.toHaveProperty("depth");
-    expect(output.results[0]).not.toHaveProperty("onActiveBranch");
-
-    const component = new ToolExecutionComponent(
-      tool.name,
-      "tool-1",
-      { live: true },
-      undefined,
-      tool,
-      createFakeTui(),
-      "/repo",
-    );
-    component.updateResult(
-      { content: result.content, details: result.details, isError: false },
-      false,
-    );
-    component.setExpanded(true);
-    expect(stripAnsi(component.render(120).join("\n"))).toContain("[starting]");
-  });
-
-  it("resolves subagent relations outside the index and reports scope totals", async () => {
-    const agentDir = testFs.createTempDir();
-    const dir = testFs.createTempDir();
-    process.env.PI_CODING_AGENT_DIR = agentDir;
-    writeFileSync(
-      path.join(agentDir, "settings.json"),
-      `${JSON.stringify({ sessions: { index: { dir } } }, null, 2)}\n`,
-    );
-    const dbPath = path.join(dir, "index.sqlite");
-    const db = openIndexDatabase(dbPath, { create: true });
-    initializeSchema(db);
-    for (const [sessionId, sessionOrigin] of [
-      ["owned-stale-origin", "handoff"],
-      ["owned-subagent", "subagent"],
-    ] as const) {
-      insertSession(
-        db,
-        {
-          sessionId,
-          sessionPath: `/tmp/${sessionId}.jsonl`,
-          sessionName: sessionId,
-          cwd: "/repo/app",
-          repoRoots: ["/repo"],
-          startedAt: "2026-03-22T00:00:00.000Z",
-          modifiedAt:
-            sessionId === "owned-subagent"
-              ? "2026-03-22T00:20:00.000Z"
-              : "2026-03-22T00:10:00.000Z",
-          messageCount: 1,
-          entryCount: 1,
-          sessionOrigin,
-        },
-        "full_reindex",
-      );
-    }
-    db.close();
-
-    const roster = {
-      resolve: vi.fn(async () => ({
-        total: 3,
-        entries: [
-          rosterEntry("owned-stale-origin", true, false),
-          rosterEntry("owned-subagent", false, true),
-          rosterEntry("owned-but-unindexed", false, true),
-        ],
-      })),
-    } as SubagentRoster;
-    const tool = registerSessionSearchTool({ roster });
-    const result = await tool.execute(
-      "tool-1",
-      { relationScope: "branch" },
-      undefined,
-      undefined,
-      createToolContext("/repo", "current-session"),
-    );
-    const output = JSON.parse((result.content[0] as { text: string }).text) as {
-      scope: { matched: number; total: number };
-      results: Array<{
-        sessionId: string;
-        state?: string;
-        depth?: number;
-        onActiveBranch?: boolean;
-      }>;
-    };
-
-    expect(roster.resolve).toHaveBeenCalledWith("branch");
-    expect(output.scope).toEqual({ matched: 2, total: 3 });
-    expect(output.results).toEqual([
-      expect.objectContaining({
-        sessionId: "owned-subagent",
-        state: "interrupted",
-        depth: 1,
-        onActiveBranch: true,
-      }),
-      expect.objectContaining({
-        sessionId: "owned-stale-origin",
-        state: "completed",
-        onActiveBranch: false,
-      }),
-    ]);
-
-    const component = new ToolExecutionComponent(
-      tool.name,
-      "tool-1",
-      { relationScope: "branch" },
-      undefined,
-      tool,
-      createFakeTui(),
-      "/repo",
-    );
-    component.updateResult(
-      { content: result.content, details: result.details, isError: false },
-      false,
-    );
-    component.setExpanded(true);
-    const rendered = stripAnsi(component.render(120).join("\n"));
-    expect(rendered).toContain("scope: 2 matched • 3 total");
-    expect(rendered).toContain("[interrupted • depth 1]");
-    expect(rendered).toContain("[completed • depth 1 • history]");
-
-    const liveResult = await tool.execute(
-      "tool-2",
-      { relationScope: "tree", live: true },
-      undefined,
-      undefined,
-      createToolContext("/repo", "current-session"),
-    );
-    const liveOutput = JSON.parse((liveResult.content[0] as { text: string }).text) as {
-      scope: { matched: number; total: number };
-      results: Array<{ sessionId: string }>;
-    };
-    expect(roster.resolve).toHaveBeenLastCalledWith("tree");
-    expect(liveOutput.scope).toEqual({ matched: 1, total: 3 });
-    expect(liveOutput.results.map((row) => row.sessionId)).toEqual(["owned-stale-origin"]);
-
-    const filteredResult = await tool.execute(
-      "tool-3",
-      { relationScope: "branch", query: "absent-content" },
-      undefined,
-      undefined,
-      createToolContext("/repo", "current-session"),
-    );
-    const filteredOutput = JSON.parse((filteredResult.content[0] as { text: string }).text) as {
-      scope: { matched: number; total: number };
-      results: unknown[];
-    };
-    expect(filteredOutput).toMatchObject({ scope: { matched: 0, total: 3 }, results: [] });
-  });
-
-  it("fails live search clearly when session messaging is inactive", async () => {
-    const agentDir = testFs.createTempDir();
-    const dir = testFs.createTempDir();
-    process.env.PI_CODING_AGENT_DIR = agentDir;
-    writeFileSync(
-      path.join(agentDir, "settings.json"),
-      `${JSON.stringify({ sessions: { index: { dir } } }, null, 2)}\n`,
-    );
-    const dbPath = path.join(dir, "index.sqlite");
-
-    const db = openIndexDatabase(dbPath, { create: true });
-    initializeSchema(db);
-    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
-    db.close();
-
-    const tool = registerSessionSearchTool({ messaging: undefined });
-    await expect(
-      tool.execute(
-        "tool-1",
-        { live: true },
-        undefined,
-        undefined,
-        createToolContext("/repo", "current-session"),
-      ),
-    ).rejects.toThrow("Session messaging is not active");
-  });
-
   it("keeps autocomplete search ordering in parity with the session_search tool", async () => {
     const agentDir = testFs.createTempDir();
     const dir = testFs.createTempDir();
@@ -755,10 +413,7 @@ describe("session_search tool", () => {
   });
 });
 
-function registerSessionSearchTool(deps?: {
-  messaging?: MessagingHandle | undefined;
-  roster?: SubagentRoster | undefined;
-}) {
+function registerSessionSearchTool() {
   let registeredTool: ToolDefinition | undefined;
 
   const settings = loadSettings();
@@ -768,12 +423,7 @@ function registerSessionSearchTool(deps?: {
         registeredTool = tool;
       },
     } as unknown as ExtensionAPI,
-    {
-      settings,
-      index: { path: settings.index.path },
-      messaging: deps?.messaging,
-      roster: deps?.roster,
-    },
+    { settings, index: { path: settings.index.path } },
   );
 
   if (!registeredTool) {
@@ -781,25 +431,6 @@ function registerSessionSearchTool(deps?: {
   }
 
   return registeredTool;
-}
-
-function rosterEntry(sessionId: string, managedLive: boolean, onActiveBranch: boolean) {
-  return {
-    sessionId,
-    sessionFile: `/tmp/${sessionId}.jsonl`,
-    ownerSessionId: "current-session",
-    ownerTitle: "Current session",
-    ownerIsCurrentSession: true,
-    title: sessionId,
-    goal: "Work",
-    cwd: "/repo",
-    resumeCommand: `pi --session-id '${sessionId}'`,
-    launchedAt: "2026-03-22T00:00:00.000Z",
-    depth: 1,
-    state: onActiveBranch ? ("interrupted" as const) : ("completed" as const),
-    onActiveBranch,
-    managedLive,
-  };
 }
 
 function createToolContext(cwd: string, sessionId = "another-session") {

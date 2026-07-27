@@ -66,13 +66,8 @@ export function createSessionSendMessageTool(
     ? "Send a message to another pi session or a subagent"
     : "Send a message to another live pi session";
   const promptGuidelines = options.wakeCapable
-    ? [
-        "Use session_search with live: true to discover live sessions.",
-        "It is always possible to session_send_message to an owned subagent",
-      ]
-    : [
-        "Before session_send_message, use session_search with live: true to list all live sessions and find the target.",
-      ];
+    ? ["Use session_reachable to discover live sessions and owned subagents."]
+    : ["Use session_reachable to list live sessions and find the target."];
 
   return defineTool({
     name: "session_send_message",
@@ -194,7 +189,12 @@ export function createSessionCancelTool(service: CancelSessionService): ToolDefi
           throw new Error(buildUnknownCancellationError(result.target));
         }
         return {
-          content: [{ type: "text" as const, text: buildCancelSessionModelText(details) }],
+          content: [
+            {
+              type: "text" as const,
+              text: buildCancelSessionModelText(details),
+            },
+          ],
           details,
         };
       }

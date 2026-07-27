@@ -2,7 +2,8 @@
 
 - **Pi Sessions**: The Pi extension package in this repo; manages recall, lineage, and coordination between Pi coding sessions.
 - **Current/active session**: The Pi session handling the current command, tool call, hook, or user prompt.
-- **Live/reachable session**: A Pi session with a currently running extension, able to receive a message from another session.
+- **Live session**: A Pi session with a currently running extension, registered with the message broker.
+- **Reachable session**: A session the current session can address: any live session, plus its own dormant subagents, which messaging wakes on delivery.
 - **Message broker**: The singleton local process that owns live-session presence and routes messages between live sessions. It knows session ids only; all session metadata lives in the session index.
 - **Session lineage**: The self/parent/child family relationship between sessions, including ancestors, descendants, siblings, and related branches. Lineage may come from Pi forks or pi-sessions handoffs.
 - **Conversation branch**: A root-to-leaf path through a single session's entry tree. Rewinds produce multiple branches within one session.

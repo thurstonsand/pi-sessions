@@ -41,19 +41,21 @@ Expected:
 - evidence includes snippets from indexed session text
 - snippet markers are rendered for matched terms
 
-## 4. Verify live session discovery
+## 4. Verify reachable session discovery
 
 Open two Pi sessions with `pi-sessions` loaded. In one session, prompt Pi to call:
 
 ```text
-Use session_search with live true and limit 5. Return session ids, titles, cwd, and relation only.
+Use session_reachable. Return session ids, titles, cwd, state, and relation only.
 ```
 
 Expected:
 
-- the other live session is returned if it is present in the session index
-- the current session is returned with `relation: "self"`
-- results use index metadata, not broker registration metadata
+- the other live session is returned
+- the current session is absent
+- titles and cwd come from the session index; a live session missing from the index is still returned as a bare id
+
+With a subagent running, ask for `scope: "branch"` and expect the worker rows with `state`, `depth`, and goal.
 
 ## 5. Verify follow-up analysis
 

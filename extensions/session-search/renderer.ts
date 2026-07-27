@@ -11,8 +11,6 @@ import {
 } from "../shared/search-snippet.ts";
 import { formatSessionTitleOrShortId } from "../shared/session-ui.ts";
 import type {
-  AnnotatedSearchResult,
-  RelatedSubagentSearchResult,
   SessionSearchResult,
   SessionSearchToolDetails,
   SessionSearchToolParams,
@@ -51,11 +49,6 @@ export function renderSessionSearchResult(
   }
 
   const lines = formatSessionSearchContextLines(details.params, theme);
-  if (details.scope) {
-    lines.push(
-      theme.fg("dim", `scope: ${details.scope.matched} matched • ${details.scope.total} total`),
-    );
-  }
   if (details.results.length === 0) {
     if (lines.length > 0) lines.push("");
     lines.push(theme.fg("warning", "No matching sessions found."));
@@ -85,9 +78,7 @@ function formatSessionSearchContextLines(
     filters.push(`files.touched: ${params.files.touched.join(", ")}`);
   if (params.files?.changed?.length)
     filters.push(`files.changed: ${params.files.changed.join(", ")}`);
-  if (params.live) filters.push("live: true");
   if (params.kind) filters.push(`kind: ${params.kind}`);
-  if (params.relationScope) filters.push(`relationScope: ${params.relationScope}`);
   if (params.sort) filters.push(`sort: ${params.sort}`);
   if (params.time?.after?.trim()) filters.push(`after: ${params.time.after.trim()}`);
   if (params.time?.before?.trim()) filters.push(`before: ${params.time.before.trim()}`);
@@ -114,9 +105,7 @@ function formatSessionSearchPanelResults(
   const lines = visibleResults.flatMap((result, index) => {
     const location = formatSearchResultLocation(result.cwd);
     const relation = result.relation ? ` ${theme.fg("dim", `[${result.relation}]`)}` : "";
-    const annotation = formatSearchResultAnnotation(result);
-    const state = annotation.length > 0 ? ` ${theme.fg("dim", `[${annotation.join(" • ")}]`)}` : "";
-    const heading = `${index + 1}. ${theme.bold(formatSearchResultLabel(result))}${relation}${state}${location ? ` ${theme.fg("dim", `(${location})`)}` : ""}`;
+    const heading = `${index + 1}. ${theme.bold(formatSearchResultLabel(result))}${relation}${location ? ` ${theme.fg("dim", `(${location})`)}` : ""}`;
     const snippets = params?.query ? formatSearchSnippets(result).slice(0, 3) : [];
     return snippets.length > 0
       ? [heading, ...snippets.map((snippet) => theme.fg("dim", `  - ${snippet}`))]
@@ -128,26 +117,6 @@ function formatSessionSearchPanelResults(
   }
 
   return lines;
-}
-
-function formatSearchResultAnnotation(result: SessionSearchResult): string[] {
-  if (!isAnnotatedSearchResult(result)) {
-    return [];
-  }
-  if (!isRelatedSubagentSearchResult(result)) {
-    return [result.state];
-  }
-  return [result.state, `depth ${result.depth}`, ...(result.onActiveBranch ? [] : ["history"])];
-}
-
-function isAnnotatedSearchResult(result: SessionSearchResult): result is AnnotatedSearchResult {
-  return "state" in result;
-}
-
-function isRelatedSubagentSearchResult(
-  result: AnnotatedSearchResult,
-): result is RelatedSubagentSearchResult {
-  return "depth" in result;
 }
 
 function formatSearchResultLabel(result: SessionSearchResult): string {

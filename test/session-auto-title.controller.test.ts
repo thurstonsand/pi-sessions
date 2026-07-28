@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createSessionAutoTitleController } from "../extensions/session-auto-title/controller.ts";
+import {
+  createSessionAutoTitleController,
+  type SessionAutoTitleController,
+} from "../extensions/session-auto-title/controller.ts";
 import {
   AUTO_TITLE_STATE_CUSTOM_TYPE,
   type AutoTitlePersistedState,
@@ -74,14 +77,20 @@ function createControllerContext(options?: {
   };
 }
 
+function createController(refreshTurns: number): SessionAutoTitleController {
+  return createSessionAutoTitleController({
+    refreshTurns,
+    timeoutMs: 15_000,
+    tokenBudget: 64,
+    model: undefined,
+    prompt: "Default auto-title prompt",
+    persistRuns: false,
+  });
+}
+
 describe("session auto-title controller", () => {
   it("triggers the initial title after the first completed user turn regardless of refreshTurns", () => {
-    const controller = createSessionAutoTitleController({
-      refreshTurns: 4,
-      timeoutMs: 15_000,
-      model: undefined,
-      prompt: "Default auto-title prompt",
-    });
+    const controller = createController(4);
     const { state, ctx } = createControllerContext();
 
     state.entries = [
@@ -102,12 +111,7 @@ describe("session auto-title controller", () => {
   });
 
   it("only triggers periodic retitling after the configured number of new user turns", () => {
-    const controller = createSessionAutoTitleController({
-      refreshTurns: 3,
-      timeoutMs: 15_000,
-      model: undefined,
-      prompt: "Default auto-title prompt",
-    });
+    const controller = createController(3);
     const { state, ctx } = createControllerContext();
 
     state.entries = [
@@ -154,12 +158,7 @@ describe("session auto-title controller", () => {
   });
 
   it("does not trigger on sessions that already have a user title and no auto-title state", () => {
-    const controller = createSessionAutoTitleController({
-      refreshTurns: 2,
-      timeoutMs: 15_000,
-      model: undefined,
-      prompt: "Default auto-title prompt",
-    });
+    const controller = createController(2);
     const { ctx } = createControllerContext({
       sessionName: "Investigate bug",
       entries: [
@@ -177,12 +176,7 @@ describe("session auto-title controller", () => {
   });
 
   it("pauses automation when the current session name diverges from the last auto title", () => {
-    const controller = createSessionAutoTitleController({
-      refreshTurns: 4,
-      timeoutMs: 15_000,
-      model: undefined,
-      prompt: "Default auto-title prompt",
-    });
+    const controller = createController(4);
     const { ctx } = createControllerContext({
       sessionName: "Manual Title",
       entries: [
@@ -211,12 +205,7 @@ describe("session auto-title controller", () => {
   });
 
   it("allows manual retitling even when automation is paused", () => {
-    const controller = createSessionAutoTitleController({
-      refreshTurns: 4,
-      timeoutMs: 15_000,
-      model: undefined,
-      prompt: "Default auto-title prompt",
-    });
+    const controller = createController(4);
     const { ctx } = createControllerContext({
       sessionName: "Manual Title",
       entries: [
@@ -246,12 +235,7 @@ describe("session auto-title controller", () => {
   });
 
   it("reactivates automation after a successful manual retitle", () => {
-    const controller = createSessionAutoTitleController({
-      refreshTurns: 4,
-      timeoutMs: 15_000,
-      model: undefined,
-      prompt: "Default auto-title prompt",
-    });
+    const controller = createController(4);
     const { ctx } = createControllerContext();
 
     const plan = controller.handleManualRetitle(ctx);
@@ -273,12 +257,7 @@ describe("session auto-title controller", () => {
   });
 
   it("tracks the latest failure and dedupes repeated notifications until success", () => {
-    const controller = createSessionAutoTitleController({
-      refreshTurns: 4,
-      timeoutMs: 15_000,
-      model: undefined,
-      prompt: "Default auto-title prompt",
-    });
+    const controller = createController(4);
     const { ctx } = createControllerContext();
 
     const failure = {

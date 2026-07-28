@@ -18,6 +18,8 @@ beforeEach(() => {
     autoTitle: {
       refreshTurns: 4,
       timeoutMs: 15_000,
+      tokenBudget: 64,
+      persistRuns: false,
       model: "google/gemini-flash-lite-latest",
       prompt: "Default auto-title prompt",
     },
@@ -114,7 +116,13 @@ describe("session auto-title extension", () => {
         assistantTurnCount: 4,
       },
       "manual",
-      { systemPrompt: "Name this coding session.", timeoutMs: 15_000, thinkingLevel: undefined },
+      {
+        systemPrompt: "Name this coding session.",
+        timeoutMs: 15_000,
+        tokenBudget: 64,
+        thinkingLevel: undefined,
+        persistRuns: false,
+      },
     );
     await generateAutoTitle(
       modelRuntime,
@@ -127,7 +135,13 @@ describe("session auto-title extension", () => {
         assistantTurnCount: 4,
       },
       "periodic",
-      { systemPrompt: "Name this coding session.", timeoutMs: 15_000, thinkingLevel: undefined },
+      {
+        systemPrompt: "Name this coding session.",
+        timeoutMs: 15_000,
+        tokenBudget: 64,
+        thinkingLevel: undefined,
+        persistRuns: false,
+      },
     );
 
     const manualRequestContext = completeSimpleMock.mock.calls[0]?.[1];
@@ -146,6 +160,78 @@ describe("session auto-title extension", () => {
     expect(periodicPrompt).toContain(
       "<title_instructions>\nName this coding session.\n\nPreserve the current title unless the conversation has meaningfully shifted.\n</title_instructions>",
     );
+  });
+
+  it("blames the token budget when a reasoning model spends it before answering", async () => {
+    const { generateAutoTitle } = await import("../extensions/session-auto-title/generate.ts");
+    const ctx = createRetitleContext({
+      availableModels: [],
+      currentModel: { provider: "mockvllm", id: "sidecar-ornith-9b" },
+    });
+    completeSimpleMock.mockResolvedValue({
+      stopReason: "length",
+      content: [{ type: "thinking", thinking: "Okay, the user wants a short title" }],
+    });
+
+    const result = await generateAutoTitle(
+      createRuntime(ctx),
+      { provider: "mockvllm", id: "sidecar-ornith-9b" } as never,
+      {
+        cwd: "/repo/app",
+        currentTitle: undefined,
+        conversationText: "user: hello",
+        userTurnCount: 1,
+        assistantTurnCount: 1,
+      },
+      "manual",
+      {
+        systemPrompt: "Name this coding session.",
+        timeoutMs: 15_000,
+        tokenBudget: 64,
+        thinkingLevel: undefined,
+        persistRuns: false,
+      },
+    );
+
+    expect(completeSimpleMock.mock.calls[0]?.[2]).toMatchObject({ maxTokens: 64 });
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.failure.message).toBe(
+      "Model spent its 64-token budget without producing a title. Raise sessions.autoTitle.tokenBudget if the model reasons before answering.",
+    );
+  });
+
+  it("sends the configured token budget as the output cap", async () => {
+    const { generateAutoTitle } = await import("../extensions/session-auto-title/generate.ts");
+    const ctx = createRetitleContext({
+      availableModels: [],
+      currentModel: { provider: "openai", id: "gpt-5.4-mini" },
+    });
+    completeSimpleMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "Budgeted Title" }],
+    });
+
+    await generateAutoTitle(
+      createRuntime(ctx),
+      { provider: "openai", id: "gpt-5.4-mini" } as never,
+      {
+        cwd: "/repo/app",
+        currentTitle: undefined,
+        conversationText: "user: hello",
+        userTurnCount: 1,
+        assistantTurnCount: 1,
+      },
+      "manual",
+      {
+        systemPrompt: "Name this coding session.",
+        timeoutMs: 15_000,
+        tokenBudget: 512,
+        thinkingLevel: undefined,
+        persistRuns: false,
+      },
+    );
+
+    expect(completeSimpleMock.mock.calls[0]?.[2]).toMatchObject({ maxTokens: 512 });
   });
 
   it("passes the configured thinking level through as reasoning, omitting it for off", async () => {
@@ -171,16 +257,22 @@ describe("session auto-title extension", () => {
     await generateAutoTitle(modelRuntime, model, titleContext, "manual", {
       systemPrompt: "Name this coding session.",
       timeoutMs: 15_000,
+      tokenBudget: 64,
+      persistRuns: false,
       thinkingLevel: "max",
     });
     await generateAutoTitle(modelRuntime, model, titleContext, "manual", {
       systemPrompt: "Name this coding session.",
       timeoutMs: 15_000,
+      tokenBudget: 64,
+      persistRuns: false,
       thinkingLevel: "off",
     });
     await generateAutoTitle(modelRuntime, model, titleContext, "manual", {
       systemPrompt: "Name this coding session.",
       timeoutMs: 15_000,
+      tokenBudget: 64,
+      persistRuns: false,
       thinkingLevel: undefined,
     });
 

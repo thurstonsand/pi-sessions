@@ -1,13 +1,10 @@
-import { appendFileSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model, TextContent, UserMessage } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import type { AutoTitleContext } from "./context.ts";
+import { type AutoTitleRun, startAutoTitleRun } from "./runs.ts";
 import type { AutoTitleTrigger } from "./state.ts";
 
-const AUTO_TITLE_MAX_TOKENS = 64;
 const AUTO_TITLE_CHAR_MAX = 80;
 
 export interface AutoTitleFailure {
@@ -20,7 +17,9 @@ export interface AutoTitleFailure {
 export interface AutoTitleGeneration {
   systemPrompt: string;
   timeoutMs: number;
+  tokenBudget: number;
   thinkingLevel: ThinkingLevel | undefined;
+  persistRuns: boolean;
 }
 
 export type AutoTitleGenerationResult =
@@ -66,35 +65,47 @@ export async function generateAutoTitle(
   const abortController = new AbortController();
   const timeoutId = setTimeout(() => abortController.abort(), generation.timeoutMs);
   const thinkingLevel = generation.thinkingLevel;
+  const run = generation.persistRuns
+    ? startAutoTitleRun({
+        cwd: context.cwd ?? process.cwd(),
+        model,
+        trigger,
+        systemPrompt: resolvedSystemPrompt,
+        tokenBudget: generation.tokenBudget,
+        thinkingLevel,
+        message,
+      })
+    : undefined;
 
   try {
-    const requestContext = {
-      systemPrompt: resolvedSystemPrompt,
-      messages: [message],
-    };
-    writeAutoTitleDebugRequest(model, trigger, requestContext);
-    const response = await modelRuntime.completeSimple(model, requestContext, {
-      maxTokens: AUTO_TITLE_MAX_TOKENS,
-      ...(thinkingLevel && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
-      signal: abortController.signal,
-    });
-    writeAutoTitleDebugResponse(model, trigger, response);
+    const response = await modelRuntime.completeSimple(
+      model,
+      {
+        systemPrompt: resolvedSystemPrompt,
+        messages: [message],
+      },
+      {
+        maxTokens: generation.tokenBudget,
+        ...(thinkingLevel && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
+        signal: abortController.signal,
+      },
+    );
+    run?.recordResponse(response);
 
     if (response.stopReason === "error" || response.stopReason === "aborted") {
       const fallbackMessage =
         response.stopReason === "aborted" ? "Request was aborted." : "Provider returned an error.";
-      return {
-        ok: false,
-        failure: createAutoTitleFailure(trigger, model, response.errorMessage || fallbackMessage),
-      };
+      return failGeneration(run, trigger, model, response.errorMessage || fallbackMessage);
     }
 
     const normalizedTitle = normalizeGeneratedAutoTitle(extractResponseText(response.content));
     if (!normalizedTitle) {
-      return {
-        ok: false,
-        failure: createAutoTitleFailure(trigger, model, "Model returned an empty title."),
-      };
+      return failGeneration(
+        run,
+        trigger,
+        model,
+        describeEmptyTitle(response.stopReason === "length", generation.tokenBudget),
+      );
     }
 
     return {
@@ -102,10 +113,7 @@ export async function generateAutoTitle(
       title: normalizedTitle,
     };
   } catch (error) {
-    return {
-      ok: false,
-      failure: createAutoTitleFailure(trigger, model, extractErrorMessage(error)),
-    };
+    return failGeneration(run, trigger, model, extractErrorMessage(error));
   } finally {
     clearTimeout(timeoutId);
   }
@@ -122,6 +130,27 @@ export function createAutoTitleFailure(
     model: formatModelLabel(model),
     message,
   };
+}
+
+function failGeneration(
+  run: AutoTitleRun | undefined,
+  trigger: AutoTitleTrigger,
+  model: Model<Api>,
+  message: string,
+): AutoTitleGenerationResult {
+  run?.recordFailure(message);
+  return {
+    ok: false,
+    failure: createAutoTitleFailure(trigger, model, message),
+  };
+}
+
+function describeEmptyTitle(hitTokenBudget: boolean, tokenBudget: number): string {
+  if (!hitTokenBudget) {
+    return "Model returned an empty title.";
+  }
+
+  return `Model spent its ${tokenBudget}-token budget without producing a title. Raise sessions.autoTitle.tokenBudget if the model reasons before answering.`;
 }
 
 function buildAutoTitleSystemPrompt(systemPrompt: string, shouldPreserveTitle: boolean): string {
@@ -168,45 +197,6 @@ function normalizeGeneratedAutoTitle(value: string): string | undefined {
 
   const truncated = collapsed.slice(0, AUTO_TITLE_CHAR_MAX).trim();
   return truncated || undefined;
-}
-
-function writeAutoTitleDebugRequest(
-  model: Model<Api>,
-  trigger: AutoTitleTrigger,
-  request: unknown,
-): void {
-  writeAutoTitleDebugEntry({
-    phase: "request",
-    trigger,
-    model: formatModelLabel(model),
-    request,
-  });
-}
-
-function writeAutoTitleDebugResponse(
-  model: Model<Api>,
-  trigger: AutoTitleTrigger,
-  response: unknown,
-): void {
-  writeAutoTitleDebugEntry({
-    phase: "response",
-    trigger,
-    model: formatModelLabel(model),
-    response,
-  });
-}
-
-function writeAutoTitleDebugEntry(entry: Record<string, unknown>): void {
-  try {
-    const dir = join(homedir(), ".pi", "agent", "pi-sessions");
-    mkdirSync(dir, { recursive: true });
-    appendFileSync(
-      join(dir, "auto-title-debug.jsonl"),
-      `${JSON.stringify({ at: new Date().toISOString(), ...entry })}\n`,
-    );
-  } catch {
-    // Debug logging must not affect title generation.
-  }
 }
 
 function extractResponseText(content: unknown[]): string {

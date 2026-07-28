@@ -1,7 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { SettingsManager } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
 import { isThinkingLevel } from "./thinking-levels.ts";
@@ -9,6 +9,7 @@ import { parseTypeBoxValue } from "./typebox.ts";
 
 export const DEFAULT_AUTO_TITLE_REFRESH_TURNS = 4;
 export const DEFAULT_AUTO_TITLE_TIMEOUT_SECONDS = 15;
+export const DEFAULT_AUTO_TITLE_TOKEN_BUDGET = 64;
 export const DEFAULT_AUTO_TITLE_PROMPT = `Name this coding session (under 80 chars). Be specific to what is being discussed. Your exact output will be displayed to the user, so make sure that it contains ONLY the title itself and nothing else.`;
 const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
   messaging: Type.Optional(
@@ -51,9 +52,11 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
       enable: Type.Optional(Type.Boolean()),
       refreshTurns: Type.Optional(Type.Integer({ minimum: 1 })),
       timeoutSecs: Type.Optional(Type.Integer({ minimum: 1 })),
+      tokenBudget: Type.Optional(Type.Integer({ minimum: 1 })),
       model: Type.Optional(Type.String()),
       thinkingLevel: Type.Optional(Type.String()),
       prompt: Type.Optional(Type.String()),
+      persistRuns: Type.Optional(Type.Boolean()),
     }),
   ),
   ask: Type.Optional(
@@ -82,7 +85,9 @@ export interface AgentModelSettings {
 export interface AutoTitleSettings extends AgentModelSettings {
   refreshTurns: number;
   timeoutMs: number;
+  tokenBudget: number;
   prompt: string;
+  persistRuns: boolean;
 }
 
 export interface AskSettings extends AgentModelSettings {
@@ -123,7 +128,7 @@ export interface SessionSettings {
 type SessionFileSettings = Static<typeof SESSION_FILE_SETTINGS_SCHEMA>;
 
 export function getDefaultIndexDir(): string {
-  return path.join(os.homedir(), ".pi", "agent", "pi-sessions");
+  return path.join(getAgentDir(), "pi-sessions");
 }
 
 export function getDefaultIndexPath(): string {
@@ -136,6 +141,10 @@ export function getDefaultSessionAskRunsDir(): string {
 
 export function getDefaultHandoffRunsDir(): string {
   return path.join(getDefaultIndexDir(), "session-handoff");
+}
+
+export function getDefaultAutoTitleRunsDir(): string {
+  return path.join(getDefaultIndexDir(), "session-auto-title");
 }
 
 function expandHome(rawPath: string): string {
@@ -240,7 +249,9 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
       ...resolveAgentModelSettings(fileSettings.autoTitle),
       refreshTurns: fileSettings.autoTitle?.refreshTurns ?? DEFAULT_AUTO_TITLE_REFRESH_TURNS,
       timeoutMs: (fileSettings.autoTitle?.timeoutSecs ?? DEFAULT_AUTO_TITLE_TIMEOUT_SECONDS) * 1000,
+      tokenBudget: fileSettings.autoTitle?.tokenBudget ?? DEFAULT_AUTO_TITLE_TOKEN_BUDGET,
       prompt: normalizeAutoTitlePrompt(fileSettings.autoTitle?.prompt),
+      persistRuns: fileSettings.autoTitle?.persistRuns ?? false,
     },
     ask: {
       ...resolveAgentModelSettings(fileSettings.ask),

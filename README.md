@@ -214,9 +214,10 @@ Note that generating titles for all sessions can take some time, and will hit yo
 - if you manually rename a session with `/name`, automatic retitling pauses for that session
 - Regenerate the title for the current session to resume automatic retitling
 - if unconfigured, it will attempt to use these models in order, first one that is available:
-  - `google/gemini-flash-lite-latest`
+  - `openai-codex/gpt-5.6-luna`
+  - `openai/gpt-5.6-luna`
   - `anthropic/claude-haiku-4-5`
-  - `openai/gpt-5.4-mini`
+  - `google/gemini-flash-lite-latest`
   - your currently configured model
 
 To change auto-titling settings, edit `~/.pi/agent/settings.json`:
@@ -227,13 +228,17 @@ To change auto-titling settings, edit `~/.pi/agent/settings.json`:
     "autoTitle": {
       "refreshTurns": 4,
       "timeoutSecs": 15,
+      "tokenBudget": 64,
       "model": "anthropic/claude-haiku-4-5",
       "thinkingLevel": "off",
-      "prompt": "Custom prompt that overrides the default."
+      "prompt": "Custom prompt that overrides the default.",
+      "persistRuns": false
     }
   }
 }
 ```
+
+`persistRuns` records each title request as its own session file under `~/.pi/agent/pi-sessions/session-auto-title/`, holding the exact prompt and response. Open one with `pi --session <file>` to see what the titling model was sent.
 
 ## Development
 

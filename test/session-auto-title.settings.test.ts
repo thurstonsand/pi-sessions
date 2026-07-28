@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_AUTO_TITLE_PROMPT,
   DEFAULT_AUTO_TITLE_REFRESH_TURNS,
+  DEFAULT_AUTO_TITLE_TOKEN_BUDGET,
   loadSettings,
 } from "../extensions/shared/settings.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
@@ -27,8 +28,10 @@ describe("pi-sessions auto-title settings", () => {
 
     const settings = loadSettings();
     expect(settings.autoTitle.refreshTurns).toBe(DEFAULT_AUTO_TITLE_REFRESH_TURNS);
+    expect(settings.autoTitle.tokenBudget).toBe(DEFAULT_AUTO_TITLE_TOKEN_BUDGET);
     expect(settings.autoTitle.model).toBeUndefined();
     expect(settings.autoTitle.prompt).toBe(DEFAULT_AUTO_TITLE_PROMPT);
+    expect(settings.autoTitle.persistRuns).toBe(false);
     expect(settings.ask.persistRuns).toBe(false);
     expect(settings.handoff.persistRuns).toBe(false);
   });
@@ -44,8 +47,10 @@ describe("pi-sessions auto-title settings", () => {
           sessions: {
             autoTitle: {
               refreshTurns: 6,
+              tokenBudget: 512,
               model: " openai/gpt-5.4-mini ",
               prompt: " Use terse subsystem titles. ",
+              persistRuns: true,
             },
           },
         },
@@ -57,8 +62,10 @@ describe("pi-sessions auto-title settings", () => {
 
     const settings = loadSettings();
     expect(settings.autoTitle.refreshTurns).toBe(6);
+    expect(settings.autoTitle.tokenBudget).toBe(512);
     expect(settings.autoTitle.model).toBe("openai/gpt-5.4-mini");
     expect(settings.autoTitle.prompt).toBe("Use terse subsystem titles.");
+    expect(settings.autoTitle.persistRuns).toBe(true);
   });
 
   it("reads explicit handoff settings from global settings", () => {

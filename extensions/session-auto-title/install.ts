@@ -53,7 +53,9 @@ export function installAutoTitle(
   ): AutoTitleGeneration => ({
     systemPrompt: settings.autoTitle.prompt,
     timeoutMs: settings.autoTitle.timeoutMs,
+    tokenBudget: settings.autoTitle.tokenBudget,
     thinkingLevel: settings.autoTitle.thinkingLevel ?? resolution?.thinkingLevel,
+    persistRuns: settings.autoTitle.persistRuns,
   });
 
   pi.registerCommand("title", {

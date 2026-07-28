@@ -91,17 +91,18 @@ describe.each(schemaVariants)("$type client frame", (variant) => {
     expect(brokerAccepts(frame)).toBe(false);
   });
 
-  test.each(
-    Object.entries(variant.properties),
-  )("both parsers reject a wrong-typed %s", (property, declared) => {
-    const wrongValue =
-      declared.const === undefined
-        ? WRONG_TYPED_VALUES[declared.type ?? "string"]
-        : `not-${declared.const}`;
-    const frame = { ...sample, [property]: wrongValue };
-    expect(schemaAccepts(frame)).toBe(false);
-    expect(brokerAccepts(frame)).toBe(false);
-  });
+  test.each(Object.entries(variant.properties))(
+    "both parsers reject a wrong-typed %s",
+    (property, declared) => {
+      const wrongValue =
+        declared.const === undefined
+          ? WRONG_TYPED_VALUES[declared.type ?? "string"]
+          : `not-${declared.const}`;
+      const frame = { ...sample, [property]: wrongValue };
+      expect(schemaAccepts(frame)).toBe(false);
+      expect(brokerAccepts(frame)).toBe(false);
+    },
+  );
 });
 
 test("both parsers reject non-object frames", () => {

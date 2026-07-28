@@ -63,12 +63,14 @@ describe("subagent report-message renderer", () => {
     expect(rendered).not.toContain("Subagent report from");
   });
 
-  it.each([
-    "blocked",
-    "incomplete",
-  ] as const)("includes [%s] in a non-done report header", (status) => {
-    expect(render(report(status))).toContain(`Report from subagent [${status}] “Implement phase”`);
-  });
+  it.each(["blocked", "incomplete"] as const)(
+    "includes [%s] in a non-done report header",
+    (status) => {
+      expect(render(report(status))).toContain(
+        `Report from subagent [${status}] “Implement phase”`,
+      );
+    },
+  );
 
   it("honors the configured output padding", () => {
     const paddedHeader = renderLines(report(), 1)?.find((line) => line.includes("Report from"));

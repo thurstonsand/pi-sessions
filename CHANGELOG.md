@@ -2,17 +2,34 @@
 
 <!-- markdownlint-disable MD024 -->
 
-## [Unreleased]
+## [0.11.0] - 2026-07-28
+
+- **Dependency-free install** - The session index moved to Node's built-in SQLite and the messaging broker ships pre-compiled, so pi-sessions now installs with no runtime dependencies and no native build step.
+
+### Added
+
+- Added `session_reachable` for listing the sessions the current session can address: `scope: "user"` for live user-facing sessions, `scope: "branch"` or `"tree"` for owned subagents. It ships with session messaging and needs no new toggle; when subagents are disabled the parameter disappears and the tool lists live sessions only.
+- Added `sessions.autoTitle.tokenBudget` (default 64) for pointing auto-title at a model that reasons before answering, which otherwise spends the whole budget thinking and never reaches a title.
+- Added `sessions.autoTitle.persistRuns` (default false), which records each title request as a standalone Pi session under `pi-sessions/session-auto-title/`, matching how session_ask and handoff already persist their runs.
 
 ### Changed
 
-- Raised the minimum supported Pi version to 0.82.1 and made custom message renderers honor Pi's configured output padding.
-- Changed the package to install with no runtime dependencies; the detached broker now validates protocol frames itself instead of loading TypeBox.
+- `session_search` no longer accepts `live` or `relationScope`, and results no longer carry `state`, `depth`, `onActiveBranch`, or the `scope` totals block. Use `session_reachable` with the matching scope instead; `kind` still works. Search is now a pure index query.
+- Changed the session index to use Node's built-in `node:sqlite` instead of better-sqlite3, removing the node-gyp compile that npm 12 blocks by default and that restricted registries could not satisfy. No reindex is required.
+- Changed reachable-session discovery to exclude the current session and other sessions' subagents, and to read the subagent roster directly rather than intersecting it with the index, so a freshly launched worker shows up before the indexer catches it.
+- Raised the minimum supported Pi version to 0.82.1 and made custom message renderers honor Pi's configured output padding; handoff kickoff, incoming message, and subagent report blocks no longer sit misaligned under a non-default `outputPad`.
 
 ### Fixed
 
+- Fixed git installations never producing a messaging broker, which left session messaging and subagents unavailable. The compiled broker is committed to the repository, so it survives the `git clean` Pi runs on update, and it no longer loads TypeBox or anything else from `node_modules`.
+- Fixed sibling subagents launched in the same turn racing to create their shared tmux session, where all but one failed with `duplicate session: pi-<id>` and only succeeded on a retry.
 - Fixed handoff, session_ask, and auto-title dropping natively registered extension providers such as pi-claude-bridge, which made their models unresolvable in nested sessions.
 - Fixed a full reindex aborting with `FOREIGN KEY constraint failed` when a session's parent transcript was not itself indexed.
+- Fixed auto-title reporting "Model returned an empty title" when the model had actually exhausted its token budget; the failure now names the cause and points at `sessions.autoTitle.tokenBudget`.
+
+### Removed
+
+- Removed the undocumented `~/.pi/agent/pi-sessions/auto-title-debug.jsonl`, which mirrored whole conversation transcripts outside their session files and grew without bound. Nothing writes it anymore; delete any existing copy.
 
 ## [0.10.0] - 2026-07-26
 

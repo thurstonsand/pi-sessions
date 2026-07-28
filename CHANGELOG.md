@@ -2,6 +2,12 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.11.1] - 2026-07-28
+
+### Fixed
+
+- Fixed a message referencing `session_search` when it should have been referencing `session_reachable`.
+
 ## [0.11.0] - 2026-07-28
 
 - **Dependency-free install** - The session index moved to Node's built-in SQLite and the messaging broker ships pre-compiled, so pi-sessions now installs with no runtime dependencies and no native build step.

@@ -15,7 +15,7 @@ export const HANDOFF_BOOTSTRAP_CONSUMED_CUSTOM_TYPE = "pi-sessions.handoff-boots
 export const HANDOFF_STALE_SESSION_MESSAGE =
   "Session handoff failed: target session already has user input.";
 export const SESSION_STARTING_MESSAGE =
-  "Target session is still starting. wait for it to show up in session_search, then resend.";
+  "Target session is still starting. wait for session_reachable to report it as live, then resend.";
 
 // A subagent's self-knowledge, stamped into its child-local bootstrap so the
 // child never opens the parent transcript to learn who it is.

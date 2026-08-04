@@ -2,6 +2,18 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.11.2] - 2026-08-04
+
+### Changed
+
+- The handoff tool card only shows the resume command for deferred handoffs now. You can still copy the command from the `/handoff` pane.
+
+### Fixed
+
+- Subagents now start with `--approve` so they don't just hang forever waiting for user input to trust a folder.
+- A handoff that fails to write its prompt now says why in the new session. It will retry on every startup until the first user message is sent.
+- Handoff prompt generation now reports errors from the model provider.
+
 ## [0.11.1] - 2026-07-28
 
 ### Fixed

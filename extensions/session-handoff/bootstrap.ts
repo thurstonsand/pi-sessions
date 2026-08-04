@@ -11,6 +11,7 @@ import {
   findPendingHandoffBootstrap,
   getHandoffMetadataFromEntries,
   HANDOFF_BOOTSTRAP_CONSUMED_CUSTOM_TYPE,
+  HANDOFF_BOOTSTRAP_FAILED_CUSTOM_TYPE,
   HANDOFF_METADATA_CUSTOM_TYPE,
   HANDOFF_STALE_SESSION_MESSAGE,
   type HandoffBootstrapConsumedReason,
@@ -54,6 +55,7 @@ export async function consumePendingHandoffBootstrap(
     ctx,
     bootstrap,
     scan.entryId,
+    scan.failure !== undefined,
     consumeBootstrap,
     getModelRuntime,
     destinationThinkingLevel,
@@ -66,6 +68,7 @@ async function startChildGeneratedHandoff(
   ctx: ExtensionContext,
   bootstrap: ChildGeneratedHandoffBootstrap,
   bootstrapEntryId: string,
+  hasEarlierFailure: boolean,
   consumeBootstrap: (reason: HandoffBootstrapConsumedReason) => void,
   getModelRuntime: ModelRuntimeProvider,
   destinationThinkingLevel: ThinkingLevel | undefined,
@@ -80,8 +83,13 @@ async function startChildGeneratedHandoff(
     return;
   }
 
+  // An automatic bootstrap exits on its first failure because only an
+  // unattended worker ever reaches that attempt. Every later start is someone
+  // opening the session deliberately, so it latches open for them instead.
+  const exitOnFailure = bootstrap.bootstrapMode === "automatic" && !hasEarlierFailure;
+
   if (!ctx.hasUI) {
-    if (bootstrap.bootstrapMode === "automatic") {
+    if (exitOnFailure) {
       ctx.shutdown();
     }
     return;
@@ -164,8 +172,15 @@ async function startChildGeneratedHandoff(
       { triggerTurn: true },
     );
   } catch (error) {
-    ctx.ui.notify(formatHandoffError(error), "error");
-    if (bootstrap.bootstrapMode === "automatic") {
+    // An exiting bootstrap takes the notification down with it, so the reason
+    // has to live in the transcript instead.
+    const message = formatHandoffError(error);
+    pi.appendEntry(HANDOFF_BOOTSTRAP_FAILED_CUSTOM_TYPE, {
+      bootstrapEntryId,
+      error: message,
+    });
+    ctx.ui.notify(message, "error");
+    if (exitOnFailure) {
       ctx.shutdown();
     }
   }

@@ -40,14 +40,19 @@ export class HandoffToolComponent implements Component {
       return container.render(width);
     }
 
-    const commandLabel =
-      this.model.result.launch === "deferred"
-        ? formatDeferredCommandLabel(this.clipboardStatus)
-        : "recovery command";
-    container.addChild(new Spacer(1));
-    container.addChild(
-      createLaunchCommandComponent(this.model.result.resumeCommand, commandLabel, this.theme),
-    );
+    // Only a deferred handoff needs its command in the transcript, because the
+    // user is the one who has to run it. A launched child is already running;
+    // the board is where its command belongs.
+    if (this.model.result.launch === "deferred") {
+      container.addChild(new Spacer(1));
+      container.addChild(
+        createLaunchCommandComponent(
+          this.model.result.resumeCommand,
+          formatDeferredCommandLabel(this.clipboardStatus),
+          this.theme,
+        ),
+      );
+    }
     if (this.model.result.degradedFrom) {
       container.addChild(new Spacer(1));
       container.addChild(

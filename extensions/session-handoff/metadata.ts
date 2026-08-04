@@ -12,6 +12,7 @@ import {
 export const HANDOFF_METADATA_CUSTOM_TYPE = "pi-sessions.handoff";
 export const HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE = "pi-sessions.handoff-bootstrap";
 export const HANDOFF_BOOTSTRAP_CONSUMED_CUSTOM_TYPE = "pi-sessions.handoff-bootstrap-consumed";
+export const HANDOFF_BOOTSTRAP_FAILED_CUSTOM_TYPE = "pi-sessions.handoff-bootstrap-failed";
 export const HANDOFF_STALE_SESSION_MESSAGE =
   "Session handoff failed: target session already has user input.";
 export const SESSION_STARTING_MESSAGE =
@@ -62,6 +63,14 @@ export const HANDOFF_BOOTSTRAP_SCHEMA = Type.Union([
   }),
 ]);
 
+// A bootstrap whose generation failed stays pending so a resume can retry it,
+// but the failure is recorded so the session stops reading as one that is
+// still starting.
+export const HANDOFF_BOOTSTRAP_FAILED_SCHEMA = Type.Object({
+  bootstrapEntryId: Type.String(),
+  error: Type.String(),
+});
+
 export const HANDOFF_BOOTSTRAP_CONSUMED_SCHEMA = Type.Object({
   bootstrapEntryId: Type.String(),
   reason: Type.Union([
@@ -77,6 +86,7 @@ export type HandoffSessionMetadata = Static<typeof HANDOFF_SESSION_METADATA_SCHE
 export type HandoffBootstrap = Static<typeof HANDOFF_BOOTSTRAP_SCHEMA>;
 export type ChildGeneratedHandoffBootstrap = HandoffBootstrap;
 export type HandoffBootstrapConsumed = Static<typeof HANDOFF_BOOTSTRAP_CONSUMED_SCHEMA>;
+export type HandoffBootstrapFailed = Static<typeof HANDOFF_BOOTSTRAP_FAILED_SCHEMA>;
 export type HandoffBootstrapConsumedReason = HandoffBootstrapConsumed["reason"];
 
 export function createHandoffSessionMetadata(
@@ -125,7 +135,7 @@ export function createChildGeneratedHandoffBootstrap(options: {
 }
 
 export type PendingHandoffBootstrapScan =
-  | { kind: "pending"; entryId: string; bootstrap: HandoffBootstrap }
+  | { kind: "pending"; entryId: string; bootstrap: HandoffBootstrap; failure?: string | undefined }
   | { kind: "invalid"; entryId: string };
 
 /**
@@ -137,6 +147,7 @@ export function findPendingHandoffBootstrap(
   branch: readonly SessionEntry[],
 ): PendingHandoffBootstrapScan | undefined {
   const consumedEntryIds = new Set<string>();
+  const failuresByEntryId = new Map<string, string>();
   for (const entry of branch) {
     if (entry.type === "custom_message" && entry.customType === HANDOFF_KICKOFF_CUSTOM_TYPE) {
       const details = safeParseTypeBoxValue(HANDOFF_KICKOFF_DETAILS_SCHEMA, entry.details);
@@ -148,6 +159,12 @@ export function findPendingHandoffBootstrap(
       const consumed = safeParseTypeBoxValue(HANDOFF_BOOTSTRAP_CONSUMED_SCHEMA, entry.data);
       if (consumed) {
         consumedEntryIds.add(consumed.bootstrapEntryId);
+      }
+    }
+    if (entry.type === "custom" && entry.customType === HANDOFF_BOOTSTRAP_FAILED_CUSTOM_TYPE) {
+      const failed = safeParseTypeBoxValue(HANDOFF_BOOTSTRAP_FAILED_SCHEMA, entry.data);
+      if (failed) {
+        failuresByEntryId.set(failed.bootstrapEntryId, failed.error);
       }
     }
   }
@@ -163,9 +180,11 @@ export function findPendingHandoffBootstrap(
     }
 
     const bootstrap = safeParseTypeBoxValue(HANDOFF_BOOTSTRAP_SCHEMA, entry.data);
-    return bootstrap
-      ? { kind: "pending", entryId: entry.id, bootstrap }
-      : { kind: "invalid", entryId: entry.id };
+    if (!bootstrap) {
+      return { kind: "invalid", entryId: entry.id };
+    }
+    const failure = failuresByEntryId.get(entry.id);
+    return { kind: "pending", entryId: entry.id, bootstrap, ...(failure ? { failure } : {}) };
   }
 
   return undefined;
@@ -175,10 +194,13 @@ export function findPendingHandoffBootstrap(
  * A session is *starting* when its active branch still carries an unconsumed,
  * well-formed handoff bootstrap: it has been prepared but has not received its
  * kickoff. An invalid bootstrap does not count — the child consumes it and
- * proceeds as an ordinary session rather than kicking off a handoff.
+ * proceeds as an ordinary session rather than kicking off a handoff. Neither
+ * does one whose generation already failed: it stays retryable on resume, but
+ * nothing is starting right now.
  */
 export function isSessionStarting(branch: readonly SessionEntry[]): boolean {
-  return findPendingHandoffBootstrap(branch)?.kind === "pending";
+  const scan = findPendingHandoffBootstrap(branch);
+  return scan?.kind === "pending" && scan.failure === undefined;
 }
 
 /**

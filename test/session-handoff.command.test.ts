@@ -51,6 +51,7 @@ async function installCommand(): Promise<{
     | undefined;
   const pi = {
     registerMessageRenderer: vi.fn(),
+    registerEntryRenderer: vi.fn(),
     registerTool: vi.fn(),
     registerCommand: vi.fn((_name, definition) => {
       command = definition;

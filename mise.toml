@@ -19,6 +19,8 @@ _.path = ["{{config_root}}/node_modules/.bin"]
 description = "Install project dependencies and git hooks"
 run = [
     "npm ci --quiet --no-fund --no-audit",
+    # pi must always resolve to the global install, never this repo's copy
+    "rm -f node_modules/.bin/pi",
     "hk install --mise --quiet",
     "mkdir -p .mise && touch .mise/bootstrap",
 ]

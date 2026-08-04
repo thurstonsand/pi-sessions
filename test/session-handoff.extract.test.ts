@@ -294,6 +294,22 @@ describe("session handoff extraction", () => {
     );
   });
 
+  it("stops on a provider error instead of re-prompting a failed turn", async () => {
+    const onPrompt = vi.fn();
+    createAgentSessionMock.mockResolvedValue(
+      createMockAgentSession(undefined, onPrompt, {
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "Codex error: The usage limit has been reached",
+      }),
+    );
+
+    await expect(
+      generateHandoffDraft(createGenerationContext(), "Finish phase 1.", "medium"),
+    ).rejects.toThrow("Handoff extraction failed: Codex error: The usage limit has been reached");
+    expect(onPrompt).toHaveBeenCalledOnce();
+  });
+
   it("rejects extraction runs after three turns without the structured tool", async () => {
     const onPrompt = vi.fn();
     createAgentSessionMock.mockResolvedValue(createMockAgentSession(undefined, onPrompt));
@@ -440,10 +456,12 @@ describe("session handoff extraction", () => {
 function createMockAgentSession(
   toolArguments: unknown | ((promptIndex: number) => unknown),
   onPrompt?: (prompt: string) => void,
+  assistantMessage?: { role: "assistant"; stopReason: string; errorMessage?: string },
 ) {
   let promptIndex = 0;
   return {
     session: {
+      messages: assistantMessage ? [assistantMessage] : [],
       async prompt(prompt: string) {
         onPrompt?.(prompt);
         const currentPromptIndex = promptIndex;

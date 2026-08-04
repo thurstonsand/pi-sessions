@@ -1,5 +1,6 @@
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { describe, expect, it } from "vitest";
+import type { HandoffLaunchReceipt } from "../extensions/session-handoff/receipt.ts";
 import { HandoffToolComponent } from "../extensions/session-handoff/tool-renderer.ts";
 import { buildHandoffToolView } from "../extensions/session-handoff/tool-view-model.ts";
 
@@ -20,10 +21,10 @@ const args = {
   requestResponse: true,
 };
 
-const details = {
+const details: HandoffLaunchReceipt = {
   sessionId: "child-1",
   title: "Index recovery audit",
-  launch: "deferred" as const,
+  launch: "deferred",
   childSessionFile: "/tmp/child-1.jsonl",
   resumeCommand: "pi --session-id 'child-1'",
   cwd: "/repo/app",
@@ -35,7 +36,7 @@ const details = {
 
 function render(
   renderArgs: unknown,
-  result: typeof details | undefined,
+  result: HandoffLaunchReceipt | undefined,
   expanded: boolean,
   width = 120,
 ): string {

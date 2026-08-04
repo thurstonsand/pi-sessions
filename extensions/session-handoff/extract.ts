@@ -1,4 +1,4 @@
-import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type {
   Api,
   AssistantMessage,
@@ -247,6 +247,13 @@ async function runHandoffExtractionAgent(
       if (capturedArguments) {
         break;
       }
+      // A failed turn carries no refusal to re-prompt: retrying only burns the
+      // remaining attempts and buries the provider's reason behind the generic
+      // "did not return structured context" error.
+      const providerError = findProviderError(session.messages);
+      if (providerError) {
+        throw new Error(`Handoff extraction failed: ${providerError}`);
+      }
     }
   } finally {
     signal?.removeEventListener("abort", abortHandler);
@@ -270,6 +277,14 @@ async function runHandoffExtractionAgent(
     context: extraction.context,
     ...(debugSessionPath ? { debugSessionPath } : {}),
   };
+}
+
+function findProviderError(messages: readonly AgentMessage[]): string | undefined {
+  const lastAssistant = messages.findLast((message) => message.role === "assistant");
+  if (lastAssistant?.role !== "assistant" || lastAssistant.stopReason !== "error") {
+    return undefined;
+  }
+  return lastAssistant.errorMessage || "the provider returned an error.";
 }
 
 export function assembleHandoffDraft(

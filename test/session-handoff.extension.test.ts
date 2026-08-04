@@ -283,6 +283,7 @@ describe("session handoff extension", () => {
         depth: 1,
         requestResponse: input.requestResponse,
       }),
+      approveProjectTrust: true,
       prepareChild: vi.fn(),
       launch,
     };

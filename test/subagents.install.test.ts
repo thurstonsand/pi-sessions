@@ -444,6 +444,7 @@ function createPi(options: {
   const pi = {
     registerTool: vi.fn(),
     registerMessageRenderer: vi.fn(),
+    registerEntryRenderer: vi.fn(),
     appendEntry: vi.fn(),
     sendMessage: vi.fn(),
     on: vi.fn(

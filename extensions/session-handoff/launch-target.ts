@@ -59,6 +59,8 @@ export interface HandoffLaunchTarget {
   description?: string | undefined;
   requestResponseDefault: boolean;
   bootstrapMode: "review" | "automatic";
+  /** Unattended children skip the startup trust prompt; watched ones let the user answer it. */
+  approveProjectTrust: boolean;
   /** Subagent launches stamp their child's identity into the child bootstrap. */
   describeSubagentChild?(input: {
     childSessionId: string;
@@ -79,6 +81,7 @@ export function createBackendLaunchTarget(
     ...(description ? { description } : {}),
     requestResponseDefault: false,
     bootstrapMode: "review",
+    approveProjectTrust: false,
     prepareChild() {},
     launch(input) {
       return backend.launch({

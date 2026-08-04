@@ -21,6 +21,7 @@ export function prepareHandoffLaunch(options: {
   parentSessionFile: string;
   title: string;
   model: string | undefined;
+  approveProjectTrust: boolean;
   buildBootstrap: (sessionId: string) => HandoffBootstrap;
   prepareChild?: ((manager: SessionManager, sessionId: string) => void) | undefined;
 }): PreparedHandoff {
@@ -52,6 +53,7 @@ export function prepareHandoffLaunch(options: {
     sessionId: manager.getSessionId(),
     sessionDir: manager.usesDefaultSessionDir() ? undefined : manager.getSessionDir(),
     model: options.model,
+    approveProjectTrust: options.approveProjectTrust,
   });
 
   return { sessionId: manager.getSessionId(), sessionFile, resumeCommand };
@@ -79,6 +81,11 @@ function flushPreparedSession(manager: SessionManager): void {
  * The canonical recovery artifact consumed by launch backends, failure
  * messages, clipboard delivery, and renderers. Self-locating: when the target
  * cwd differs from the parent's, the command starts with `cd <target> &&`.
+ *
+ * Unattended children carry `--approve`, which resolves project trust for that
+ * process without prompting: nobody is watching a detached worker's window, so
+ * a blocked trust selector there stalls the launch indefinitely. The override
+ * is process-scoped and never written to the trust store.
  */
 export function buildPiResumeCommand(options: {
   targetCwd: string;
@@ -86,12 +93,16 @@ export function buildPiResumeCommand(options: {
   sessionId: string;
   sessionDir?: string | undefined;
   model?: string | undefined;
+  approveProjectTrust: boolean;
 }): string {
   const args = ["pi"];
   if (options.sessionDir) {
     args.push("--session-dir", shellQuote(options.sessionDir));
   }
   args.push("--session-id", shellQuote(options.sessionId));
+  if (options.approveProjectTrust) {
+    args.push("--approve");
+  }
   if (options.model) {
     args.push("--model", shellQuote(options.model));
   }

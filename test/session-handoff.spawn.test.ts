@@ -39,6 +39,7 @@ describe("session handoff spawn helpers", () => {
       parentSessionFile: "/tmp/project/parent.jsonl",
       title: "Implement autocomplete",
       model: undefined,
+      approveProjectTrust: false,
       buildBootstrap: (sessionId) => createBootstrap(sessionId),
     });
 
@@ -84,6 +85,7 @@ describe("session handoff spawn helpers", () => {
       parentSessionDir: sessionDir,
       parentSessionFile: "/tmp/parent.jsonl",
       title: "Title",
+      approveProjectTrust: false,
       model: undefined,
       buildBootstrap: (sessionId) => createBootstrap(sessionId),
     });
@@ -124,6 +126,7 @@ describe("session handoff spawn helpers", () => {
       parentSessionDir,
       parentSessionFile: "/tmp/parent.jsonl",
       title: "Title",
+      approveProjectTrust: false,
       model: "openai/gpt-5.4:medium",
       buildBootstrap: (sessionId) => createBootstrap(sessionId),
     });
@@ -144,9 +147,21 @@ describe("session handoff spawn helpers", () => {
       targetCwd: "/repo/app",
       parentCwd: "/repo/app",
       sessionId: "child-session-123",
+      approveProjectTrust: false,
     });
 
     expect(resumeCommand).toBe("pi --session-id 'child-session-123'");
+  });
+
+  it("auto-approves project trust only for unattended children", () => {
+    const resumeCommand = buildPiResumeCommand({
+      targetCwd: "/repo/other",
+      parentCwd: "/repo/app",
+      sessionId: "child-session-123",
+      approveProjectTrust: true,
+    });
+
+    expect(resumeCommand).toBe("cd '/repo/other' && pi --session-id 'child-session-123' --approve");
   });
 
   it("includes --session-dir only for nondefault directories", () => {
@@ -156,6 +171,7 @@ describe("session handoff spawn helpers", () => {
       sessionId: "child-session-123",
       sessionDir: "/custom/sessions",
       model: "openai/gpt-5.4:medium",
+      approveProjectTrust: false,
     });
 
     expect(resumeCommand).toBe(
@@ -233,6 +249,7 @@ describe("session handoff spawn helpers", () => {
       parentSessionFile: "/tmp/parent.jsonl",
       title: "Implement autocomplete",
       model: undefined,
+      approveProjectTrust: false,
       buildBootstrap: (sessionId) => createBootstrap(sessionId),
     });
 

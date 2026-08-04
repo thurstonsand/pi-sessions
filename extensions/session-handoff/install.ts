@@ -10,11 +10,13 @@ import { THINKING_LEVELS } from "../shared/thinking-levels.ts";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
 import { type HandoffBoardServices, openHandoffBoard } from "./board.ts";
 import { consumePendingHandoffBootstrap } from "./bootstrap.ts";
+import { renderHandoffBootstrapFailedEntry } from "./bootstrap-failed-renderer.ts";
 import { HANDOFF_KICKOFF_CUSTOM_TYPE, renderHandoffKickoffMessage } from "./kickoff.ts";
 import type { ClipboardStatus } from "./launch/backend.ts";
 import { resolveSplitLaunchBackend } from "./launch/resolution.ts";
 import { createHandoffLaunchTargets } from "./launch-options.ts";
 import type { HandoffLaunchTarget } from "./launch-target.ts";
+import { HANDOFF_BOOTSTRAP_FAILED_CUSTOM_TYPE } from "./metadata.ts";
 import { openSessionReferencePicker } from "./picker.ts";
 import { SESSION_TOKEN_PREFIX } from "./query.ts";
 import {
@@ -51,6 +53,7 @@ export function installHandoff(
   });
 
   pi.registerMessageRenderer(HANDOFF_KICKOFF_CUSTOM_TYPE, renderHandoffKickoffMessage);
+  pi.registerEntryRenderer(HANDOFF_BOOTSTRAP_FAILED_CUSTOM_TYPE, renderHandoffBootstrapFailedEntry);
   function registerHandoffTool(
     models: readonly Model<Api>[],
     launchTargets: readonly HandoffLaunchTarget[],

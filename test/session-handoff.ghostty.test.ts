@@ -110,6 +110,7 @@ describe("ghostty launch backend", () => {
         sessionId: "child-session-123",
         sessionDir: "/tmp/sessions",
         model: "openai/gpt-5.4:medium",
+        approveProjectTrust: false,
       }),
     });
 
@@ -169,6 +170,7 @@ function resumeCommand(sessionId: string): string {
     parentCwd: "/tmp/project",
     sessionId,
     sessionDir: "/tmp/sessions",
+    approveProjectTrust: false,
   });
 }
 

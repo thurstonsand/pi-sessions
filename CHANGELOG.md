@@ -2,6 +2,18 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.12.0] - 2026-08-04
+
+- **Handoff model roster** - Handoffs now launch child sessions only on configured models.
+
+### Added
+
+- Added `sessions.handoff.roster`, listing the models a handoff may launch a child session on.
+
+### Changed
+
+- Changed the models a handoff may use when no roster is configured: it now follows pi's own `enabledModels` scoping, falling back to every authenticated model only when nothing is scoped.
+
 ## [0.11.2] - 2026-08-04
 
 ### Changed

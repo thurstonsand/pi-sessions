@@ -3,6 +3,7 @@ import {
   createChildGeneratedHandoffBootstrap,
   HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
 } from "../extensions/session-handoff/metadata.ts";
+import { parseModelSelection } from "../extensions/shared/model.ts";
 import { createFakeModelRegistry, createFakeModelRuntime } from "./test-helpers.ts";
 
 const mockLoadSettings = vi.fn();
@@ -59,6 +60,7 @@ beforeEach(() => {
     handoff: {
       pickerShortcut: "alt+o",
       persistRuns: false,
+      roster: [],
       deferred: { copyToClipboard: true },
     },
     index: { path: "/tmp/pi-sessions/index.sqlite" },
@@ -146,6 +148,7 @@ describe("session handoff extension", () => {
       handoff: {
         pickerShortcut: "alt+p",
         persistRuns: false,
+        roster: [],
         deferred: { copyToClipboard: true },
       },
       index: { path: "/tmp/pi-sessions/index.sqlite" },
@@ -451,29 +454,86 @@ describe("session handoff extension", () => {
     ).rejects.toThrow('Model "ghost/model" not found. Available models: openai/gpt-5.4.');
   });
 
-  it("rejects a provider without a model and a model without a provider", async () => {
+  it("falls back to the session's scoped models when no roster is configured", async () => {
     const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
     installHandoffAndWire(installHandoff, pi);
 
-    await expect(
-      runTool(pi, handlers, {
-        goal: "Do it",
-        title: "Do it now",
-        launch: "deferred",
-        provider: "openai",
-      }),
-    ).rejects.toThrow("session_handoff requires provider and model together, or neither.");
+    const availableModels = [
+      { provider: "openai", id: "gpt-5.4" },
+      { provider: "metered", id: "gpt-5.4" },
+    ];
+    const scopedModels = [{ model: availableModels[0], thinkingLevel: "high" }];
 
     await expect(
-      runTool(pi, handlers, {
-        goal: "Do it",
-        title: "Do it now",
-        launch: "deferred",
-        model: "gpt-5.4",
-      }),
-    ).rejects.toThrow("session_handoff requires provider and model together, or neither.");
+      runTool(
+        pi,
+        handlers,
+        {
+          goal: "Do it",
+          title: "Do it now",
+          launch: "deferred",
+          provider: "metered",
+          model: "gpt-5.4",
+        },
+        { availableModels, scopedModels },
+      ),
+    ).rejects.toThrow(
+      'Model "metered/gpt-5.4" is not on the handoff roster. Allowed models: openai/gpt-5.4:high.',
+    );
+
+    const registerTool = pi.registerTool as ReturnType<typeof vi.fn>;
+    expect(promptGuidelines(registerTool.mock.calls.at(-1)?.[0])).toContain(
+      "Available models, given as provider/model-id: openai/gpt-5.4:high.",
+    );
+  });
+
+  it("restricts the advertised and accepted models to a configured roster", async () => {
+    mockLoadSettings.mockReturnValue({
+      features: {},
+      subagents: { maxDepth: 2 },
+      handoff: {
+        pickerShortcut: "alt+o",
+        persistRuns: false,
+        roster: [parseModelSelection("openai/*")],
+        deferred: { copyToClipboard: true },
+      },
+      index: { path: "/tmp/pi-sessions/index.sqlite" },
+      autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
+    });
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi);
+
+    const availableModels = [
+      { provider: "openai", id: "gpt-5.4" },
+      { provider: "metered", id: "gpt-5.4" },
+    ];
+
+    await expect(
+      runTool(
+        pi,
+        handlers,
+        {
+          goal: "Do it",
+          title: "Do it now",
+          launch: "deferred",
+          provider: "metered",
+          model: "gpt-5.4",
+        },
+        { availableModels, scopedModels: [{ model: availableModels[1] }] },
+      ),
+    ).rejects.toThrow(
+      'Model "metered/gpt-5.4" is not on the handoff roster. Allowed models: openai/gpt-5.4.',
+    );
+
+    const registerTool = pi.registerTool as ReturnType<typeof vi.fn>;
+    const definition = registerTool.mock.calls.at(-1)?.[0];
+    expect(promptGuidelines(definition)).toContain(
+      "Available models, given as provider/model-id: openai/gpt-5.4.",
+    );
   });
 
   it("shuts down an automatic child when bootstrap fails before its first turn", async () => {
@@ -589,14 +649,18 @@ async function runTool(
   pi: ReturnType<typeof createPiApi>,
   handlers: Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>,
   params: Record<string, unknown>,
-  options?: { availableModels?: unknown[] },
+  options?: { availableModels?: unknown[]; scopedModels?: unknown[] },
 ): Promise<{
   content: Array<{ text?: string }>;
   details: Record<string, unknown>;
 }> {
   await handlers.get("session_start")?.(
     {},
-    createSessionStartContext({ sessionId: "tool-session" }) as never,
+    createSessionStartContext({
+      sessionId: "tool-session",
+      ...(options?.availableModels ? { availableModels: options.availableModels } : {}),
+      ...(options?.scopedModels ? { scopedModels: options.scopedModels } : {}),
+    }) as never,
   );
   const registerTool = pi.registerTool as ReturnType<typeof vi.fn>;
   const definition = registerTool.mock.calls.at(-1)?.[0] as {
@@ -679,9 +743,11 @@ function createSessionStartContext(options: {
   sessionId: string;
   entries?: unknown[];
   availableModels?: unknown[];
+  scopedModels?: unknown[];
 }) {
   return {
     hasUI: true,
+    scopedModels: options.scopedModels ?? [],
     ui: {
       notify: vi.fn(),
       custom: vi.fn(),

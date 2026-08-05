@@ -1,7 +1,7 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
-import { formatAvailableModelList } from "../shared/model-resolution.ts";
 import { type HandoffLaunchTarget, SUBAGENT_LAUNCH } from "./launch-target.ts";
+import { formatRosterEntry, type HandoffRoster } from "./roster.ts";
 
 export function buildHandoffLaunchSchema(targets: readonly HandoffLaunchTarget[]) {
   const descriptions = targets.flatMap((target) =>
@@ -31,6 +31,9 @@ const MODEL_INHERITANCE_GUIDELINES = [
   "To run the handoff on a different model, set both provider and model together (both are required).",
 ];
 
+const RESTRICTED_THINKING_GUIDELINE =
+  'A ":level" suffix on a listed model limits it to those thinking levels; set thinkingLevel to one of them, or leave it unset when only one is listed.';
+
 const SUBAGENT_MODEL_OVERRIDE_GUIDELINE =
   "For subagents, choose the model that best fits the delegated task; for directional or deferred handoffs, only override the model when the task clearly warrants it. When unsure, ask the user for their preference.";
 
@@ -40,15 +43,19 @@ const DEFAULT_MODEL_OVERRIDE_GUIDELINE =
 export function buildHandoffPromptGuidelines(
   targets: readonly HandoffLaunchTarget[],
   models: readonly Model<Api>[],
+  roster: HandoffRoster | undefined,
 ): string[] {
   const hasSubagent = targets.some((target) => target.value === SUBAGENT_LAUNCH);
+  const selectable =
+    roster?.map(formatRosterEntry) ?? models.map((model) => `${model.provider}/${model.id}`);
   return [
     ...(hasSubagent ? SUBAGENT_GUIDELINES : []),
     LAUNCH_TARGET_GUIDELINE,
     ...MODEL_INHERITANCE_GUIDELINES,
     hasSubagent ? SUBAGENT_MODEL_OVERRIDE_GUIDELINE : DEFAULT_MODEL_OVERRIDE_GUIDELINE,
-    ...(models.length > 0
-      ? [`Available models, given as provider/model-id: ${formatAvailableModelList(models)}.`]
+    ...(selectable.length > 0
+      ? [`Available models, given as provider/model-id: ${selectable.join(", ")}.`]
       : []),
+    ...(roster?.some((entry) => entry.thinkingLevels) ? [RESTRICTED_THINKING_GUIDELINE] : []),
   ];
 }

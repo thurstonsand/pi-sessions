@@ -19,6 +19,7 @@ import type { HandoffLaunchTarget } from "./launch-target.ts";
 import { HANDOFF_BOOTSTRAP_FAILED_CUSTOM_TYPE } from "./metadata.ts";
 import { openSessionReferencePicker } from "./picker.ts";
 import { SESSION_TOKEN_PREFIX } from "./query.ts";
+import { type HandoffRoster, resolveHandoffRoster } from "./roster.ts";
 import {
   executeSessionHandoffTool,
   type HandoffToolParams,
@@ -57,6 +58,7 @@ export function installHandoff(
   function registerHandoffTool(
     models: readonly Model<Api>[],
     launchTargets: readonly HandoffLaunchTarget[],
+    roster: HandoffRoster | undefined,
   ): void {
     pi.registerTool({
       name: "session_handoff",
@@ -64,7 +66,7 @@ export function installHandoff(
       description: "Start a new Pi session with a self-contained task.",
       promptSnippet:
         "Delegate bounded work to a background subagent or hand off context to another Pi session",
-      promptGuidelines: buildHandoffPromptGuidelines(launchTargets, models),
+      promptGuidelines: buildHandoffPromptGuidelines(launchTargets, models, roster),
       parameters: Type.Object({
         goal: Type.String({
           description:
@@ -141,6 +143,7 @@ export function installHandoff(
           ctx,
           modelRuntime,
           launchTargets,
+          roster,
           (sessionId, status) => clipboardStatusBySessionId.set(sessionId, status),
         );
       },
@@ -202,13 +205,19 @@ export function installHandoff(
 
   return {
     async onSessionStart(_event, ctx) {
+      const models = ctx.modelRegistry.getAvailable();
       registerHandoffTool(
-        ctx.modelRegistry.getAvailable(),
+        models,
         createHandoffLaunchTargets({
           pi,
           splitBackend,
           copyDeferredToClipboard: settings.handoff.deferred.copyToClipboard,
           additionalTargets: deps.getLaunchTargets?.() ?? [],
+        }),
+        resolveHandoffRoster({
+          models,
+          patterns: settings.handoff.roster,
+          scopedModels: ctx.scopedModels,
         }),
       );
 

@@ -12,8 +12,9 @@ import {
   type HandoffLaunchValue,
 } from "./launch-target.ts";
 import { createChildGeneratedHandoffBootstrap } from "./metadata.ts";
-import { formatModelArgument, resolveModelOverride } from "./model.ts";
+import { formatModelArgument, resolveChildModel } from "./model.ts";
 import { buildLaunchReceipt } from "./receipt.ts";
+import type { HandoffRoster } from "./roster.ts";
 import { formatHandoffLaunchFailure, prepareHandoffLaunch } from "./spawn.ts";
 import type { HandoffToolDetails } from "./tool-contract.ts";
 
@@ -39,6 +40,7 @@ export async function executeSessionHandoffTool(
   ctx: ExtensionContext,
   modelRuntime: ModelRuntime,
   launchTargets: readonly HandoffLaunchTarget[],
+  roster: HandoffRoster | undefined,
   recordClipboardStatus: (sessionId: string, status: ClipboardStatus) => void,
 ) {
   const goal = params.goal.trim();
@@ -90,7 +92,7 @@ export async function executeSessionHandoffTool(
   }
   const override =
     provider && modelId
-      ? resolveModelOverride(modelRuntime, `${provider}/${modelId}`, params.thinkingLevel)
+      ? resolveChildModel(modelRuntime, roster, { provider, modelId }, params.thinkingLevel)
       : undefined;
   const childModel = override?.model ?? ctx.model;
   const thinkingLevel = override?.thinkingLevel ?? params.thinkingLevel ?? pi.getThinkingLevel();

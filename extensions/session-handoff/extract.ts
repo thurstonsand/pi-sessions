@@ -26,7 +26,7 @@ import { type Static, Type } from "typebox";
 import { freshenModel } from "../shared/model-runtime.ts";
 import { getDefaultHandoffRunsDir, type HandoffSettings } from "../shared/settings.ts";
 import { parseTypeBoxValue } from "../shared/typebox.ts";
-import { resolveModelOverride } from "./model.ts";
+import { resolveModelPattern } from "./model.ts";
 
 const MAX_HANDOFF_EXTRACTION_ATTEMPTS = 3;
 const HANDOFF_EXTRACTION_RETRY_PROMPT =
@@ -111,7 +111,7 @@ export async function generateHandoffDraftFromSessionManager({
   requestResponse?: boolean | undefined;
 }): Promise<HandoffDraftResult | undefined> {
   const modelOverride = settings.model
-    ? resolveModelOverride(modelRuntime, settings.model, settings.thinkingLevel)
+    ? resolveModelPattern(modelRuntime, settings.model, settings.thinkingLevel)
     : undefined;
   let model = modelOverride?.model;
   if (!model) {

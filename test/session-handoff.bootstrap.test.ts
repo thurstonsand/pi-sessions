@@ -102,6 +102,7 @@ describe("session handoff bootstrap", () => {
     const getModelRuntime = vi.fn().mockResolvedValue(modelRuntime);
     const handoffSettings = {
       pickerShortcut: "alt+o" as const,
+      roster: [],
       model: "openai-codex/gpt-5.6-terra",
       thinkingLevel: "low" as const,
       persistRuns: true,
@@ -272,6 +273,7 @@ function consumeBootstrap(pi: unknown, ctx: unknown): Promise<void> {
     "medium",
     {
       pickerShortcut: "alt+o" as const,
+      roster: [],
       persistRuns: false,
       deferred: { copyToClipboard: true },
     },

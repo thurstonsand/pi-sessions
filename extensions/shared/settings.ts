@@ -4,6 +4,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { getAgentDir, SettingsManager } from "@earendil-works/pi-coding-agent";
 import type { KeyId } from "@earendil-works/pi-tui";
 import { type Static, Type } from "typebox";
+import { type ModelSelection, parseModelSelection } from "./model.ts";
 import { isThinkingLevel } from "./thinking-levels.ts";
 import { parseTypeBoxValue } from "./typebox.ts";
 
@@ -30,6 +31,7 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
       persistRuns: Type.Optional(Type.Boolean()),
       model: Type.Optional(Type.String()),
       thinkingLevel: Type.Optional(Type.String()),
+      roster: Type.Optional(Type.Array(Type.String())),
       deferred: Type.Optional(
         Type.Object({
           copyToClipboard: Type.Optional(Type.Boolean()),
@@ -97,6 +99,8 @@ export interface AskSettings extends AgentModelSettings {
 export interface HandoffSettings extends AgentModelSettings {
   pickerShortcut: KeyId;
   persistRuns: boolean;
+  /** Patterns naming the models a handoff may launch a child on. Empty means unrestricted. */
+  roster: readonly ModelSelection[];
   deferred: {
     copyToClipboard: boolean;
   };
@@ -182,6 +186,19 @@ function normalizePickerShortcut(value: string | undefined): KeyId {
   return (trimmed ? trimmed : "alt+o") as KeyId;
 }
 
+function normalizeRoster(value: readonly string[] | undefined): readonly ModelSelection[] {
+  return (value ?? [])
+    .map((pattern) => pattern.trim())
+    .filter(Boolean)
+    .map((pattern) => {
+      try {
+        return parseModelSelection(pattern);
+      } catch (error) {
+        throw new Error(`Invalid sessions.handoff.roster entry: ${(error as Error).message}`);
+      }
+    });
+}
+
 function parseThinkingLevel(value: string | undefined): ThinkingLevel | undefined {
   const trimmed = value?.trim();
   return isThinkingLevel(trimmed) ? trimmed : undefined;
@@ -238,6 +255,7 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
       ...resolveAgentModelSettings(fileSettings.handoff),
       pickerShortcut: normalizePickerShortcut(fileSettings.handoff?.pickerShortcut),
       persistRuns: fileSettings.handoff?.persistRuns ?? false,
+      roster: normalizeRoster(fileSettings.handoff?.roster),
       deferred: {
         copyToClipboard: fileSettings.handoff?.deferred?.copyToClipboard ?? true,
       },

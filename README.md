@@ -142,6 +142,7 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
       "pickerShortcut": "alt+p",
       "model": "openai-codex/gpt-5.6-terra",
       "thinkingLevel": "low",
+      "roster": ["anthropic/*", "openai-codex/gpt-5.6-terra:high"],
       "deferred": {
         "copyToClipboard": true
       }
@@ -151,6 +152,8 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
 ```
 
 `model` and `thinkingLevel` configure the agent that builds handoff prompts. They default to the new session's values when absent.
+
+`roster` limits which models a handoff may launch a child session on. Defaults to pi's own `enabledModels` scoping, then to all configured models. May optionally include a thinking level; listing a model more than once adds to the levels it allows.
 
 `deferred.copyToClipboard` (default `true`) controls whether deferred handoffs copy the resume command to the clipboard. When off, the resume command is only shown in the tool call.
 

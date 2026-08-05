@@ -1,34 +1,20 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
+import {
+  type ExactModelReference,
+  findModelByReference,
+  formatModelSelection,
+  selectModel,
+} from "../shared/model.ts";
 import { formatAvailableModelList, resolveAuthenticatedModel } from "../shared/model-resolution.ts";
-import { isThinkingLevel } from "../shared/thinking-levels.ts";
+import { type HandoffRoster, selectFromRoster } from "./roster.ts";
 
 export function formatModelArgument(
   model: Model<Api> | undefined,
   thinkingLevel: ThinkingLevel | undefined,
 ): string | undefined {
-  if (!model) {
-    return undefined;
-  }
-
-  const base = `${model.provider}/${model.id}`;
-  return thinkingLevel ? `${base}:${thinkingLevel}` : base;
-}
-
-export function parseModelArgument(value: string): {
-  model: string;
-  thinkingLevel?: ThinkingLevel | undefined;
-} {
-  const separator = value.lastIndexOf(":");
-  const suffix = separator >= 0 ? value.slice(separator + 1) : undefined;
-  if (!isThinkingLevel(suffix)) {
-    return { model: value };
-  }
-  return {
-    model: value.slice(0, separator),
-    thinkingLevel: suffix,
-  };
+  return model ? formatModelSelection(selectModel(model, thinkingLevel)) : undefined;
 }
 
 export interface HandoffModelOverride {
@@ -36,7 +22,41 @@ export interface HandoffModelOverride {
   thinkingLevel: ThinkingLevel | undefined;
 }
 
-export function resolveModelOverride(
+/**
+ * Resolves the model a handoff launches its child on. A roster replaces Pi's CLI
+ * matching entirely: fuzzy aliases resolve across every authenticated provider,
+ * which is how delegated work lands on a metered provider that happens to serve
+ * the same model id, so a rostered handoff accepts only an exact roster entry.
+ */
+export function resolveChildModel(
+  modelRuntime: ModelRuntime,
+  roster: HandoffRoster | undefined,
+  requested: ExactModelReference,
+  thinkingLevel: ThinkingLevel | undefined,
+): HandoffModelOverride {
+  if (!roster) {
+    return resolveModelPattern(
+      modelRuntime,
+      formatModelSelection({ ...requested, thinkingLevel: undefined }),
+      thinkingLevel,
+    );
+  }
+
+  const level = selectFromRoster(roster, requested, thinkingLevel);
+  const model = findModelByReference(modelRuntime.getAvailableSnapshot(), requested);
+  if (!model) {
+    throw new Error(
+      `Model "${requested.provider}/${requested.modelId}" is no longer an available authenticated model.`,
+    );
+  }
+  return { model, thinkingLevel: level };
+}
+
+/**
+ * Resolves a user-configured model pattern with Pi's CLI grammar, including fuzzy
+ * aliases. Only for settings the user writes by hand; never for a model's choice.
+ */
+export function resolveModelPattern(
   modelRuntime: ModelRuntime,
   modelPattern: string,
   thinkingLevel?: ThinkingLevel | undefined,

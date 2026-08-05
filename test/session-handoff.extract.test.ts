@@ -486,6 +486,7 @@ function createMockAgentSession(
 function createHandoffSettings(persistRuns = false): HandoffSettings {
   return {
     pickerShortcut: "alt+o",
+    roster: [],
     persistRuns,
     deferred: { copyToClipboard: true },
   };

@@ -8,8 +8,13 @@ enter = "mise bootstrap --yes --quiet"
 
 [tools]
 actionlint = "1.7.12"
-hk = "1.54.0"
+hk = "1.54.1"
 node = "24"
+"npm:renovate" = { version = "44.5.3", allow_builds = [
+  "re2",
+], trust_policy_excludes = [
+  "@yarnpkg/libzip@3.2.2",
+] }
 
 [env]
 HK_MISE = "1"

@@ -88,7 +88,8 @@ export function installSearch(pi: ExtensionAPI, deps: SearchInstallDeps): void {
         Type.Union(
           [Type.Literal("relevance"), Type.Literal("modified_desc"), Type.Literal("modified_asc")],
           {
-            description: "Display order for returned matches",
+            description:
+              "Display order for returned matches: `relevance`, `modified_desc`, or `modified_asc`. Defaults to `relevance` when a query is present and `modified_desc` otherwise.",
           },
         ),
       ),

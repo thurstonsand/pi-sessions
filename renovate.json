@@ -1,6 +1,14 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "customManagers:biomeVersions"],
+  "extends": [
+    "config:recommended",
+    "customManagers:biomeVersions",
+    ":configMigration",
+    ":maintainLockFilesWeekly",
+    "security:minimumReleaseAgeNpm",
+    "abandonments:recommended",
+    ":enableVulnerabilityAlertsWithAdditionalLabel(security)"
+  ],
   "dependencyDashboard": true,
   "timezone": "America/New_York",
   "labels": ["dependencies"],

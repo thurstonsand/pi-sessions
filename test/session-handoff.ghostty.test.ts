@@ -183,6 +183,7 @@ function createPiApi(result?: { code?: number; stdout?: string; stderr?: string 
     registerFlag: vi.fn(),
     getFlag: vi.fn(),
     registerMessageRenderer: vi.fn(),
+    registerMarkdownTransformer: vi.fn(),
     registerEntryRenderer: vi.fn(),
     sendMessage: vi.fn(),
     sendUserMessage: vi.fn(),

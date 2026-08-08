@@ -501,9 +501,11 @@ describe("session-search hooks", () => {
 
     const controller = createSessionHookController({ indexPath });
     // The lock holder lives on a worker thread because the sqlite driver blocks
-    // the main thread synchronously while it waits for the lock. The hold must
-    // outlast any bounded retry scheme so only genuine lock queueing passes.
-    const lockHolder = await holdWriteLockInWorker(indexPath, 4200);
+    // the main thread synchronously while it waits for the lock. A writer without
+    // busy_timeout fails the instant it finds the lock held, so any hold at all
+    // separates queueing from failing; keep it far below the timeout so a loaded
+    // machine cannot push the wait past it.
+    const lockHolder = await holdWriteLockInWorker(indexPath, 1000);
 
     try {
       expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);

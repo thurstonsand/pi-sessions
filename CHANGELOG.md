@@ -2,6 +2,12 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.12.1] - 2026-08-08
+
+### Fixed
+
+- `session_search`'s `sort` parameter now describes its accepted values, so agents stop inventing plausible-sounding orderings like `recency` and failing validation.
+
 ## [0.12.0] - 2026-08-04
 
 - **Handoff model roster** - Handoffs now launch child sessions only on configured models.

@@ -10,7 +10,7 @@ enter = "mise bootstrap --yes --quiet"
 actionlint = "1.7.12"
 hk = "1.54.1"
 node = "24"
-"npm:renovate" = { version = "44.5.3", allow_builds = [
+"npm:renovate" = { version = "44.27.0", allow_builds = [
   "re2",
 ], trust_policy_excludes = [
   "@yarnpkg/libzip@3.2.2",
@@ -39,7 +39,7 @@ run = "tsc --project tsconfig.broker.json"
 
 [tasks.lint]
 description = "Lint"
-depends = ["lint:biome", "lint:actions", "lint:broker"]
+depends = ["lint:*"]
 
 [tasks."lint:biome"]
 description = "Lint TypeScript and JSON"

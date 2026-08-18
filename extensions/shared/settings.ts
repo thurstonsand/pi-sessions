@@ -22,6 +22,7 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
     Type.Object({
       enable: Type.Optional(Type.Boolean()),
       maxDepth: Type.Optional(Type.Integer({ minimum: 0 })),
+      contextLimit: Type.Optional(Type.Integer({ minimum: 1 })),
     }),
   ),
   handoff: Type.Optional(
@@ -120,6 +121,8 @@ export interface SessionSettings {
   features: FeatureToggles;
   subagents: {
     maxDepth: number;
+    /** Effective context window for a subagent, when smaller than its model's. */
+    contextLimit?: number;
   };
   handoff: HandoffSettings;
   index: {
@@ -250,6 +253,9 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
     features: resolveFeatureToggles(fileSettings),
     subagents: {
       maxDepth: fileSettings.subagents?.maxDepth ?? 2,
+      ...(fileSettings.subagents?.contextLimit === undefined
+        ? {}
+        : { contextLimit: fileSettings.subagents.contextLimit }),
     },
     handoff: {
       ...resolveAgentModelSettings(fileSettings.handoff),
@@ -280,4 +286,16 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
 
 export function loadSettings(): SessionSettings {
   return resolveSessionSettings(loadSessionFileSettings());
+}
+
+/** pi's own compaction knobs, resolved rather than pi's all-optional `CompactionSettings`. */
+export interface CompactionThresholdSettings {
+  enabled: boolean;
+  reserveTokens: number;
+  keepRecentTokens: number;
+}
+
+/** Read fresh so live settings edits apply mid-session, as they do for pi itself. */
+export function readCompactionSettings(): CompactionThresholdSettings {
+  return SettingsManager.create(process.cwd()).getCompactionSettings();
 }

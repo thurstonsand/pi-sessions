@@ -251,6 +251,40 @@ describe("subagent installation", () => {
     expect((result as { systemPrompt: string }).systemPrompt).not.toContain("submit_task_report");
   });
 
+  it("compacts an over-limit child before settling it, and leaves the parent alone", async () => {
+    const order: string[] = [];
+    const { pi, handlers } = createPi({ tmuxInstalled: true, attachedResponses: [false] });
+    const handle = installSubagents(pi as never, createDeps(2, undefined, undefined, 400_000));
+    const ctx = createContext(childId, childEntries(1, false));
+    ctx.compact.mockImplementation((options: { onComplete?: () => void }) => {
+      order.push("compact");
+      options.onComplete?.();
+    });
+    ctx.shutdown.mockImplementation(() => order.push("shutdown"));
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(order).toEqual(["compact", "shutdown"]);
+
+    const parentCtx = createContext(parentId, []);
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, parentCtx as never);
+    await handlers.get("agent_settled")?.({}, parentCtx);
+    expect(parentCtx.compact).not.toHaveBeenCalled();
+  });
+
+  it("leaves an under-limit child uncompacted", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true, attachedResponses: [false] });
+    const handle = installSubagents(pi as never, createDeps(2, undefined, undefined, 400_000));
+    const ctx = createContext(childId, childEntries(1, false));
+    ctx.getContextUsage = () => ({ tokens: 100_000, contextWindow: 1_000_000, percent: 10 });
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+
+    await handlers.get("agent_settled")?.({}, ctx);
+
+    expect(ctx.compact).not.toHaveBeenCalled();
+    expect(ctx.shutdown).toHaveBeenCalledOnce();
+  });
+
   it("exits a settled child immediately when nobody is observing its tmux session", async () => {
     const { pi, handlers } = createPi({ tmuxInstalled: true, attachedResponses: [false] });
     const handle = installSubagents(pi as never, createDeps(2));
@@ -414,9 +448,15 @@ function createDeps(
   maxDepth: number,
   captureIncoming?: ((handler: (envelope: unknown) => void) => void) | undefined,
   listSessions = vi.fn(async () => []),
+  contextLimit?: number,
 ) {
   return {
-    settings: { subagents: { maxDepth } },
+    readCompactionSettings: () => ({
+      enabled: true,
+      reserveTokens: 16_384,
+      keepRecentTokens: 20_000,
+    }),
+    settings: { subagents: { maxDepth, contextLimit } },
     index: { path: "/tmp/index.sqlite" },
     messaging: {
       onIncomingSubagentReport: vi.fn((handler) => captureIncoming?.(handler)),
@@ -495,6 +535,9 @@ function createContext(sessionId: string, entries: unknown[]) {
     hasPendingMessages: () => false,
     isIdle: () => true,
     shutdown: vi.fn(),
+    hasUI: false,
+    getContextUsage: () => ({ tokens: 500_000, contextWindow: 1_000_000, percent: 50 }),
+    compact: vi.fn((options: { onComplete?: () => void }) => options.onComplete?.()),
   };
 }
 

@@ -157,17 +157,20 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
 
 `deferred.copyToClipboard` (default `true`) controls whether deferred handoffs copy the resume command to the clipboard. When off, the resume command is only shown in the tool call.
 
-Subagents require the handoff and messaging features. Limit recursive delegation depth with `sessions.subagents.maxDepth` (default `2`):
+Subagents require the handoff and messaging features. Limit recursive delegation depth with `sessions.subagents.maxDepth` (default `2`), or cap the context a subagent runs in with `sessions.subagents.contextLimit`:
 
 ```json
 {
   "sessions": {
     "subagents": {
-      "maxDepth": 2
+      "maxDepth": 2,
+      "contextLimit": 400000
     }
   }
 }
 ```
+
+`contextLimit` sets a max context limit before compaction is triggered. It works identically to setting a global value in pi itself, but only applies to subagents.
 
 ## Session Index
 

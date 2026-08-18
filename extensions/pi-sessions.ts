@@ -17,7 +17,7 @@ import {
 import { installSearch } from "./session-search/install.ts";
 import type { SessionLifecycle } from "./shared/composition.ts";
 import { createSessionModelRuntime, type ModelRuntimeProvider } from "./shared/model-runtime.ts";
-import { loadSettings } from "./shared/settings.ts";
+import { loadSettings, readCompactionSettings } from "./shared/settings.ts";
 import { installSubagents } from "./subagents/install.ts";
 
 /**
@@ -55,7 +55,7 @@ export default function piSessions(pi: ExtensionAPI): void {
   }
   const subagents =
     settings.features.subagents && messaging
-      ? installSubagents(pi, { settings, messaging })
+      ? installSubagents(pi, { settings, messaging, readCompactionSettings })
       : undefined;
   if (subagents) {
     lifecycles.push(subagents);

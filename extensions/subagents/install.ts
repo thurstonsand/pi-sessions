@@ -6,9 +6,10 @@ import type {
   SendMessageResult,
 } from "../session-messaging/install.ts";
 import type { SessionLifecycle } from "../shared/composition.ts";
-import type { SessionSettings } from "../shared/settings.ts";
+import type { CompactionThresholdSettings, SessionSettings } from "../shared/settings.ts";
 import { isTmuxInstalled } from "../shared/tmux.ts";
 import { SubagentCancellationRouter, type SubagentCancelResult } from "./cancel.ts";
+import { createSubagentContextLimit } from "./context-limit.ts";
 import { createSubagentLaunchTarget, type SubagentLaunchState } from "./launch-target.ts";
 import {
   hasSubagentLaunchEntries,
@@ -55,12 +56,20 @@ export interface SubagentsHandle extends SessionLifecycle {
 
 export function installSubagents(
   pi: ExtensionAPI,
-  deps: { settings: SessionSettings; messaging: MessagingHandle },
+  deps: {
+    settings: SessionSettings;
+    messaging: MessagingHandle;
+    readCompactionSettings: () => CompactionThresholdSettings;
+  },
 ): SubagentsHandle {
   pi.registerMessageRenderer(SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE, renderSubagentReportMessage);
 
   let epoch = 0;
   let current: CurrentSubagentSession | undefined;
+  const contextLimit = createSubagentContextLimit(
+    deps.settings.subagents.contextLimit,
+    deps.readCompactionSettings,
+  );
 
   const isCurrentSession = (candidateEpoch: number): boolean =>
     current?.parent.epoch === candidateEpoch;
@@ -150,6 +159,7 @@ You are working as a subagent on one task delegated by a parent session. The han
       ? await reconciler.reconcile()
       : undefined;
     if (session.child) {
+      await contextLimit.compactIfOverLimit(ctx);
       await settledChildLifecycle.settle(session.parent, session.child, reconciliation);
     }
   });

@@ -7,14 +7,8 @@ experimental = true
 enter = "mise bootstrap --yes --quiet"
 
 [tools]
-actionlint = "1.7.12"
 hk = "1.54.1"
 node = "24"
-"npm:renovate" = { version = "44.29.4", allow_builds = [
-  "re2",
-], trust_policy_excludes = [
-  "@yarnpkg/libzip@3.2.2",
-] }
 
 [env]
 HK_MISE = "1"
@@ -48,11 +42,22 @@ run = "biome check ."
 [tasks."lint:actions"]
 description = "Lint GitHub Actions workflows"
 run = "actionlint"
+tools.actionlint = "1.7.12"
 
 [tasks."lint:broker"]
 description = "Verify the committed broker build matches its source"
 depends = ["build:broker"]
 run = "git diff --exit-code -- dist"
+
+[tasks.renovate]
+description = "Run Renovate"
+run = "renovate"
+tools.node = "24"
+tools."npm:renovate" = { version = "44.29.4", allow_builds = [
+  "re2",
+], trust_policy_excludes = [
+  "@yarnpkg/libzip@3.2.2",
+] }
 
 [tasks.format]
 description = "Format and apply safe fixes"

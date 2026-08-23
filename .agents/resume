@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "${repo_root}"
+
+export PATH="${HOME}/.local/share/mise/shims:${HOME}/.local/bin:${PATH}"
+
+for command in mise node npm pi tmux; do
+  if ! command -v "${command}" >/dev/null 2>&1; then
+    printf 'Orb toolchain is incomplete; rerun .agents/setup.\n' >&2
+    exit 1
+  fi
+done

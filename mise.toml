@@ -7,7 +7,7 @@ experimental = true
 enter = "mise bootstrap --yes --quiet"
 
 [tools]
-hk = "1.54.1"
+hk = "1.56.1"
 node = "24"
 
 [env]
@@ -53,7 +53,7 @@ run = "git diff --exit-code -- dist"
 description = "Run Renovate"
 run = "renovate"
 tools.node = "24"
-tools."npm:renovate" = { version = "44.29.4", allow_builds = [
+tools."npm:renovate" = { version = "44.39.1", allow_builds = [
   "re2",
 ], trust_policy_excludes = [
   "@yarnpkg/libzip@3.2.2",
@@ -63,7 +63,7 @@ tools."npm:renovate" = { version = "44.29.4", allow_builds = [
 description = "Validate Renovate configuration"
 run = "renovate-config-validator renovate.json"
 tools.node = "24"
-tools."npm:renovate" = { version = "44.29.4", allow_builds = [
+tools."npm:renovate" = { version = "44.39.1", allow_builds = [
   "re2",
 ], trust_policy_excludes = [
   "@yarnpkg/libzip@3.2.2",

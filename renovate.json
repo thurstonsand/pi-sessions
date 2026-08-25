@@ -46,6 +46,12 @@
       "matchPackageNames": ["jdx/hk"],
       "groupName": "hk",
       "groupSlug": "hk"
+    },
+    {
+      "description": "Pinned to the version pi ships. Pi's extension loader aliases typebox to its own bundled copy, so our declaration only types what pi executes and must match it. It moves when pi moves, not on Renovate's schedule; the typebox pin test reports when that happens.",
+      "matchManagers": ["npm"],
+      "matchPackageNames": ["typebox"],
+      "enabled": false
     }
   ]
 }

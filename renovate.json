@@ -52,6 +52,11 @@
       "matchManagers": ["npm"],
       "matchPackageNames": ["typebox"],
       "enabled": false
+    },
+    {
+      "description": "@types/node describes the runtime, so it tracks the Node these packages run on rather than the newest DefinitelyTyped release. Types from a later major describe APIs that are not there and hide ones that were removed, and tsc believes them either way. Raise the ceiling when the toolchain in mise.toml moves.",
+      "matchPackageNames": ["@types/node"],
+      "allowedVersions": "<25"
     }
   ]
 }

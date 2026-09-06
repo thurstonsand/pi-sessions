@@ -82,6 +82,26 @@ describe("session_reachable tool", () => {
     expect(details.sessions[1]).not.toHaveProperty("title");
   });
 
+  it("keeps the parent off a subagent's menu", async () => {
+    const dbPath = createIndex((db) => {
+      insertIndexedSession(db, { sessionId: "parent-session", sessionName: "Parent" });
+      insertIndexedSession(db, { sessionId: "other-user", sessionName: "Other" });
+    });
+
+    const tool = createSessionReachableTool(
+      createDeps(dbPath, {
+        listSessions: async () => ["current-session", "parent-session", "other-user"],
+        getParentSessionId: () => "parent-session",
+      }),
+    );
+
+    const result = await tool.execute("tool-1", {}, undefined, undefined, createToolContext());
+
+    expect((result.details as { sessions: Array<{ sessionId: string }> }).sessions).toEqual([
+      expect.objectContaining({ sessionId: "other-user" }),
+    ]);
+  });
+
   it("marks a live session that has not finished bootstrapping as starting", async () => {
     const root = testFs.createTempDir();
     const sessionId = "starting-live-session";

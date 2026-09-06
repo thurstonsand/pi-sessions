@@ -63,11 +63,17 @@ export default function piSessions(pi: ExtensionAPI): void {
   if (messaging) {
     pi.registerTool(
       createSessionSendMessageTool(subagents ?? messaging, {
-        wakeCapable: Boolean(subagents),
+        role: subagents ? { kind: "wakeCapable" } : { kind: "plain" },
         getCachedRelationTo: messaging.getCachedRelationTo,
+        ...(subagents ? { getParentSessionId: () => subagents.getParentSessionId() } : {}),
       }),
     );
-    pi.registerTool(createSessionCancelTool(subagents ?? messaging));
+    pi.registerTool(
+      createSessionCancelTool(subagents ?? messaging, {
+        role: { kind: "plain" },
+        ...(subagents ? { getParentSessionId: () => subagents.getParentSessionId() } : {}),
+      }),
+    );
     pi.registerTool(
       createSessionReachableTool({
         indexPath: index.path,
@@ -76,6 +82,7 @@ export default function piSessions(pi: ExtensionAPI): void {
         ...(subagents
           ? {
               listSubagents: async (scope) => (await subagents.roster.resolve(scope)).entries,
+              getParentSessionId: () => subagents.getParentSessionId(),
             }
           : {}),
       }),
@@ -104,7 +111,14 @@ export default function piSessions(pi: ExtensionAPI): void {
     installSearch(pi, { settings, index });
   }
   if (settings.features.ask) {
-    installAsk(pi, { settings, index, getModelRuntime });
+    installAsk(pi, {
+      settings,
+      index,
+      getModelRuntime,
+      ...(subagents
+        ? { shouldMessageSubagent: (sessionId) => subagents.shouldMessageSubagent(sessionId) }
+        : {}),
+    });
   }
   if (settings.features.autoTitle) {
     lifecycles.push(

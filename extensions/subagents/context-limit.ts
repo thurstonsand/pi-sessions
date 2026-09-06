@@ -26,7 +26,7 @@ export function exceedsSubagentContextLimit(
 
 export function createSubagentContextLimit(
   contextLimit: number | undefined,
-  readCompactionSettings: () => CompactionThresholdSettings,
+  readCompactionSettings: (cwd: string) => CompactionThresholdSettings,
 ): SubagentContextLimit {
   if (contextLimit === undefined) {
     return { compactIfOverLimit: async () => {} };
@@ -35,7 +35,11 @@ export function createSubagentContextLimit(
   return {
     async compactIfOverLimit(ctx) {
       if (
-        exceedsSubagentContextLimit(ctx.getContextUsage(), contextLimit, readCompactionSettings())
+        exceedsSubagentContextLimit(
+          ctx.getContextUsage(),
+          contextLimit,
+          readCompactionSettings(ctx.cwd),
+        )
       ) {
         await new Promise<void>((resolve) => {
           ctx.compact({

@@ -29,6 +29,7 @@ export function installAsk(
     settings: SessionSettings;
     index: IndexHandle;
     getModelRuntime: ModelRuntimeProvider;
+    shouldMessageSubagent?: (sessionId: string) => Promise<boolean>;
   },
 ): void {
   const { settings } = deps;
@@ -37,15 +38,22 @@ export function installAsk(
   pi.registerTool({
     name: "session_ask",
     label: "Session Ask",
-    description: "Interrogate a Pi session",
+    description: "Interrogate a Pi session transcript",
     promptSnippet: "Recall information, decisions, or reasoning from a Pi session by id",
-    promptGuidelines: ["Use session_ask with focused questions rather than broad recap requests."],
+    promptGuidelines: [
+      "Use session_ask with focused questions rather than broad recap requests.",
+      ...(deps.shouldMessageSubagent
+        ? [
+            "Use session_send_message for your unfinished subagents; session_ask can read completed subagent transcripts.",
+          ]
+        : []),
+    ],
     parameters: Type.Object({
       session: Type.String({
         description: "Bare UUID for the session",
       }),
       question: Type.String({
-        description: "What to extract, verify, or explain from that session",
+        description: "What to find in that session's transcript",
       }),
     }),
     async execute(_toolCallId, params: SessionAskToolParams, signal, onUpdate, ctx) {
@@ -57,6 +65,19 @@ export function installAsk(
       const question = params.question.trim();
       if (!question) {
         throw new Error("session_ask requires a question.");
+      }
+
+      if (!isExactSessionId(sessionId)) {
+        throw new Error(
+          "session_ask requires an exact session UUID. Use autocomplete or session_search to find it.",
+        );
+      }
+
+      // Unfinished children may not have reached the index yet.
+      if (await deps.shouldMessageSubagent?.(sessionId)) {
+        throw new Error(
+          "That session is your unfinished subagent. Use session_send_message to ask it directly.",
+        );
       }
 
       const resolvedTarget = resolveSessionAskTarget(sessionId, indexPath);
@@ -182,13 +203,6 @@ function resolveSessionAskTarget(
   resolved?: SessionLineageRow | undefined;
   error?: string | undefined;
 } {
-  if (!isExactSessionId(sessionId)) {
-    return {
-      error:
-        "session_ask requires an exact session UUID. Use autocomplete or session_search to find it.",
-    };
-  }
-
   try {
     return withSessionIndex(indexPath, { mode: "read", required: true }, ({ db }) => {
       const row = getSessionById(db, sessionId);

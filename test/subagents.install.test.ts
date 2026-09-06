@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildHandoffKickoffMessage } from "../extensions/session-handoff/kickoff.ts";
 import {
@@ -6,9 +7,17 @@ import {
   HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
   HANDOFF_METADATA_CUSTOM_TYPE,
 } from "../extensions/session-handoff/metadata.ts";
+import type { MessagingHandle } from "../extensions/session-messaging/install.ts";
+import type {
+  CancelSessionResult,
+  SendMessageResult,
+  SendSubagentReportResult,
+} from "../extensions/session-messaging/pi/service.ts";
 import { installSubagents } from "../extensions/subagents/install.ts";
 import {
+  SUBAGENT_CANCELLED_CUSTOM_TYPE,
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
+  SUBAGENT_REPORT_CUSTOM_TYPE,
   SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
 } from "../extensions/subagents/ledger.ts";
@@ -109,6 +118,249 @@ describe("subagent installation", () => {
       SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
       expect.objectContaining({ reportId: "report-1", childSessionId: childId }),
     );
+  });
+
+  it("redirects only unfinished subagents launched on the active branch", async () => {
+    const { pi } = createPi({ tmuxInstalled: true });
+    const handle = installSubagents(pi as never, createDeps(2));
+
+    expect(await handle.shouldMessageSubagent(childId)).toBe(false);
+
+    await handle.onSessionStart?.(
+      { type: "session_start", reason: "startup" },
+      createContext(parentId, [launchEntry()]) as never,
+    );
+
+    expect(await handle.shouldMessageSubagent(childId)).toBe(true);
+    expect(await handle.shouldMessageSubagent(grandchildId)).toBe(false);
+  });
+
+  it("stops redirecting once the active branch no longer carries the launch", async () => {
+    const { pi } = createPi({ tmuxInstalled: true });
+    const handle = installSubagents(pi as never, createDeps(2));
+
+    await handle.onSessionStart?.(
+      { type: "session_start", reason: "startup" },
+      createContext(parentId, [launchEntry()]) as never,
+    );
+    expect(await handle.shouldMessageSubagent(childId)).toBe(true);
+
+    handle.onSessionShutdown?.(
+      { type: "session_shutdown", reason: "reload" },
+      createContext(parentId, []) as never,
+    );
+    await handle.onSessionStart?.(
+      { type: "session_start", reason: "reload" },
+      createContext(parentId, []) as never,
+    );
+
+    expect(await handle.shouldMessageSubagent(childId)).toBe(false);
+  });
+
+  it("allows transcript questions for a cancelled subagent", async () => {
+    const { pi } = createPi({ tmuxInstalled: true });
+    const handle = installSubagents(pi as never, createDeps(2));
+
+    await handle.onSessionStart?.(
+      { type: "session_start", reason: "startup" },
+      createContext(parentId, [launchEntry(), cancelEntry()]) as never,
+    );
+
+    expect(await handle.shouldMessageSubagent(childId)).toBe(false);
+  });
+
+  it.each([
+    { hasWindow: false, brokerLive: false, redirect: false },
+    { hasWindow: true, brokerLive: false, redirect: true },
+    { hasWindow: false, brokerLive: true, redirect: true },
+  ])(
+    "classifies a reported child without waking it: %j",
+    async ({ hasWindow, brokerLive, redirect }) => {
+      const { pi } = createPi({
+        tmuxInstalled: true,
+        ownedWindowSessionIds: () => (hasWindow ? [childId] : []),
+      });
+      const listSessions = vi.fn(async () => (brokerLive ? [childId] : []));
+      const handle = installSubagents(pi as never, createDeps(2, undefined, listSessions));
+      const entries: unknown[] = [];
+      await handle.onSessionStart?.(
+        { type: "session_start", reason: "startup" },
+        createContext(parentId, entries) as never,
+      );
+      const childPath = testFs.writeJsonlFile(testFs.createTempDir(), "reported.jsonl", [
+        {
+          type: "session",
+          version: 3,
+          id: childId,
+          timestamp: "2026-03-25T00:00:00.000Z",
+          cwd: "/repo",
+        },
+        {
+          type: "custom",
+          id: "report",
+          parentId: null,
+          timestamp: "2026-03-25T00:00:01.000Z",
+          customType: SUBAGENT_REPORT_CUSTOM_TYPE,
+          data: { reportId: "report-1", status: "done", summary: "Complete." },
+        },
+      ]);
+      const launch = launchEntry();
+      launch.data.childSessionFile = childPath;
+      entries.push(launch);
+      pi.exec.mockClear();
+      pi.appendEntry.mockClear();
+      pi.sendMessage.mockClear();
+
+      expect(await handle.shouldMessageSubagent(childId)).toBe(redirect);
+      expect(pi.appendEntry).not.toHaveBeenCalled();
+      expect(pi.sendMessage).not.toHaveBeenCalled();
+      expect(pi.exec.mock.calls.every(([, args]) => args[0] === "list-windows")).toBe(true);
+    },
+  );
+
+  it("registers a parent-refusing send-message tool for a subagent session", async () => {
+    const { pi } = createPi({ tmuxInstalled: true });
+    const handle = installSubagents(pi as never, createDeps(2));
+
+    await handle.onSessionStart?.(
+      { type: "session_start", reason: "startup" },
+      createContext(childId, childEntries(1, true)) as never,
+    );
+
+    const registered = pi.registerTool.mock.calls
+      .map((call) => call[0] as ToolDefinition)
+      .find((tool) => tool.name === "session_send_message");
+    expect(registered?.description).toBe("Send a message to another subagent.");
+    if (!registered) {
+      throw new Error("session_send_message was not registered for the subagent session.");
+    }
+    await expect(
+      registered.execute(
+        "call-1",
+        { session: parentId, message: "Done." },
+        undefined,
+        undefined,
+        {} as never,
+      ),
+    ).rejects.toThrow("The parent session cannot be messaged. Use submit_task_report.");
+  });
+
+  it("provides a working report tool when a rewind arms the parent refusal", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true });
+    const messaging = createMessagingFake(undefined, async () => []);
+    vi.mocked(messaging.sendSubagentReport).mockResolvedValue({ delivered: true });
+    const handle = installSubagents(
+      pi as never,
+      createDeps(2, undefined, undefined, undefined, messaging),
+    );
+    const entries = pendingChildEntries(1, true);
+    entries.push({
+      type: "custom",
+      id: "consumed",
+      parentId: "bootstrap",
+      customType: HANDOFF_BOOTSTRAP_CONSUMED_CUSTOM_TYPE,
+      data: { bootstrapEntryId: "bootstrap", reason: "cancelled" },
+    });
+    const ctx = createContext(childId, entries);
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    expect(handle.getParentSessionId()).toBeUndefined();
+    expect(pi.getActiveTools()).not.toContain("submit_task_report");
+
+    entries.pop();
+    await handlers.get("session_tree")?.({}, ctx);
+
+    expect(handle.getParentSessionId()).toBe(parentId);
+    const send = registeredTool(pi, "session_send_message");
+    await expect(
+      send.execute(
+        "send-1",
+        { session: parentId, message: "Done." },
+        undefined,
+        undefined,
+        ctx as never,
+      ),
+    ).rejects.toThrow("The parent session cannot be messaged. Use submit_task_report.");
+    expect(pi.getActiveTools()).toContain("submit_task_report");
+    const report = registeredTool(pi, "submit_task_report");
+    const result = await report.execute(
+      "report-1",
+      { status: "done", summary: "Rewind report." },
+      undefined,
+      undefined,
+      ctx as never,
+    );
+    expect(result).toMatchObject({ terminate: true, details: { delivered: true } });
+    expect(pi.appendEntry).toHaveBeenCalledWith(
+      SUBAGENT_REPORT_CUSTOM_TYPE,
+      expect.objectContaining({ status: "done", summary: "Rewind report." }),
+    );
+    expect(messaging.sendSubagentReport).toHaveBeenCalledWith(
+      expect.objectContaining({ target: parentId, summary: "Rewind report." }),
+    );
+
+    entries.length = 0;
+    await handlers.get("session_tree")?.({}, ctx);
+    expect(handle.getParentSessionId()).toBeUndefined();
+    expect(pi.getActiveTools()).not.toContain("submit_task_report");
+    expect(
+      await handlers.get("before_agent_start")?.({ systemPrompt: "Base" }, ctx),
+    ).toBeUndefined();
+    await expect(
+      report.execute(
+        "report-2",
+        { status: "done", summary: "Invalid." },
+        undefined,
+        undefined,
+        ctx as never,
+      ),
+    ).rejects.toThrow("submit_task_report is available only in its original subagent session.");
+
+    entries.push(...pendingChildEntries(1, true));
+    await handlers.get("session_tree")?.({}, ctx);
+    expect(pi.getActiveTools()).toContain("submit_task_report");
+  });
+
+  it("preserves turn report accounting when navigating within the same child identity", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true });
+    const entries = childEntries(1, true);
+    const handle = installSubagents(pi as never, createDeps(2));
+    const ctx = createContext(childId, entries);
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    await handlers.get("agent_start")?.({}, ctx);
+    entries.push({
+      type: "custom",
+      id: "report",
+      parentId: "kickoff",
+      customType: SUBAGENT_REPORT_CUSTOM_TYPE,
+      data: { reportId: "report-1", status: "done", summary: "Complete." },
+    });
+    await handlers.get("session_tree")?.({}, ctx);
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(ctx.shutdown).toHaveBeenCalledOnce();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+  });
+
+  it("resets the report baseline when rewinding behind reports counted at turn start", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true });
+    const entries = childEntries(1, true);
+    const report = {
+      type: "custom",
+      id: "report",
+      parentId: "kickoff",
+      customType: SUBAGENT_REPORT_CUSTOM_TYPE,
+      data: { reportId: "report-1", status: "done", summary: "Complete." },
+    };
+    entries.push(report);
+    const handle = installSubagents(pi as never, createDeps(2));
+    const ctx = createContext(childId, entries);
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    await handlers.get("agent_start")?.({}, ctx);
+    entries.pop();
+    await handlers.get("session_tree")?.({}, ctx);
+    entries.push(report);
+    await handlers.get("agent_settled")?.({}, ctx);
+    expect(ctx.shutdown).toHaveBeenCalledOnce();
+    expect(pi.sendMessage).not.toHaveBeenCalled();
   });
 
   it("skips reconciliation when a plain session settles without subagent history", async () => {
@@ -447,8 +699,9 @@ describe("subagent installation", () => {
 function createDeps(
   maxDepth: number,
   captureIncoming?: ((handler: (envelope: unknown) => void) => void) | undefined,
-  listSessions = vi.fn(async () => []),
+  listSessions: () => Promise<string[]> = vi.fn(async () => []),
   contextLimit?: number,
+  messaging = createMessagingFake(captureIncoming, listSessions),
 ) {
   return {
     readCompactionSettings: () => ({
@@ -458,17 +711,43 @@ function createDeps(
     }),
     settings: { subagents: { maxDepth, contextLimit } },
     index: { path: "/tmp/index.sqlite" },
-    messaging: {
-      onIncomingSubagentReport: vi.fn((handler) => captureIncoming?.(handler)),
-      sendSubagentReport: vi.fn(),
-      sendMessage: vi.fn(async () => ({
+    messaging,
+  } as never;
+}
+
+function createMessagingFake(
+  captureIncoming: ((handler: (envelope: unknown) => void) => void) | undefined,
+  listSessions: () => Promise<string[]>,
+): MessagingHandle {
+  return {
+    onIncomingSubagentReport: vi.fn((handler) => captureIncoming?.(handler as never)),
+    onIncomingMessage: vi.fn(),
+    onIncomingCancel: vi.fn(),
+    sendSubagentReport: vi.fn(
+      async (): Promise<SendSubagentReportResult> => ({
+        delivered: false,
+        reason: "no_session",
+      }),
+    ),
+    sendMessage: vi.fn(
+      async (): Promise<SendMessageResult> => ({
         delivered: false,
         messageId: "message-1",
         reason: "no_session",
-      })),
-      listSessions,
-    },
-  } as never;
+      }),
+    ),
+    cancelSession: vi.fn(
+      async (): Promise<CancelSessionResult> => ({
+        kind: "transport",
+        cancelId: "cancel-1",
+        delivered: false,
+        reason: "no_session",
+      }),
+    ),
+    waitForSession: vi.fn(async () => false),
+    getCachedRelationTo: vi.fn(() => undefined),
+    listSessions,
+  };
 }
 
 function createPi(options: {
@@ -481,8 +760,19 @@ function createPi(options: {
     (event: unknown, ctx: ReturnType<typeof createContext>) => unknown
   >();
   const attachedResponses = [...(options.attachedResponses ?? [])];
+  let activeTools = ["read", "bash"];
+  const knownTools = new Set(activeTools);
   const pi = {
-    registerTool: vi.fn(),
+    registerTool: vi.fn((tool: ToolDefinition) => {
+      if (!knownTools.has(tool.name)) {
+        knownTools.add(tool.name);
+        activeTools.push(tool.name);
+      }
+    }),
+    getActiveTools: vi.fn(() => [...activeTools]),
+    setActiveTools: vi.fn((names: string[]) => {
+      activeTools = names;
+    }),
     registerMessageRenderer: vi.fn(),
     registerEntryRenderer: vi.fn(),
     appendEntry: vi.fn(),
@@ -517,6 +807,16 @@ function createPi(options: {
     }),
   };
   return { pi, handlers };
+}
+
+function registeredTool(pi: ReturnType<typeof createPi>["pi"], name: string): ToolDefinition {
+  const tool = pi.registerTool.mock.calls
+    .map(([tool]) => tool)
+    .findLast((tool) => tool.name === name);
+  if (!tool) {
+    throw new Error(`${name} was not registered.`);
+  }
+  return tool;
 }
 
 function createContext(sessionId: string, entries: unknown[]) {
@@ -559,6 +859,16 @@ function launchEntry() {
       resumeCommand: "resume",
       depth: 1,
     },
+  };
+}
+
+function cancelEntry() {
+  return {
+    type: "custom",
+    id: "cancelled",
+    parentId: "launch",
+    customType: SUBAGENT_CANCELLED_CUSTOM_TYPE,
+    data: { writerSessionId: parentId, childSessionId: childId },
   };
 }
 

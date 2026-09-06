@@ -46,8 +46,6 @@ export function createSubmitTaskReportTool(
     promptSnippet: "Submit the current task report to the parent session and end the turn",
     promptGuidelines: [
       "Call submit_task_report exactly once as the final tool call for every delegated task or follow-up that expects a response.",
-      "Do not send task results through session_send_message; submit_task_report is the only supported means to send final results to the parent.",
-      "If you receive steering instructions from the parent via session_send_message, you may optionally reply to the parent using the session_send_message tool if the parent's message calls for something that is out of band of what would be included in the report.",
     ],
     parameters: TASK_REPORT_SCHEMA,
     async execute(_toolCallId, params) {

@@ -22,7 +22,7 @@ const details = {
 
 function getTool() {
   return createSessionSendMessageTool({ sendMessage: vi.fn() } as never, {
-    wakeCapable: false,
+    role: { kind: "plain" },
     getCachedRelationTo: vi.fn(() => "child"),
   }) as {
     renderCall: (

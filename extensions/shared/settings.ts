@@ -295,7 +295,11 @@ export interface CompactionThresholdSettings {
   keepRecentTokens: number;
 }
 
-/** Read fresh so live settings edits apply mid-session, as they do for pi itself. */
-export function readCompactionSettings(): CompactionThresholdSettings {
-  return SettingsManager.create(process.cwd()).getCompactionSettings();
+/**
+ * Read fresh so live settings edits apply mid-session, as they do for pi itself.
+ * Takes the session's cwd rather than the process's, since compaction merges the
+ * project's settings over the global ones.
+ */
+export function readCompactionSettings(cwd: string): CompactionThresholdSettings {
+  return SettingsManager.create(cwd).getCompactionSettings();
 }

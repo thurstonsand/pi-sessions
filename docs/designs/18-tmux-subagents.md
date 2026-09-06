@@ -81,7 +81,7 @@ installAsk(pi, …); installAutoTitle(pi, …); installHooks(pi, …);
 
 The root also owns lifecycle ordering: it subscribes to `session_start`/`session_shutdown` once and drives feature hooks deterministically — broker registration resolves before any reconciliation mutation. A process that fails broker registration (duplicate session) refuses all reconciliation mutation, not merely messaging.
 
-Which tool registrations happen is a root decision: with subagents enabled, the composite `session_send_message` (wake-on-send) and `session_cancel` (ownership dispatch) register instead of messaging's plain variants, and they call _down_ into the messaging handle. No upward calls exist anywhere.
+Which tool registrations happen is a root decision: with subagents enabled, the composite `session_send_message` (wake-on-send) and `session_cancel` (ownership dispatch) register instead of messaging's plain variants, and they call _down_ into the messaging handle. No upward calls exist anywhere. The one exception is `session_send_message` wording: subagent identity follows the active branch, so a rewind can change it, and the subagents lifecycle re-registers the matching wording on `session_tree`. Enforcement does not ride on that registration — the root hands the tool a live parent resolver, and the tool refuses the parent on every call regardless of which wording it was built with.
 
 Each feature is toggled by an `enable` flag under its own `sessions.<feature>` namespace (default on), alongside its other settings (for example `sessions.subagents.enable` beside `sessions.subagents.maxDepth`, default 2).
 

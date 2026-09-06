@@ -31,6 +31,18 @@ function createMessagingHandle(
 }
 
 describe("subagent reports", () => {
+  it("carries a single prompt guideline", () => {
+    const tool = createSubmitTaskReportTool(
+      createFakeExtensionApi(),
+      createMessagingHandle(async () => ({ delivered: true })),
+      () => undefined,
+    );
+
+    expect(tool.promptGuidelines).toEqual([
+      "Call submit_task_report exactly once as the final tool call for every delegated task or follow-up that expects a response.",
+    ]);
+  });
+
   it("writes the child report before attempting broker delivery and terminates the turn", async () => {
     const order: string[] = [];
     const pi = createFakeExtensionApi();

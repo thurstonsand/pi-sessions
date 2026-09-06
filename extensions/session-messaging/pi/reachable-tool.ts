@@ -53,6 +53,8 @@ export interface SessionReachableDeps {
         scope: Exclude<SessionReachableScope, "user">,
       ) => Promise<readonly ReachableSubagentEntry[]>)
     | undefined;
+  /** Resolved per call; the parent is unreachable from a subagent, so it stays off the menu. */
+  getParentSessionId?: (() => string | undefined) | undefined;
 }
 
 interface SessionReachableRendererState {
@@ -123,7 +125,10 @@ async function listReachableUserSessions(
     throw new Error(`Session messaging is unavailable: ${formatError(error)}`);
   }
 
-  const targetIds = liveSessionIds.filter((sessionId) => sessionId !== currentSessionId);
+  const parentSessionId = deps.getParentSessionId?.();
+  const targetIds = liveSessionIds.filter(
+    (sessionId) => sessionId !== currentSessionId && sessionId !== parentSessionId,
+  );
   return withSessionIndex(deps.indexPath, { mode: "read", required: true }, ({ db }) => {
     const sessions: ReachableUserSession[] = [];
     for (const sessionId of targetIds) {

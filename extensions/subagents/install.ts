@@ -5,6 +5,10 @@ import type {
   SendMessageRequest,
   SendMessageResult,
 } from "../session-messaging/install.ts";
+import {
+  createSessionCancelTool,
+  createSessionSendMessageTool,
+} from "../session-messaging/pi/tools.ts";
 import type { SessionLifecycle } from "../shared/composition.ts";
 import type { CompactionThresholdSettings, SessionSettings } from "../shared/settings.ts";
 import { isTmuxInstalled } from "../shared/tmux.ts";
@@ -29,8 +33,10 @@ import {
   countSubagentReports,
   createSettledChildLifecycle,
   findSelfSubagentIdentity,
+  refreshSubagentChildState,
   type SubagentChildSessionState,
 } from "./settle.ts";
+import { shouldMessageSubagent } from "./should-message.ts";
 import { SubagentMessageRouter } from "./wake.ts";
 
 interface ParentSessionState extends SubagentParentSession {
@@ -52,6 +58,9 @@ export interface SubagentsHandle extends SessionLifecycle {
   getLaunchTargets(): readonly HandoffLaunchTarget[];
   sendMessage(request: SendMessageRequest): Promise<SendMessageResult>;
   cancelSession(sessionId: string): Promise<SubagentCancelResult>;
+  shouldMessageSubagent(sessionId: string): Promise<boolean>;
+  /** Undefined unless the active branch makes this session someone's subagent. */
+  getParentSessionId(): string | undefined;
 }
 
 export function installSubagents(
@@ -59,7 +68,7 @@ export function installSubagents(
   deps: {
     settings: SessionSettings;
     messaging: MessagingHandle;
-    readCompactionSettings: () => CompactionThresholdSettings;
+    readCompactionSettings: (cwd: string) => CompactionThresholdSettings;
   },
 ): SubagentsHandle {
   pi.registerMessageRenderer(SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE, renderSubagentReportMessage);
@@ -164,14 +173,77 @@ You are working as a subagent on one task delegated by a parent session. The han
     }
   });
 
+  const refreshChildSession = (): void => {
+    if (!current) {
+      return;
+    }
+    const previousChild = current.child;
+    current.child = refreshSubagentChildState(
+      current.parent.sessionId,
+      current.parent.getBranch(),
+      previousChild,
+    );
+    current.parent.launchState.depth = current.child?.identity.depth ?? 0;
+    if (current.child && current.child !== previousChild) {
+      pi.registerTool(
+        createSubmitTaskReportTool(pi, deps.messaging, () => {
+          const session = current;
+          return session?.child
+            ? { ...session.parent, identity: session.child.identity }
+            : undefined;
+        }),
+      );
+      const activeTools = pi.getActiveTools();
+      if (!activeTools.includes("submit_task_report")) {
+        pi.setActiveTools([...activeTools, "submit_task_report"]);
+      }
+    } else if (!current.child && previousChild) {
+      pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "submit_task_report"));
+    }
+  };
+
+  const registerMessagingTools = (): void => {
+    const isSubagent = handle.getParentSessionId() !== undefined;
+    pi.registerTool(
+      createSessionSendMessageTool(handle, {
+        role: isSubagent ? { kind: "subagent" } : { kind: "wakeCapable" },
+        getCachedRelationTo: deps.messaging.getCachedRelationTo,
+        getParentSessionId: () => handle.getParentSessionId(),
+      }),
+    );
+    pi.registerTool(
+      createSessionCancelTool(handle, {
+        role: isSubagent ? { kind: "subagent" } : { kind: "plain" },
+        getParentSessionId: () => handle.getParentSessionId(),
+      }),
+    );
+  };
+
   pi.on("session_tree", async () => {
+    settledChildLifecycle.cancel();
+    refreshChildSession();
+    registerMessagingTools();
     await reconciler.reconcileAndRestoreSuspended();
   });
 
-  return {
+  const handle: SubagentsHandle = {
     roster,
     sendMessage: (request) => messageRouter.sendMessage(request),
     cancelSession: (sessionId) => cancellationRouter.cancelSession(sessionId),
+    shouldMessageSubagent: (sessionId) =>
+      shouldMessageSubagent(sessionId, {
+        executor: pi,
+        messaging: deps.messaging,
+        getParent: () => current?.parent,
+        openSession: openRosterSession,
+      }),
+    getParentSessionId() {
+      const parent = current?.parent;
+      if (!parent) {
+        return undefined;
+      }
+      return findSelfSubagentIdentity(parent.sessionId, parent.getBranch())?.ownerSessionId;
+    },
     getLaunchTargets() {
       const parent = current?.parent;
       if (!parent?.tmuxInstalled || parent.launchState.depth >= deps.settings.subagents.maxDepth) {
@@ -199,27 +271,10 @@ You are working as a subagent on one task delegated by a parent session. The han
         tmuxInstalled: await isTmuxInstalled(pi, ctx.cwd),
       };
       reconciler.beginSession();
-      current = {
-        parent,
-        ...(identity
-          ? {
-              child: {
-                identity,
-                requestResponse: identity.requestResponse,
-                reportsAtTurnStart: countSubagentReports(sessionStartBranch),
-              },
-            }
-          : {}),
-      };
+      current = { parent };
+      refreshChildSession();
       if (identity) {
-        pi.registerTool(
-          createSubmitTaskReportTool(pi, deps.messaging, () => {
-            const session = current;
-            return session?.child
-              ? { ...session.parent, identity: session.child.identity }
-              : undefined;
-          }),
-        );
+        registerMessagingTools();
       }
       if (_event.reason === "reload") {
         await reconciler.reconcile();
@@ -236,4 +291,5 @@ You are working as a subagent on one task delegated by a parent session. The han
       current = undefined;
     },
   };
+  return handle;
 }

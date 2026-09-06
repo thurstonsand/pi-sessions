@@ -91,7 +91,7 @@ test("session_cancel reports accepted live cancellation", async () => {
     target: { sessionId: "target-session", sessionName: "Target" },
     relation: "sibling" as const,
   }));
-  const tool = createSessionCancelTool({ cancelSession } as never);
+  const tool = createSessionCancelTool({ cancelSession } as never, { role: { kind: "plain" } });
 
   const result = await tool.execute(
     "tool-1",
@@ -120,14 +120,17 @@ test("session_cancel reports accepted live cancellation", async () => {
 });
 
 test("session_cancel reports managed teardown honestly", async () => {
-  const tool = createSessionCancelTool({
-    cancelSession: vi.fn(async () => ({
-      kind: "managed" as const,
-      accepted: true as const,
-      target: { sessionId: "child-session", sessionName: "Child" },
-      state: "stopping",
-    })),
-  });
+  const tool = createSessionCancelTool(
+    {
+      cancelSession: vi.fn(async () => ({
+        kind: "managed" as const,
+        accepted: true as const,
+        target: { sessionId: "child-session", sessionName: "Child" },
+        state: "stopping",
+      })),
+    },
+    { role: { kind: "plain" } },
+  );
 
   const result = await tool.execute(
     "tool-2",
@@ -154,14 +157,17 @@ test("session_cancel reports managed teardown honestly", async () => {
 });
 
 test("session_cancel rejects an unknown managed state", async () => {
-  const tool = createSessionCancelTool({
-    cancelSession: vi.fn(async () => ({
-      kind: "managed" as const,
-      accepted: true as const,
-      target: { sessionId: "child-session", sessionName: "Child" },
-      state: "unknown",
-    })),
-  });
+  const tool = createSessionCancelTool(
+    {
+      cancelSession: vi.fn(async () => ({
+        kind: "managed" as const,
+        accepted: true as const,
+        target: { sessionId: "child-session", sessionName: "Child" },
+        state: "unknown",
+      })),
+    },
+    { role: { kind: "plain" } },
+  );
 
   await expect(
     tool.execute("tool-3", { session: "child-session" }, undefined, undefined, {} as never),
@@ -169,15 +175,18 @@ test("session_cancel rejects an unknown managed state", async () => {
 });
 
 test("session_cancel rejects dead targets", async () => {
-  const tool = createSessionCancelTool({
-    cancelSession: vi.fn(async () => ({
-      kind: "transport" as const,
-      delivered: false as const,
-      cancelId: "cancel-2",
-      reason: "no_session" as const,
-      error: "No live session found for id: dead-session",
-    })),
-  } as never);
+  const tool = createSessionCancelTool(
+    {
+      cancelSession: vi.fn(async () => ({
+        kind: "transport" as const,
+        delivered: false as const,
+        cancelId: "cancel-2",
+        reason: "no_session" as const,
+        error: "No live session found for id: dead-session",
+      })),
+    } as never,
+    { role: { kind: "plain" } },
+  );
 
   await expect(
     tool.execute("tool-4", { session: "dead-session" }, undefined, undefined, {} as never),

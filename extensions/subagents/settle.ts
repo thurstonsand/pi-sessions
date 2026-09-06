@@ -126,6 +126,32 @@ export function countSubagentReports(branch: readonly SessionEntry[]): number {
   return getChildSubagentLifecycle(branch).reports.length;
 }
 
+export function refreshSubagentChildState(
+  sessionId: string,
+  branch: readonly SessionEntry[],
+  child: SubagentChildSessionState | undefined,
+): SubagentChildSessionState | undefined {
+  const identity = findSelfSubagentIdentity(sessionId, branch);
+  if (!identity) {
+    return undefined;
+  }
+  const reports = countSubagentReports(branch);
+  if (
+    child?.identity.childSessionId === identity.childSessionId &&
+    child.identity.ownerSessionId === identity.ownerSessionId &&
+    child.identity.depth === identity.depth &&
+    child.identity.requestResponse === identity.requestResponse &&
+    child.reportsAtTurnStart <= reports
+  ) {
+    return child;
+  }
+  return {
+    identity,
+    requestResponse: identity.requestResponse,
+    reportsAtTurnStart: reports,
+  };
+}
+
 export function findSelfSubagentIdentity(
   sessionId: string,
   branch: readonly SessionEntry[],

@@ -15,6 +15,65 @@ const parentId = "12345678-1234-1234-1234-123456789abc";
 const childId = "87654321-1234-1234-1234-123456789abc";
 
 describe("subagent reconciliation", () => {
+  it("does not replay a queued live report until a new session epoch", async () => {
+    const fixture = createFixture([launchEntry()], [reportEntry()]);
+    fixture.append(SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, {
+      writerSessionId: parentId,
+      childSessionId: childId,
+      reportId: "report-1",
+    });
+    fixture.reconciler.noteReportSent("report-1");
+
+    await fixture.reconciler.reconcile();
+    expect(fixture.sent).toHaveLength(0);
+    expect(fixture.appended).toHaveLength(1);
+
+    fixture.reconciler.beginSession();
+    await fixture.reconciler.reconcile();
+    expect(fixture.sent).toHaveLength(1);
+    expect(fixture.appended).toHaveLength(1);
+  });
+
+  it("does not enqueue a recovered report twice before Pi persists it", async () => {
+    const fixture = createFixture([launchEntry()], [reportEntry()]);
+    fixture.deliver.mockImplementation((message, options) => {
+      fixture.sent.push({ message, ...(options ? { options } : {}) });
+    });
+    await fixture.reconciler.reconcile();
+    await fixture.reconciler.reconcile();
+    expect(fixture.sent).toHaveLength(1);
+    expect(fixture.appended).toHaveLength(1);
+  });
+
+  it("does not recover a report delivered live while presence was being read", async () => {
+    const fixture = createFixture([launchEntry()], [reportEntry()], false, async () => {
+      fixture.append(SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, {
+        writerSessionId: parentId,
+        childSessionId: childId,
+        reportId: "report-1",
+      });
+      fixture.deliver({
+        customType: SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
+        content: "Complete.",
+        display: true,
+        details: {
+          writerSessionId: parentId,
+          childSessionId: childId,
+          reportId: "report-1",
+          status: "done",
+          summary: "Complete.",
+          provenance: "live",
+        },
+      });
+      return [];
+    });
+
+    await fixture.reconciler.reconcile();
+
+    expect(fixture.appended).toHaveLength(1);
+    expect(fixture.sent).toHaveLength(1);
+  });
+
   it("recovers a missed report and wakes an idle parent with its contents", async () => {
     const fixture = createFixture([launchEntry()], [reportEntry()]);
 
@@ -389,6 +448,7 @@ function createFixture(
   return {
     reconciler,
     append: (customType: string, data: unknown) => executor.appendEntry(customType, data),
+    deliver: executor.sendMessage,
     appended,
     sent,
     created: () => created,

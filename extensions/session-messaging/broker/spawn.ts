@@ -1,5 +1,13 @@
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { type ChildProcess, spawn } from "node:child_process";
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import net from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +24,7 @@ const brokerDir = getSessionMessagingDir();
 const brokerSocketPath = getSessionMessagingSocketPath();
 const brokerPidPath = join(brokerDir, "broker.pid");
 const brokerSpawnLockPath = join(brokerDir, "broker.spawn.lock");
+const brokerLogPath = join(brokerDir, "broker.log");
 
 export async function spawnSessionMessagingBrokerIfNeeded(): Promise<void> {
   mkdirSync(brokerDir, { recursive: true, mode: 0o700 });
@@ -43,14 +52,23 @@ export async function spawnSessionMessagingBrokerIfNeeded(): Promise<void> {
         `Session messaging broker build not found: ${brokerPath}. Run npm install in the pi-sessions package directory.`,
       );
     }
-    const child = spawn(process.execPath, [brokerPath], {
-      detached: true,
-      stdio: "ignore",
-      windowsHide: process.platform === "win32",
-      env: brokerSpawnEnv(),
-    });
-    child.unref();
-    await waitForBroker();
+    const log = openSync(brokerLogPath, "w", 0o600);
+    try {
+      const child = spawn(process.execPath, [brokerPath], {
+        detached: true,
+        stdio: ["ignore", log, log],
+        windowsHide: process.platform === "win32",
+        env: brokerSpawnEnv(),
+      });
+      await new Promise<void>((resolve, reject) => {
+        child.once("spawn", resolve);
+        child.once("error", reject);
+      });
+      child.unref();
+      await waitForBroker(child);
+    } finally {
+      closeSync(log);
+    }
   } finally {
     releaseSpawnLock();
   }
@@ -103,16 +121,21 @@ function canConnectToBroker(): Promise<boolean> {
   });
 }
 
-async function waitForBroker(): Promise<void> {
+async function waitForBroker(child?: ChildProcess): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < BROKER_START_TIMEOUT_MS) {
     if (await canConnectToBroker()) {
       return;
     }
+    if (child && (child.exitCode !== null || child.signalCode !== null)) {
+      throw new Error(
+        `Session messaging broker exited (${child.signalCode ?? child.exitCode}). See ${brokerLogPath}.`,
+      );
+    }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  throw new Error("Session messaging broker failed to start.");
+  throw new Error(`Session messaging broker failed to start. See ${brokerLogPath}.`);
 }
 
 function acquireSpawnLock(): boolean {

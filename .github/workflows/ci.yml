@@ -28,3 +28,20 @@ jobs:
 
       - name: Check
         run: mise run check
+
+      - name: Smoke test prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tmux
+
+      - name: Real Pi smoke test
+        run: mise run smoke
+
+      - name: Smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pi-smoke
+          path: .mise/smoke/
+          include-hidden-files: true
+          if-no-files-found: ignore

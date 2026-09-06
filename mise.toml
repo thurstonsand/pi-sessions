@@ -86,6 +86,15 @@ description = "Run tests"
 depends = ["build:broker"]
 run = "vitest run"
 
+[tasks.smoke]
+description = "Exercise real Pi and tmux with disposable state and a scripted provider"
+depends = ["build:broker"]
+run = "PATH=\"{{ tools.node.path }}/bin:$PATH\" vitest run --config vitest.smoke.config.ts"
+
+[tasks.bench]
+description = "Benchmark reindex, search and incremental hooks without writing live state"
+run = "PATH=\"{{ tools.node.path }}/bin:$PATH\" node --experimental-transform-types scripts/benchmark.ts"
+
 [tasks.check]
 description = "Run full verification"
 depends = ["lint", "typecheck", "test"]

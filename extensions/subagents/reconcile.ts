@@ -84,6 +84,7 @@ export class SubagentReconciler {
   private shuttingDown = false;
   private registered: { epoch: number; sessionIds: Set<string> } | undefined;
   private latestResult: ReconcileResult = emptyReconcileResult();
+  private sentReportIds = new Set<string>();
 
   constructor(private readonly deps: ReconcileDependencies) {}
 
@@ -93,6 +94,16 @@ export class SubagentReconciler {
     this.restoreSuspended = false;
     this.registered = undefined;
     this.latestResult = emptyReconcileResult();
+    this.sentReportIds.clear();
+  }
+
+  hasSentReport(reportId: string): boolean {
+    return this.sentReportIds.has(reportId);
+  }
+
+  noteReportSent(reportId: string): void {
+    // Pi may queue the message before persisting it. The ledger alone cannot deduplicate it yet.
+    this.sentReportIds.add(reportId);
   }
 
   reconcile(): Promise<ReconcileResult> {
@@ -199,15 +210,20 @@ export class SubagentReconciler {
         continue;
       }
 
+      // Live delivery can update the ledger while presence or an earlier child's tmux work waits.
+      const reportLedger = collectParentLedger(parent.getBranch(), parent.sessionId);
       for (const report of child.reports) {
-        if (!ledger.receivedReportIds.has(report.reportId)) {
+        if (this.hasSentReport(report.reportId)) {
+          continue;
+        }
+        if (!reportLedger.receivedReportIds.has(report.reportId)) {
           this.append(parent, SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, {
             writerSessionId: parent.sessionId,
             childSessionId: child.launch.childSessionId,
             reportId: report.reportId,
           });
         }
-        if (!ledger.deliveredReportIds.has(report.reportId)) {
+        if (!reportLedger.deliveredReportIds.has(report.reportId)) {
           this.deliverRecoveredReport(parent, child.launch, report);
         }
       }
@@ -346,6 +362,7 @@ export class SubagentReconciler {
       display: true,
       details: message,
     });
+    this.noteReportSent(report.reportId);
   }
 
   private sendDisownedMessage(parent: ReconcileParentSession): void {

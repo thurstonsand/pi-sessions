@@ -102,15 +102,17 @@ describe("subagent installation", () => {
     );
 
     listSessions.mockClear();
-    receive?.({
-      kind: "subagent_report",
+    const envelope = {
+      kind: "subagent_report" as const,
       reportId: "report-1",
       source: childId,
       target: parentId,
-      status: "done",
+      status: "done" as const,
       summary: "Complete.",
       sentAt: "2026-03-25T00:00:00.000Z",
-    });
+    };
+    await receive?.(envelope);
+    await receive?.(envelope);
 
     expect(order).toEqual(["receipt", "message"]);
     expect(listSessions).not.toHaveBeenCalled();

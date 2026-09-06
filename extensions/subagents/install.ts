@@ -122,6 +122,9 @@ export function installSubagents(
     if (!parent) {
       throw new Error("Target session is not ready to receive subagent reports.");
     }
+    if (reconciler.hasSentReport(envelope.reportId)) {
+      return;
+    }
     const incoming = buildIncomingSubagentReport(parent, envelope);
     if (!incoming) {
       return;
@@ -138,6 +141,7 @@ export function installSubagents(
       },
       incoming.delivery,
     );
+    reconciler.noteReportSent(envelope.reportId);
   });
 
   pi.on("before_agent_start", (event) => {

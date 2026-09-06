@@ -1,6 +1,6 @@
 import {
   closeSync,
-  existsSync,
+  type Dirent,
   fstatSync,
   openSync,
   readdirSync,
@@ -131,25 +131,18 @@ const SUMMARY_DETAILS_SCHEMA = Type.Object({
 });
 
 export function listSessionFiles(sessionsDir: string): string[] {
-  if (!existsSync(sessionsDir)) {
-    return [];
-  }
-
   const results: string[] = [];
-  const stack = [sessionsDir];
-
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (!current) continue;
-
-    for (const entry of readdirSync(current, { withFileTypes: true })) {
-      const absolute = path.join(current, entry.name);
-      if (entry.isDirectory()) {
-        stack.push(absolute);
-        continue;
-      }
-      if (entry.isFile() && entry.name.endsWith(".jsonl")) {
-        results.push(absolute);
+  for (const directory of readSessionDirectory(sessionsDir)) {
+    if (!directory.isDirectory() && !directory.isSymbolicLink()) continue;
+    const current = path.join(sessionsDir, directory.name);
+    for (const entry of readSessionDirectory(current)) {
+      if ((entry.isFile() || entry.isSymbolicLink()) && entry.name.endsWith(".jsonl")) {
+        const file = path.join(current, entry.name);
+        try {
+          if (statSync(file).isFile()) results.push(file);
+        } catch (error) {
+          if (!isUnavailableSessionPath(error)) throw error;
+        }
       }
     }
   }
@@ -157,59 +150,84 @@ export function listSessionFiles(sessionsDir: string): string[] {
   return results.sort();
 }
 
-export function extractSessionRecord(sessionPath: string): ExtractedSessionRecord | undefined {
-  const indexedFileMtimeMs = Math.trunc(statSync(sessionPath).mtimeMs);
-  const buffer = readFileSync(sessionPath);
-  const slice = sliceCompleteJsonlPrefix(buffer);
-  const parsed = parseSessionContent(slice.content);
-  if (!parsed) return undefined;
-
-  const fallbackTs = parsed.header.timestamp;
-  const scan = scanSessionEntries(parsed.entries, fallbackTs, parsed.header.cwd);
-
-  const chunks: SearchTextChunk[] = [];
-  if (parsed.sessionName && scan.sessionNameEntryId) {
-    chunks.push(
-      createSessionNameChunk(
-        parsed.sessionName,
-        scan.sessionNameTs ?? fallbackTs,
-        scan.sessionNameEntryId,
-      ),
-    );
+function readSessionDirectory(directory: string): Dirent[] {
+  try {
+    return readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    if (isUnavailableSessionPath(error)) return [];
+    throw error;
   }
-  chunks.push(...scan.chunks);
-  appendDurableHandoffMetadataChunks(chunks, scan.handoffMetadata);
+}
 
-  const parentSessionPath = normalizeParentSessionPath(parsed.header.parentSession);
-  const parentSession = parentSessionPath
-    ? inspectParentSession(parentSessionPath, parsed.header.id, sessionPath)
-    : undefined;
+function isUnavailableSessionPath(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    typeof error.code === "string" &&
+    ["ENOENT", "ENOTDIR", "EACCES", "EPERM", "ELOOP", "EISDIR"].includes(error.code)
+  );
+}
 
-  return {
-    sessionId: parsed.header.id,
-    sessionPath,
-    sessionName: parsed.sessionName,
-    firstUserPrompt: trimmedText(scan.firstUserPrompt),
-    cwd: parsed.header.cwd,
-    repoRoots: deriveSessionRepoRoots(parsed.header.cwd, scan.fileTouches),
-    startedAt: fallbackTs,
-    modifiedAt: maxTimestamp(fallbackTs, scan.maxEntryTs),
-    messageCount: scan.messageCount,
-    entryCount: scan.entryCount,
-    parentSessionPath,
-    parentSessionId: parentSession?.sessionId,
-    sessionOrigin: deriveSessionOrigin(
+export function extractSessionRecord(sessionPath: string): ExtractedSessionRecord | undefined {
+  try {
+    const indexedFileMtimeMs = Math.trunc(statSync(sessionPath).mtimeMs);
+    const buffer = readFileSync(sessionPath);
+    const consumedBytes = completeJsonlBytes(buffer);
+    const entries = parseSessionBuffer(buffer.subarray(0, consumedBytes));
+    const header = entries.next().value;
+    if (header?.type !== "session") return undefined;
+
+    const fallbackTs = header.timestamp;
+    const scan = scanSessionEntries(entries, fallbackTs, header.cwd);
+    const sessionName = scan.sessionName ?? "";
+
+    const chunks: SearchTextChunk[] = [];
+    if (sessionName && scan.sessionNameEntryId) {
+      chunks.push(
+        createSessionNameChunk(
+          sessionName,
+          scan.sessionNameTs ?? fallbackTs,
+          scan.sessionNameEntryId,
+        ),
+      );
+    }
+    chunks.push(...scan.chunks);
+    appendDurableHandoffMetadataChunks(chunks, scan.handoffMetadata);
+
+    const parentSessionPath = normalizeParentSessionPath(header.parentSession);
+    const parentSession = parentSessionPath
+      ? inspectParentSession(parentSessionPath, header.id, sessionPath)
+      : undefined;
+
+    return {
+      sessionId: header.id,
+      sessionPath,
+      sessionName,
+      firstUserPrompt: trimmedText(scan.firstUserPrompt),
+      cwd: header.cwd,
+      repoRoots: deriveSessionRepoRoots(header.cwd, scan.fileTouches),
+      startedAt: fallbackTs,
+      modifiedAt: maxTimestamp(fallbackTs, scan.maxEntryTs),
+      messageCount: scan.messageCount,
+      entryCount: scan.entryCount,
       parentSessionPath,
-      parentSession?.launchedSubagent ?? false,
-      scan.handoffMetadata?.metadata,
-    ),
-    handoffGoal: scan.handoffMetadata?.metadata.goal,
-    indexedFileSize: slice.consumedBytes,
-    indexedFileMtimeMs,
-    indexedFileAnchor: buildFileAnchor(buffer, slice.consumedBytes),
-    chunks: chunks,
-    fileTouches: scan.fileTouches,
-  };
+      parentSessionId: parentSession?.sessionId,
+      sessionOrigin: deriveSessionOrigin(
+        parentSessionPath,
+        parentSession?.launchedSubagent ?? false,
+        scan.handoffMetadata?.metadata,
+      ),
+      handoffGoal: scan.handoffMetadata?.metadata.goal,
+      indexedFileSize: consumedBytes,
+      indexedFileMtimeMs,
+      indexedFileAnchor: buildFileAnchor(buffer, consumedBytes),
+      chunks: chunks,
+      fileTouches: scan.fileTouches,
+    };
+  } catch (error) {
+    if (isUnavailableSessionPath(error)) return undefined;
+    throw error;
+  }
 }
 
 // Reads only the bytes appended since the last sync. The stored anchor (the
@@ -244,16 +262,13 @@ export function extractSessionTail(
     }
 
     const tailBuffer = window.subarray(anchorBytes.length, bytesRead);
-    const slice = sliceCompleteJsonlPrefix(tailBuffer);
-    const entries = parseSessionEntries(slice.content).filter(isSessionEntry);
-    const consumedWindow = Buffer.concat([
-      anchorBytes,
-      tailBuffer.subarray(0, slice.consumedBytes),
-    ]);
+    const consumedBytes = completeJsonlBytes(tailBuffer);
+    const entries = parseSessionBuffer(tailBuffer.subarray(0, consumedBytes));
+    const consumedWindow = Buffer.concat([anchorBytes, tailBuffer.subarray(0, consumedBytes)]);
 
     return {
       scan: scanSessionEntries(entries, baseline.startedAt, baseline.cwd),
-      indexedFileSize: baseline.indexedFileSize + slice.consumedBytes,
+      indexedFileSize: baseline.indexedFileSize + consumedBytes,
       indexedFileMtimeMs,
       indexedFileAnchor: buildFileAnchor(consumedWindow, consumedWindow.length),
     };
@@ -277,13 +292,14 @@ export function createSessionNameChunk(
 }
 
 export function scanSessionEntries(
-  entries: SessionEntry[],
+  entries: Iterable<SessionHeader | SessionEntry>,
   fallbackTs: string,
   cwd: string,
 ): SessionEntryScan {
   const chunks: SearchTextChunk[] = [];
   const fileTouches: SessionFileTouch[] = [];
   let messageCount = 0;
+  let entryCount = 0;
   let maxEntryTs: string | undefined;
   let firstUserPrompt: string | undefined;
   let sessionName: string | undefined;
@@ -292,6 +308,8 @@ export function scanSessionEntries(
   let handoffMetadata: DurableHandoffMetadataRecord | undefined;
 
   for (const entry of entries) {
+    if (!isSessionEntry(entry)) continue;
+    entryCount += 1;
     const entryTs = getEntryTimestamp(entry, fallbackTs);
     if (maxEntryTs === undefined || entryTs > maxEntryTs) {
       maxEntryTs = entryTs;
@@ -368,7 +386,7 @@ export function scanSessionEntries(
     chunks,
     fileTouches,
     messageCount,
-    entryCount: entries.length,
+    entryCount,
     maxEntryTs,
     firstUserPrompt,
     sessionName,
@@ -386,23 +404,32 @@ function maxTimestamp(fallbackTs: string, entryTs: string | undefined): string {
 // an entry boundary. A final unterminated line is consumed only if it parses as
 // complete JSON: a strict prefix of a JSON object can never parse, so a torn
 // in-progress write is reliably excluded.
-function sliceCompleteJsonlPrefix(buffer: Buffer): { content: string; consumedBytes: number } {
+function completeJsonlBytes(buffer: Buffer): number {
   if (buffer.length === 0) {
-    return { content: "", consumedBytes: 0 };
+    return 0;
   }
 
   if (buffer[buffer.length - 1] === NEWLINE_BYTE) {
-    return { content: buffer.toString("utf8"), consumedBytes: buffer.length };
+    return buffer.length;
   }
 
   const lastNewline = buffer.lastIndexOf(NEWLINE_BYTE);
   const finalLine = buffer.subarray(lastNewline + 1).toString("utf8");
   if (isCompleteJsonLine(finalLine)) {
-    return { content: buffer.toString("utf8"), consumedBytes: buffer.length };
+    return buffer.length;
   }
 
-  const consumedBytes = lastNewline + 1;
-  return { content: buffer.subarray(0, consumedBytes).toString("utf8"), consumedBytes };
+  return lastNewline + 1;
+}
+
+function* parseSessionBuffer(buffer: Buffer): Generator<SessionHeader | SessionEntry, undefined> {
+  let start = 0;
+  while (start < buffer.length) {
+    const newline = buffer.indexOf(NEWLINE_BYTE, start);
+    const end = newline === -1 ? buffer.length : newline;
+    yield* parseSessionEntries(buffer.toString("utf8", start, end));
+    start = end + 1;
+  }
 }
 
 function isCompleteJsonLine(line: string): boolean {
@@ -491,23 +518,25 @@ function inspectParentSession(
   childSessionPath: string,
 ): ParentSessionInspection | undefined {
   try {
-    const parent = parseSessionFile(parentSessionPath);
-    if (!parent) {
+    const entries = parseSessionBuffer(readFileSync(parentSessionPath));
+    const header = entries.next().value;
+    if (header?.type !== "session") {
       return undefined;
     }
 
-    const launchedSubagent = parent.entries.some((entry) => {
+    for (const entry of entries) {
       if (entry.type !== "custom" || entry.customType !== SUBAGENT_LAUNCHED_CUSTOM_TYPE) {
-        return false;
+        continue;
       }
       const launch = safeParseTypeBoxValue(SUBAGENT_LAUNCHED_SCHEMA, entry.data);
-      return (
-        launch?.writerSessionId === parent.header.id &&
+      if (
+        launch?.writerSessionId === header.id &&
         launch.childSessionId === childSessionId &&
         launch.childSessionFile === childSessionPath
-      );
-    });
-    return { sessionId: parent.header.id, launchedSubagent };
+      )
+        return { sessionId: header.id, launchedSubagent: true };
+    }
+    return { sessionId: header.id, launchedSubagent: false };
   } catch {
     return undefined;
   }

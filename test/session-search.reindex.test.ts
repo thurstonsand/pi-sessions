@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { type SessionInfo, SessionManager } from "@earendil-works/pi-coding-agent";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { rebuildSessionIndex } from "../extensions/session-search/reindex.ts";
 import {
@@ -15,10 +15,82 @@ const testFs = createTestFilesystem("pi-sessions-reindex-");
 
 afterEach(() => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   testFs.cleanup();
 });
 
 describe("rebuildSessionIndex", () => {
+  it("matches native discovery depth and follows linked directories and files", async () => {
+    const root = testFs.createTempDir();
+    const sessions = testFs.ensureDir(path.join(root, "sessions"));
+    const project = testFs.ensureDir(path.join(sessions, "project"));
+    const external = testFs.ensureDir(path.join(root, "external"));
+    const header = (id: string) => ({
+      type: "session",
+      version: 3,
+      id,
+      timestamp: "2026-03-22T00:00:00.000Z",
+      cwd: root,
+    });
+    testFs.writeJsonlFile(sessions, "ignored-root.jsonl", [header("root")]);
+    testFs.writeJsonlFile(path.join(project, "nested"), "ignored-deep.jsonl", [header("deep")]);
+    testFs.writeJsonlFile(project, "valid.jsonl", [header("valid")]);
+    testFs.writeJsonlFile(external, "linked-dir.jsonl", [header("linked-dir")]);
+    const file = testFs.writeJsonlFile(root, "linked-file.jsonl", [header("linked-file")]);
+    symlinkSync(external, path.join(sessions, "external"));
+    symlinkSync(file, path.join(project, "linked-file.jsonl"));
+    symlinkSync(path.join(root, "missing"), path.join(project, "aaa-broken.jsonl"));
+    symlinkSync("aab-loop.jsonl", path.join(project, "aab-loop.jsonl"));
+    symlinkSync("loop-dir", path.join(sessions, "loop-dir"));
+    symlinkSync(path.join(root, "missing"), path.join(sessions, "broken-dir"));
+    writeFileSync(path.join(project, "invalid.jsonl"), "{garbage\n");
+    testFs.ensureDir(path.join(project, "directory.jsonl"));
+    vi.stubEnv("PI_CODING_AGENT_DIR", root);
+    const nativeIds = (await SessionManager.listAll()).map((session) => session.id).sort();
+    const indexPath = path.join(root, "index.sqlite");
+    const result = await rebuildSessionIndex({ indexPath });
+    const db = openIndexDatabase(indexPath);
+    const indexedIds = searchSessions(db, { limit: 10 })
+      .map((session) => session.sessionId)
+      .sort();
+    expect(indexedIds).toEqual(["linked-dir", "linked-file", "valid"]);
+    expect(indexedIds).toEqual(nativeIds);
+    expect(result.sessionCount).toBe(3);
+    db.close();
+  });
+
+  it("chooses the newest duplicate ID and breaks timestamp ties by sorted path", async () => {
+    const root = testFs.createTempDir();
+    const directory = path.join(root, "sessions", "project");
+    for (const [name, timestamp] of [
+      ["a", "2026-03-23T00:00:00.000Z"],
+      ["b", "2026-03-23T00:00:00.000Z"],
+      ["z", "2026-03-22T00:00:00.000Z"],
+    ]) {
+      testFs.writeJsonlFile(directory, `${name}.jsonl`, [
+        { type: "session", id: "duplicate", timestamp, cwd: root },
+        {
+          type: "message",
+          id: name,
+          timestamp,
+          parentId: null,
+          message: { role: "user", content: `duplicate ${name}` },
+        },
+      ]);
+    }
+    vi.stubEnv("PI_CODING_AGENT_DIR", root);
+    const indexPath = path.join(root, "index.sqlite");
+    for (let run = 0; run < 2; run++) {
+      const result = await rebuildSessionIndex({ indexPath });
+      expect(result).toMatchObject({ sessionCount: 1, chunkCount: 1 });
+      const db = openIndexDatabase(indexPath);
+      expect(searchSessions(db, { limit: 10 })[0]?.sessionPath).toBe(
+        path.join(directory, "b.jsonl"),
+      );
+      db.close();
+    }
+  });
+
   it("indexes sessions, repo roots, and file touches from disk", async () => {
     const root = testFs.createTempDir();
     const sessionsDir = path.join(root, "sessions");
@@ -28,7 +100,7 @@ describe("rebuildSessionIndex", () => {
     testFs.ensureDir(path.join(repoRoot, ".git"));
     const cwd = testFs.ensureDir(path.join(repoRoot, "app"));
 
-    const sessionPath = testFs.writeJsonlFile(nestedDir, "2026-03-22T00-00-00-000Z_demo.jsonl", [
+    testFs.writeJsonlFile(nestedDir, "2026-03-22T00-00-00-000Z_demo.jsonl", [
       {
         type: "session",
         id: "demo-session",
@@ -82,20 +154,11 @@ describe("rebuildSessionIndex", () => {
       },
     ]);
 
-    vi.spyOn(SessionManager, "listAll").mockResolvedValue([
-      {
-        path: sessionPath,
-        id: "demo-session",
-        cwd,
-        created: new Date("2026-03-22T00:00:00.000Z"),
-        modified: new Date("2026-03-22T00:00:04.000Z"),
-        messageCount: 2,
-        firstMessage: "search for database indexing",
-        allMessagesText: "search for database indexing\nWe should build a session index.",
-      } satisfies SessionInfo,
-    ]);
+    vi.stubEnv("PI_CODING_AGENT_DIR", root);
+    const listAll = vi.spyOn(SessionManager, "listAll");
 
     const result = await rebuildSessionIndex({ indexPath });
+    expect(listAll).not.toHaveBeenCalled();
     expect(result.sessionCount).toBe(1);
     expect(result.chunkCount).toBeGreaterThanOrEqual(3);
 
@@ -142,7 +205,7 @@ describe("rebuildSessionIndex", () => {
         cwd,
       },
     ]);
-    const childPath = testFs.writeJsonlFile(nestedDir, "2026-03-22T00-10-00-000Z_child.jsonl", [
+    testFs.writeJsonlFile(nestedDir, "2026-03-22T00-10-00-000Z_child.jsonl", [
       {
         type: "session",
         id: "child-session",
@@ -166,28 +229,7 @@ describe("rebuildSessionIndex", () => {
       },
     ]);
 
-    vi.spyOn(SessionManager, "listAll").mockResolvedValue([
-      {
-        path: parentPath,
-        id: "parent-session",
-        cwd,
-        created: new Date("2026-03-22T00:00:00.000Z"),
-        modified: new Date("2026-03-22T00:00:00.000Z"),
-        messageCount: 0,
-        firstMessage: "",
-        allMessagesText: "",
-      } satisfies SessionInfo,
-      {
-        path: childPath,
-        id: "child-session",
-        cwd,
-        created: new Date("2026-03-22T00:10:00.000Z"),
-        modified: new Date("2026-03-22T00:10:00.000Z"),
-        messageCount: 0,
-        firstMessage: "",
-        allMessagesText: "",
-      } satisfies SessionInfo,
-    ]);
+    vi.stubEnv("PI_CODING_AGENT_DIR", root);
 
     await rebuildSessionIndex({ indexPath });
 
@@ -218,7 +260,7 @@ describe("rebuildSessionIndex", () => {
     const indexPath = path.join(root, "index.sqlite");
     const cwd = "/repo/app";
 
-    const parentPath = testFs.writeJsonlFile(nestedDir, "parent.jsonl", [
+    const parentPath = testFs.writeJsonlFile(root, "parent.jsonl", [
       {
         type: "session",
         id: "excluded-parent",
@@ -226,7 +268,7 @@ describe("rebuildSessionIndex", () => {
         cwd,
       },
     ]);
-    const childPath = testFs.writeJsonlFile(nestedDir, "child.jsonl", [
+    testFs.writeJsonlFile(nestedDir, "child.jsonl", [
       {
         type: "session",
         id: "indexed-child",
@@ -236,18 +278,7 @@ describe("rebuildSessionIndex", () => {
       },
     ]);
 
-    vi.spyOn(SessionManager, "listAll").mockResolvedValue([
-      {
-        path: childPath,
-        id: "indexed-child",
-        cwd,
-        created: new Date("2026-03-22T00:10:00.000Z"),
-        modified: new Date("2026-03-22T00:10:00.000Z"),
-        messageCount: 0,
-        firstMessage: "",
-        allMessagesText: "",
-      } satisfies SessionInfo,
-    ]);
+    vi.stubEnv("PI_CODING_AGENT_DIR", root);
 
     await rebuildSessionIndex({ indexPath });
 
@@ -297,7 +328,7 @@ describe("rebuildSessionIndex", () => {
     // inode and leave the old WAL sidecar next to the new file.
     const observer = openIndexDatabase(indexPath, { create: false });
 
-    const sessionPath = testFs.writeJsonlFile(nestedDir, "2026-03-22T00-00-00-000Z_live.jsonl", [
+    testFs.writeJsonlFile(nestedDir, "2026-03-22T00-00-00-000Z_live.jsonl", [
       {
         type: "session",
         id: "live-session",
@@ -306,18 +337,7 @@ describe("rebuildSessionIndex", () => {
       },
     ]);
 
-    vi.spyOn(SessionManager, "listAll").mockResolvedValue([
-      {
-        path: sessionPath,
-        id: "live-session",
-        cwd,
-        created: new Date("2026-03-22T00:00:00.000Z"),
-        modified: new Date("2026-03-22T00:00:00.000Z"),
-        messageCount: 0,
-        firstMessage: "",
-        allMessagesText: "",
-      } satisfies SessionInfo,
-    ]);
+    vi.stubEnv("PI_CODING_AGENT_DIR", root);
 
     await rebuildSessionIndex({ indexPath });
 

@@ -15,6 +15,8 @@ mise run typecheck
 mise run test
 mise run build:broker
 mise run check      # full verification gate
+mise run smoke      # isolated real Pi/tmux integration; see SMOKE.md
+mise run bench      # repeatable indexing/search/hook measurements; see SMOKE.md
 ```
 
 Single test file:

@@ -210,12 +210,13 @@ export class SubagentReconciler {
         continue;
       }
 
-      // Live delivery can update the ledger while presence or an earlier child's tmux work waits.
-      const reportLedger = collectParentLedger(parent.getBranch(), parent.sessionId);
+      let reportLedger: ParentSubagentLedger | undefined;
       for (const report of child.reports) {
         if (this.hasSentReport(report.reportId)) {
           continue;
         }
+        // Presence and tmux awaits can yield to live delivery; read only when recovery needs it.
+        reportLedger ??= collectParentLedger(parent.getBranch(), parent.sessionId);
         if (!reportLedger.receivedReportIds.has(report.reportId)) {
           this.append(parent, SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, {
             writerSessionId: parent.sessionId,

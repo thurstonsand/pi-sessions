@@ -21,7 +21,6 @@ export const MAX_SESSION_SEARCH_LIMIT = 500;
 export const MIN_TEXT_OVERFETCH_LIMIT = 200;
 export const TEXT_OVERFETCH_MULTIPLIER = 25;
 export const MAX_TEXT_OVERFETCH_LIMIT = 5_000;
-export const MAX_FILTERED_SESSION_CANDIDATES = 10_000;
 
 export type SessionIdMatchKind = "exact" | "prefix" | "substring";
 

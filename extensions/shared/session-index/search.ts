@@ -28,7 +28,6 @@ import { getLineageRelationMap } from "./lineage.ts";
 import { type CompiledSearchQuery, compileSearchQuery } from "./query/compiler.ts";
 import {
   buildTextOverfetchLimit,
-  MAX_FILTERED_SESSION_CANDIDATES,
   MAX_SCORING_TEXT_HITS_PER_SESSION,
   MAX_TEXT_EVIDENCE_PER_SESSION,
   normalizeResultLimit,
@@ -55,6 +54,8 @@ const SESSION_LIST_ROW_SCHEMA = Type.Object({
 });
 
 type SessionListRow = Static<typeof SESSION_LIST_ROW_SCHEMA>;
+
+const SESSION_ID_ROW_SCHEMA = Type.Object({ sessionId: Type.String() });
 
 const SEARCH_CHUNK_ROW_SCHEMA = Type.Object({
   chunkId: Type.Number(),
@@ -147,7 +148,6 @@ export function searchSessions(
   const filters = buildSearchFilters(params);
   const relationBySessionId = buildRelationMap(db, params.relativeToSessionId);
   const compiledQuery = filters.query ? compileSearchQuery(filters.query) : undefined;
-  const hasPositiveQuery = compiledQuery !== undefined;
   const fileQueries = buildFileFilterQueries(filters);
   const fileMatches =
     fileQueries.length > 0
@@ -158,11 +158,38 @@ export function searchSessions(
     return [];
   }
 
+  if (fileQueries.length > 0) {
+    filters.includeSessionIds = [...fileMatches.keys()];
+  }
+  const textRows = compiledQuery ? getSessionTextMatchRows(db, filters, compiledQuery) : [];
+  const queryTokens = compiledQuery
+    ? tokenizeSessionIdQuery(filters.query ?? "", compiledQuery.positiveTerms)
+    : [];
+  if (compiledQuery) {
+    const sessionIds = new Set(textRows.map((row) => row.sessionId));
+    if (queryTokens.some((token) => token.trim().length >= 8)) {
+      const where = buildSessionWhereClause("s", filters);
+      const excludes = buildExcludeClause(compiledQuery.excludes);
+      const rows = parseTypeBoxRows(
+        SESSION_ID_ROW_SCHEMA,
+        db
+          .prepare(
+            `SELECT s.session_id AS sessionId FROM sessions s ${where.sql || "WHERE 1"} ${excludes.sql}`,
+          )
+          .all(...where.args, ...excludes.args),
+        "Invalid session IDs",
+      );
+      for (const row of rows) {
+        if (getSessionIdEvidence(queryTokens, row.sessionId)) sessionIds.add(row.sessionId);
+      }
+    }
+    if (sessionIds.size === 0) return [];
+    filters.includeSessionIds = [...sessionIds];
+  }
   const candidates = getFilteredSessionCandidates(db, filters, {
-    candidateLimit:
-      hasPositiveQuery || fileQueries.length > 0 ? MAX_FILTERED_SESSION_CANDIDATES : filters.limit,
+    candidateLimit: compiledQuery ? (filters.includeSessionIds?.length ?? 0) : filters.limit,
     sort: getBrowseSort(filters),
-  }).filter((row) => fileQueries.length === 0 || fileMatches.has(row.sessionId));
+  });
 
   if (candidates.length === 0) {
     return [];
@@ -176,11 +203,10 @@ export function searchSessions(
   }
 
   const ranked = searchFilteredSessions(
-    db,
     candidates,
     fileMatches,
-    filters,
-    compiledQuery,
+    textRows,
+    queryTokens,
     relationBySessionId,
   );
   const selected = ranked.slice(0, filters.limit);
@@ -273,17 +299,15 @@ function getFilteredSessionCandidates(
 }
 
 function searchFilteredSessions(
-  db: SessionIndexDatabase,
   candidates: SessionListRow[],
   fileMatches: Map<string, FileMatchSummary>,
-  filters: SearchFilters,
-  compiledQuery: CompiledSearchQuery,
+  textRows: SearchChunkRow[],
+  queryTokens: string[],
   relationBySessionId: Map<string, SessionLineageRelation>,
 ): SearchSessionResult[] {
   const nowMs = Date.now();
   const candidateById = new Map(candidates.map((candidate) => [candidate.sessionId, candidate]));
   const accumulators = new Map<string, SearchResultAccumulator>();
-  const queryTokens = tokenizeSessionIdQuery(filters.query ?? "", compiledQuery.positiveTerms);
 
   for (const [sessionId, candidate] of candidateById.entries()) {
     const sessionIdEvidence = getSessionIdEvidence(queryTokens, sessionId);
@@ -301,21 +325,15 @@ function searchFilteredSessions(
     addSessionIdEvidence(accumulator, sessionIdEvidence.kind, sessionIdEvidence.score);
   }
 
-  const textRows = getTextMatchRows(
-    db,
-    filters,
-    compiledQuery,
-    buildTextOverfetchLimit(filters.limit),
-    hasFileFilters(filters) ? new Set(fileMatches.keys()) : undefined,
-  );
-
-  textRows.forEach((row, rankIndex) => {
+  const textRankBySession = new Map<string, number>();
+  textRows.forEach((row) => {
     const candidate = candidateById.get(row.sessionId);
     if (!candidate) {
       return;
     }
 
-    const score = scoreTextHit(row.sourceKind, rankIndex);
+    const rankIndex = textRankBySession.get(row.sessionId) ?? textRankBySession.size;
+    textRankBySession.set(row.sessionId, rankIndex);
     const accumulator = ensureSearchAccumulator(
       accumulators,
       candidate,
@@ -323,6 +341,7 @@ function searchFilteredSessions(
       nowMs,
       relationBySessionId,
     );
+    const score = scoreTextHit(row.sourceKind, rankIndex) / (accumulator.textEvidenceCount + 1);
     addTextEvidence(accumulator, row, score);
   });
 
@@ -332,6 +351,40 @@ function searchFilteredSessions(
       hitCount: result.evidence.length,
     }))
     .sort(compareByRelevance);
+}
+
+function getSessionTextMatchRows(
+  db: SessionIndexDatabase,
+  filters: SearchFilters,
+  query: CompiledSearchQuery,
+): SearchChunkRow[] {
+  const rows: SearchChunkRow[] = [];
+  const retainedPerSession = new Map<string, number>();
+  const batchSize = buildTextOverfetchLimit(filters.limit);
+  for (const match of [query.match, query.relaxedMatch]) {
+    if (!match) continue;
+    while (retainedPerSession.size < filters.limit) {
+      const batch = queryTextMatchRows(
+        db,
+        {
+          ...filters,
+          excludeSessionIds: [...filters.excludeSessionIds, ...retainedPerSession.keys()],
+        },
+        match,
+        query.excludes,
+        batchSize,
+      );
+      for (const row of batch) {
+        const retained = retainedPerSession.get(row.sessionId) ?? 0;
+        if (retained < MAX_TEXT_EVIDENCE_PER_SESSION) {
+          rows.push(row);
+          retainedPerSession.set(row.sessionId, retained + 1);
+        }
+      }
+      if (batch.length < batchSize) break;
+    }
+  }
+  return rows;
 }
 
 export function searchSessionChunks(
@@ -361,7 +414,6 @@ function getTextMatchRows(
   filters: SearchWhereFilters,
   compiledQuery: CompiledSearchQuery,
   limit: number,
-  allowedSessionIds?: Set<string> | undefined,
 ): SearchChunkRow[] {
   const strictRows = queryTextMatchRows(
     db,
@@ -369,7 +421,6 @@ function getTextMatchRows(
     compiledQuery.match,
     compiledQuery.excludes,
     limit,
-    allowedSessionIds,
   );
   if (strictRows.length >= limit || !compiledQuery.relaxedMatch) {
     return strictRows;
@@ -382,7 +433,6 @@ function getTextMatchRows(
     compiledQuery.relaxedMatch,
     compiledQuery.excludes,
     limit,
-    allowedSessionIds,
   ).filter((row) => !seenChunkIds.has(row.chunkId));
 
   return [...strictRows, ...relaxedRows].slice(0, limit);
@@ -394,10 +444,8 @@ function queryTextMatchRows(
   match: string,
   excludes: string[],
   limit: number,
-  allowedSessionIds?: Set<string> | undefined,
 ): SearchChunkRow[] {
   const where = buildSessionWhereClause("s", filters);
-  const allowedSessionClause = buildAllowedSessionClause("s", allowedSessionIds);
   const excludeClause = buildExcludeClause(excludes);
 
   return parseTypeBoxRows(
@@ -417,9 +465,8 @@ function queryTextMatchRows(
         JOIN sessions s ON s.session_id = c.session_id
         ${where.sql}
           ${where.sql ? "AND" : "WHERE"} session_text_chunks_fts MATCH ?
-          ${allowedSessionClause.sql}
           ${excludeClause.sql}
-        ORDER BY bm25(session_text_chunks_fts) ASC, s.modified_ts DESC
+        ORDER BY bm25(session_text_chunks_fts) ASC, s.modified_ts DESC, c.id ASC
         LIMIT ?
       `,
       )
@@ -429,7 +476,6 @@ function queryTextMatchRows(
         SEARCH_SNIPPET_ELLIPSIS,
         ...where.args,
         match,
-        ...allowedSessionClause.args,
         ...excludeClause.args,
         limit,
       ),
@@ -826,21 +872,6 @@ function buildRepoFilterClause(alias: string, rawRepo: string | undefined): SqlC
   };
 }
 
-function buildAllowedSessionClause(
-  alias: string,
-  allowedSessionIds: Set<string> | undefined,
-): SqlClause {
-  if (!allowedSessionIds || allowedSessionIds.size === 0) {
-    return { sql: "", args: [] };
-  }
-
-  const sessionIds = [...allowedSessionIds];
-  return {
-    sql: `AND ${alias}.session_id IN (${sessionIds.map(() => "?").join(", ")})`,
-    args: sessionIds,
-  };
-}
-
 function buildExcludeClause(excludes: string[]): SqlClause {
   if (excludes.length === 0) {
     return { sql: "", args: [] };
@@ -962,8 +993,4 @@ function compareFileEvidence(a: FileTouchEvidence, b: FileTouchEvidence): number
 
 function getBrowseSort(filters: SearchFilters): "modified_desc" | "modified_asc" {
   return filters.sort === "modified_asc" ? "modified_asc" : "modified_desc";
-}
-
-function hasFileFilters(filters: SearchFilters): boolean {
-  return filters.touched.length > 0 || filters.changed.length > 0;
 }

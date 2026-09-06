@@ -1,6 +1,42 @@
 # pi-sessions smoke test
 
-This is the end-to-end manual recipe for verifying reindex, search, live discovery, ask, hook-maintained freshness, and the subagent lifecycle.
+## Automated integration lane
+
+From the checkout or worktree under test:
+
+```sh
+mise run check
+mise run smoke
+```
+
+The smoke lane requires tmux and a `pi` CLI matching the installed development dependency. Local bootstrap removes the dependency's CLI shim so local runs exercise the global Pi; CI uses the dependency's CLI installed by `npm ci`. It runs real Pi processes with Pi's scripted faux provider: no credentials or paid model calls. It checks hook-maintained file-touch freshness from another process, live discovery, message delivery, a cross-directory handoff to a stamped tmux worker, report delivery, dormant wake, and exactly two distinct visible report messages and receipts.
+
+Each run has a disposable home, agent directory, index, broker directory, and private tmux server. Its settings pin this checkout's package path; parent, peer, and resumed child assert the loaded extension's source path. It does not rewrite global Pi settings or alter production resume commands. Shell configuration, other extensions, and provider credentials are not inherited. Auto-title is disabled.
+
+Artifacts live under `.mise/smoke/<run>/`: RPC events and stderr, worker pane text, the disposable transcripts and index, and `result.json` only after all checks and cleanup succeed. Failures retain `failure.txt` and surviving pane captures. The broker's latest startup output is in `broker/broker.log` inside the captured fixture. Outside the harness, the broker writes the same private log in its messaging directory and names it in startup errors.
+
+CI runs this lane after the routine check and uploads its artifacts. The scripted provider verifies integration mechanics, not generated briefing quality, real provider authentication, auto-title, or interactive mouse behavior; those remain in the manual lane below.
+
+## Repeatable benchmarks
+
+```sh
+# Small generated corpus; fresh database, warm filesystem cache permitted
+mise run bench
+
+# Larger generated corpus
+mise run bench -- --count 1000 --entries 100 --samples 20
+
+# Read real history; only the disposable index and a copied session are changed
+mise run bench -- --sessions "$HOME/.pi/agent/sessions" --output .mise/benchmarks/local.json
+```
+
+`--sessions` names a Pi agent's `sessions` directory. Rebuild and search read those transcripts at their original paths so absolute parent/child references remain valid. Incremental measurements append only to a temporary copy of the largest session, indexed before sampling. Source transcripts and the live index are not written.
+
+Each JSON artifact records corpus file count/bytes and a filename-and-size manifest hash, Node/OS/CPU, rebuild time and peak process RSS, index size, first-call and warm search samples, result-ID hashes, and incremental hook samples with median/p95. The benchmark asserts repeated search results are stable and every appended marker becomes searchable. It is not a recall-quality assertion: inspect hit counts as well as latency. The manifest is not a content hash; avoid editing the corpus during comparisons. Compare several fresh process runs on the same machine and corpus. Filesystem caches are not flushed, and model latency is not part of these measurements.
+
+## Manual live-model lane
+
+The following recipe verifies reindex, search, live discovery, ask, hook-maintained freshness, and the subagent lifecycle using your configured providers and session store. It can incur model spend and modifies the normal index. Use it deliberately, not as a credential-free test.
 
 ## 1. Load the package
 

@@ -130,7 +130,7 @@ export default function piSessions(pi: ExtensionAPI): void {
     );
   }
   if (settings.features.hooks) {
-    lifecycles.push(installHooks(pi, { settings, index }));
+    lifecycles.push(installHooks(pi, { index }));
   }
   // Messaging leads every session_start so the broker connection is registered before any
   // other feature hook runs. A side effect is that messaging's first relation snapshot can

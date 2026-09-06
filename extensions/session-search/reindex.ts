@@ -1,5 +1,5 @@
 import path from "node:path";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import {
   clearSessionIndexedData,
   ensureIndexDir,
@@ -12,7 +12,7 @@ import {
   setMetadata,
   upsertSession,
 } from "../shared/session-index/index.ts";
-import { type ExtractedSessionRecord, extractSessionRecord } from "./extract.ts";
+import { type ExtractedSessionRecord, extractSessionRecord, listSessionFiles } from "./extract.ts";
 
 export interface ReindexOptions {
   indexPath: string;
@@ -27,7 +27,7 @@ export interface ReindexResult {
 export async function rebuildSessionIndex(options: ReindexOptions): Promise<ReindexResult> {
   const indexPath = options.indexPath;
   ensureIndexDir(path.dirname(indexPath));
-  const sessionFiles = (await SessionManager.listAll()).map((session) => session.path);
+  const sessionFiles = listSessionFiles(path.join(getAgentDir(), "sessions"));
 
   const db = openIndexDatabase(indexPath, { create: true });
   try {
@@ -36,7 +36,7 @@ export async function rebuildSessionIndex(options: ReindexOptions): Promise<Rein
       initializeSchema(db);
     });
 
-    let sessionCount = 0;
+    const indexedSessions = new Map<string, { modifiedAt: string; chunks: number }>();
     let chunkCount = 0;
     for (const sessionFile of sessionFiles) {
       const extracted = extractSessionRecord(sessionFile);
@@ -44,18 +44,23 @@ export async function rebuildSessionIndex(options: ReindexOptions): Promise<Rein
         continue;
       }
 
+      const previous = indexedSessions.get(extracted.sessionId);
+      if (previous && previous.modifiedAt > extracted.modifiedAt) continue;
       db.transaction(() => indexSession(db, extracted));
-      sessionCount += 1;
-      chunkCount += extracted.chunks.length;
+      chunkCount += extracted.chunks.length - (previous?.chunks ?? 0);
+      indexedSessions.set(extracted.sessionId, {
+        modifiedAt: extracted.modifiedAt,
+        chunks: extracted.chunks.length,
+      });
     }
 
     db.transaction(() => {
       rebuildSessionLineageRelations(db);
       setMetadata(db, "indexed_at", new Date().toISOString());
-      setMetadata(db, "session_source", "SessionManager.listAll()");
+      setMetadata(db, "session_source", "session files");
     });
 
-    return { sessionCount, chunkCount, indexPath };
+    return { sessionCount: indexedSessions.size, chunkCount, indexPath };
   } finally {
     db.close();
   }

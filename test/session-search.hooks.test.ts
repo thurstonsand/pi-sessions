@@ -19,125 +19,26 @@ afterEach(() => {
 });
 
 describe("session-search hooks", () => {
-  it("stages tracked tool calls and finalizes tool results", () => {
-    const controller = createSessionHookController({
-      indexPath: path.join(testFs.createTempDir(), "missing.sqlite"),
-    });
-
-    controller.handleToolCall(
-      {
-        type: "tool_call",
-        toolCallId: "call-read",
-        toolName: "read",
-        input: { path: "src/index.ts" },
-      },
-      "/tmp/session.jsonl",
-      "/repo/app",
-    );
-    controller.handleToolCall(
-      {
-        type: "tool_call",
-        toolCallId: "call-write",
-        toolName: "write",
-        input: { path: "src/out.ts" },
-      },
-      "/tmp/session.jsonl",
-      "/repo/app",
-    );
-    controller.handleToolCall(
-      {
-        type: "tool_call",
-        toolCallId: "call-bash",
-        toolName: "bash",
-        input: { command: "pwd" },
-      },
-      "/tmp/session.jsonl",
-      "/repo/app",
-    );
-    controller.handleToolCall(
-      {
-        type: "tool_call",
-        toolCallId: "call-empty",
-        toolName: "read",
-        input: { path: "   " },
-      },
-      "/tmp/session.jsonl",
-      "/repo/app",
-    );
-
-    controller.handleToolResult({
-      type: "tool_result",
-      toolCallId: "call-read",
-      toolName: "read",
-      input: { path: "src/index.ts" },
-      content: [{ type: "text", text: `${"R".repeat(520)}TAIL` }],
-      details: undefined,
-      isError: false,
-    });
-    controller.handleToolResult({
-      type: "tool_result",
-      toolCallId: "call-write",
-      toolName: "write",
-      input: { path: "src/out.ts" },
-      content: [{ type: "text", text: `${"W".repeat(520)}TAIL` }],
-      details: undefined,
-      isError: false,
-    });
-    controller.handleToolResult({
-      type: "tool_result",
-      toolCallId: "call-bash",
-      toolName: "bash",
-      input: { command: "pwd" },
-      content: [{ type: "text", text: "ignored" }],
-      details: undefined,
-      isError: false,
-    });
-
-    const state = controller.getState();
-    expect(state.currentSessionFile).toBe("/tmp/session.jsonl");
-    expect(state.pendingToolCalls).toHaveLength(0);
-    expect(state.finalizedToolCalls).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          toolCallId: "call-read",
-          toolName: "read",
-          path: "src/index.ts",
-          resultText: `${"R".repeat(500)}…`,
-        }),
-        expect.objectContaining({
-          toolCallId: "call-write",
-          toolName: "write",
-          path: "src/out.ts",
-          resultText: `${"W".repeat(520)}TAIL`,
-        }),
-      ]),
-    );
-    expect(state.finalizedToolCalls).toHaveLength(2);
-  });
-
   it("preserves the attached session file when later events omit it", async () => {
-    const controller = createSessionHookController({
-      indexPath: path.join(testFs.createTempDir(), "missing.sqlite"),
-    });
-
-    controller.handleToolCall(
+    const root = testFs.createTempDir();
+    const indexPath = path.join(root, "index.sqlite");
+    const db = openIndexDatabase(indexPath);
+    initializeSchema(db);
+    const session = testFs.writeJsonlFile(root, "attached.jsonl", [
       {
-        type: "tool_call",
-        toolCallId: "call-read",
-        toolName: "read",
-        input: { path: "src/index.ts" },
+        type: "session",
+        id: "attached",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd: root,
       },
-      "/tmp/session.jsonl",
-      "/repo/app",
-    );
-
-    expect(await controller.handleTurnEnd(undefined, "/repo/next")).toBe(false);
-
-    const state = controller.getState();
-    expect(state.currentSessionFile).toBe("/tmp/session.jsonl");
-    expect(state.currentCwd).toBe("/repo/next");
-    expect(state.pendingToolCalls).toHaveLength(0);
-    expect(state.finalizedToolCalls).toHaveLength(0);
+    ]);
+    const controller = createSessionHookController({ indexPath });
+    expect(await controller.handleSessionStart(session)).toBe(true);
+    expect(await controller.handleTurnEnd(undefined)).toBe(true);
+    expect(getMetadata(db, "hook_last_event")).toBe("turn_end");
+    expect(await controller.handleSessionShutdown(undefined)).toBe(true);
+    expect(await controller.handleTurnEnd(undefined)).toBe(false);
+    db.close();
   });
 
   it("skips sync when the session file does not exist yet", async () => {
@@ -150,9 +51,7 @@ describe("session-search hooks", () => {
     db.close();
 
     const controller = createSessionHookController({ indexPath });
-    expect(await controller.handleSessionStart(path.join(root, "missing.jsonl"), "/repo/app")).toBe(
-      false,
-    );
+    expect(await controller.handleSessionStart(path.join(root, "missing.jsonl"))).toBe(false);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
     expect(getMetadata(indexedDb, "hook_last_event")).toBeUndefined();
@@ -240,29 +139,10 @@ describe("session-search hooks", () => {
 
     const controller = createSessionHookController({ indexPath });
 
-    expect(await controller.handleSessionStart(sessionOnePath, cwd)).toBe(true);
-    controller.handleToolCall(
-      {
-        type: "tool_call",
-        toolCallId: "call-1",
-        toolName: "write",
-        input: { path: "src/index.ts" },
-      },
-      sessionOnePath,
-      cwd,
-    );
-    controller.handleToolResult({
-      type: "tool_result",
-      toolCallId: "call-1",
-      toolName: "write",
-      input: { path: "src/index.ts" },
-      content: [{ type: "text", text: "updated file" }],
-      details: undefined,
-      isError: false,
-    });
-    expect(await controller.handleTurnEnd(sessionOnePath, cwd)).toBe(true);
-    expect(await controller.handleSessionSwitch(sessionOnePath, sessionTwoPath, cwd)).toBe(true);
-    expect(await controller.handleSessionShutdown(sessionTwoPath, cwd)).toBe(true);
+    expect(await controller.handleSessionStart(sessionOnePath)).toBe(true);
+    expect(await controller.handleTurnEnd(sessionOnePath)).toBe(true);
+    expect(await controller.handleSessionSwitch(sessionOnePath, sessionTwoPath)).toBe(true);
+    expect(await controller.handleSessionShutdown(sessionTwoPath)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
     const touchedHits = searchSessions(indexedDb, {
@@ -279,7 +159,6 @@ describe("session-search hooks", () => {
       expect.arrayContaining(["session-one", "session-two"]),
     );
     expect(lastHookEvent).toBe("session_shutdown");
-    expect(controller.getState().lastFlushedSessionFile).toBe(sessionTwoPath);
   });
 
   it("records fork lineage and preserves it across later hook syncs", async () => {
@@ -322,9 +201,9 @@ describe("session-search hooks", () => {
 
     const controller = createSessionHookController({ indexPath });
 
-    expect(await controller.handleSessionStart(parentPath, cwd)).toBe(true);
-    expect(await controller.handleSessionFork(parentPath, childPath, cwd)).toBe(true);
-    expect(await controller.handleTurnEnd(childPath, cwd)).toBe(true);
+    expect(await controller.handleSessionStart(parentPath)).toBe(true);
+    expect(await controller.handleSessionFork(parentPath, childPath)).toBe(true);
+    expect(await controller.handleTurnEnd(childPath)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
     const childRow = indexedDb
@@ -389,8 +268,8 @@ describe("session-search hooks", () => {
 
     const controller = createSessionHookController({ indexPath });
 
-    expect(await controller.handleSessionSwitch(parentPath, childPath, cwd, "handoff")).toBe(true);
-    expect(await controller.handleTurnEnd(childPath, cwd)).toBe(true);
+    expect(await controller.handleSessionSwitch(parentPath, childPath, "handoff")).toBe(true);
+    expect(await controller.handleTurnEnd(childPath)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
     const childRow = indexedDb
@@ -459,8 +338,8 @@ describe("session-search hooks", () => {
 
     const controller = createSessionHookController({ indexPath });
 
-    expect(await controller.handleSessionTree(sessionPath, cwd)).toBe(true);
-    expect(await controller.handleSessionCompact(sessionPath, cwd)).toBe(true);
+    expect(await controller.handleSessionTree(sessionPath)).toBe(true);
+    expect(await controller.handleSessionCompact(sessionPath)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
     const textHits = searchSessions(indexedDb, {
@@ -508,7 +387,7 @@ describe("session-search hooks", () => {
     const lockHolder = await holdWriteLockInWorker(indexPath, 1000);
 
     try {
-      expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+      expect(await controller.handleTurnEnd(sessionPath)).toBe(true);
     } finally {
       await lockHolder.released;
     }
@@ -549,7 +428,7 @@ describe("session-search hooks", () => {
     ]);
 
     const controller = createSessionHookController({ indexPath });
-    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+    expect(await controller.handleTurnEnd(sessionPath)).toBe(true);
 
     // Sentinel: an incremental sync must not touch previously indexed chunks,
     // while a full re-extract would replace this text with the file contents.
@@ -573,7 +452,7 @@ describe("session-search hooks", () => {
       })}\n`,
     );
 
-    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+    expect(await controller.handleTurnEnd(sessionPath)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
     const sentinelCount = indexedDb
@@ -615,7 +494,7 @@ describe("session-search hooks", () => {
     ]);
 
     const controller = createSessionHookController({ indexPath });
-    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+    expect(await controller.handleTurnEnd(sessionPath)).toBe(true);
 
     // Any sync path that writes the session row resets index_source to "hook".
     const sentinelDb = openIndexDatabase(indexPath, { create: false });
@@ -624,7 +503,7 @@ describe("session-search hooks", () => {
       .run("skip-session");
     sentinelDb.close();
 
-    expect(await controller.handleSessionTree(sessionPath, cwd)).toBe(true);
+    expect(await controller.handleSessionTree(sessionPath)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
     const row = indexedDb
@@ -667,7 +546,7 @@ describe("session-search hooks", () => {
     ]);
 
     const controller = createSessionHookController({ indexPath });
-    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+    expect(await controller.handleTurnEnd(sessionPath)).toBe(true);
 
     const sentinelDb = openIndexDatabase(indexPath, { create: false });
     sentinelDb
@@ -704,7 +583,7 @@ describe("session-search hooks", () => {
       },
     ]);
 
-    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+    expect(await controller.handleTurnEnd(sessionPath)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
     const sentinelCount = indexedDb
@@ -751,7 +630,7 @@ describe("session-search hooks", () => {
     ]);
 
     const controller = createSessionHookController({ indexPath });
-    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+    expect(await controller.handleTurnEnd(sessionPath)).toBe(true);
 
     appendFileSync(
       sessionPath,
@@ -764,7 +643,7 @@ describe("session-search hooks", () => {
       })}\n`,
     );
 
-    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+    expect(await controller.handleTurnEnd(sessionPath)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
     const nameChunks = indexedDb
@@ -809,7 +688,7 @@ describe("session-search hooks", () => {
 
     const controller = createSessionHookController({ indexPath });
     for (const sessionPath of [famAParent, famAChild, famBParent, famBChild]) {
-      expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+      expect(await controller.handleTurnEnd(sessionPath)).toBe(true);
     }
 
     const beforeDb = openIndexDatabase(indexPath, { create: false });
@@ -822,7 +701,7 @@ describe("session-search hooks", () => {
     expect(famBRowids.length).toBeGreaterThan(0);
 
     const famAGrandchild = writeSession("fam-a-grandchild.jsonl", "fam-a-grandchild", famAChild);
-    expect(await controller.handleTurnEnd(famAGrandchild, cwd)).toBe(true);
+    expect(await controller.handleTurnEnd(famAGrandchild)).toBe(true);
 
     const afterDb = openIndexDatabase(indexPath, { create: false });
     // A scoped refresh leaves family B's rows physically untouched; a global
@@ -867,7 +746,7 @@ describe("session-search hooks", () => {
     ]);
 
     const controller = createSessionHookController({ indexPath });
-    expect(await controller.handleTurnEnd(sessionPath, cwd)).toBe(true);
+    expect(await controller.handleTurnEnd(sessionPath)).toBe(true);
 
     const indexedDb = openIndexDatabase(indexPath, { create: false });
     const idChunks = indexedDb

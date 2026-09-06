@@ -1,6 +1,11 @@
+import { writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { extractSessionRecord } from "../extensions/session-search/extract.ts";
+import {
+  extractSessionRecord,
+  parseSessionContent,
+  scanSessionEntries,
+} from "../extensions/session-search/extract.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-extract-");
@@ -10,6 +15,47 @@ afterEach(() => {
 });
 
 describe("extractSessionRecord", () => {
+  it.each(["", '\n{"type":"message"'])(
+    "keeps native scan results with CRLF, Unicode, malformed lines and tail %j",
+    (tail) => {
+      const root = testFs.createTempDir();
+      const header = {
+        type: "session",
+        id: "unicode",
+        timestamp: "2026-03-22T00:00:00.000Z",
+        cwd: root,
+      };
+      const raw = [
+        JSON.stringify(header),
+        "",
+        "{malformed",
+        ...Array.from({ length: 100 }, (_, i) =>
+          JSON.stringify({
+            type: "message",
+            id: `entry-${i}`,
+            parentId: i ? `entry-${i - 1}` : null,
+            timestamp: header.timestamp,
+            message: { role: "user", content: `日本語 🗡️ ${i}` },
+          }),
+        ),
+      ].join("\r\n");
+      const parsed = parseSessionContent(raw);
+      if (!parsed) throw new Error("Invalid test fixture");
+      const expected = scanSessionEntries(parsed.entries, header.timestamp, root);
+      const file = path.join(root, "session.jsonl");
+      writeFileSync(file, raw + tail);
+      const actual = extractSessionRecord(file);
+      expect(actual).toMatchObject({
+        sessionId: header.id,
+        chunks: expected.chunks,
+        fileTouches: expected.fileTouches,
+        entryCount: expected.entryCount,
+        messageCount: expected.messageCount,
+        indexedFileSize: Buffer.byteLength(raw) + (tail ? 1 : 0),
+      });
+    },
+  );
+
   it("extracts session metadata, file touches, and repo roots", () => {
     const root = testFs.createTempDir();
     const repoRoot = testFs.ensureDir(path.join(root, "repo"));

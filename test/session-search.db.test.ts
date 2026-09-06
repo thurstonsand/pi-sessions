@@ -1,5 +1,5 @@
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearSessionIndexedData,
   getIndexStatus,
@@ -25,6 +25,64 @@ afterEach(() => {
 });
 
 describe("session-search db", () => {
+  it.each(["needle", '"needle"', "needle extra", "needle AND extra"])(
+    "fills the session budget despite long matching transcripts: %s",
+    (query) => {
+      const db = openIndexDatabase(path.join(testFs.createTempDir(), "index.sqlite"));
+      initializeSchema(db);
+      db.transaction(() => {
+        for (let session = 0; session < 15; session++) {
+          const sessionId = `result-${session}`;
+          insertSession(
+            db,
+            {
+              sessionId,
+              sessionPath: `/tmp/${sessionId}.jsonl`,
+              sessionName: sessionId,
+              cwd: "/repo",
+              repoRoots: [],
+              startedAt: "2026-03-22T00:00:00.000Z",
+              modifiedAt: new Date(Date.now() - (15 - session) * 3_600_000).toISOString(),
+              messageCount: 300,
+              entryCount: 300,
+            },
+            "full_reindex",
+          );
+          for (let entry = 0; entry < 300; entry++) {
+            insertTextChunk(db, {
+              sessionId,
+              entryId: `${entry}`,
+              entryType: "message",
+              ts: "2026-03-22T00:00:00.000Z",
+              sourceKind: "user_text",
+              text: session < 3 ? "needle extra" : "needle extra filler",
+            });
+          }
+        }
+      });
+      const hits = searchSessions(db, { query, limit: 10 });
+      expect(hits).toHaveLength(10);
+      expect(new Set(hits.map((hit) => hit.sessionId)).size).toBe(10);
+      expect(hits.slice(0, 3).map((hit) => hit.sessionId)).toEqual([
+        "result-2",
+        "result-1",
+        "result-0",
+      ]);
+      expect(hits.every((hit) => hit.evidence.length <= 20)).toBe(true);
+      expect(searchSessions(db, { query, limit: 20 })).toHaveLength(15);
+      db.close();
+    },
+  );
+
+  it("does not load session metadata on a text or ID miss", () => {
+    const db = openIndexDatabase(path.join(testFs.createTempDir(), "index.sqlite"));
+    initializeSchema(db);
+    const prepare = vi.spyOn(db, "prepare");
+    expect(searchSessions(db, { query: "zz_benchmark_absent_82917" })).toEqual([]);
+    expect(prepare.mock.calls.some(([sql]) => sql.includes("s.repo_roots_json"))).toBe(false);
+    db.close();
+  });
+
   it("applies a busy timeout to every connection", () => {
     const dir = testFs.createTempDir();
     const dbPath = path.join(dir, "index.sqlite");
@@ -307,11 +365,27 @@ describe("session-search db", () => {
       query: "alpha beta gamma -forbidden",
       limit: 10,
     });
-    db.close();
 
     expect(relaxedHits.map((hit) => hit.entryId)).toEqual(["strict-entry", "partial-entry"]);
     expect(explicitHits.map((hit) => hit.entryId)).toEqual(["strict-entry"]);
     expect(sessionHits.map((hit) => hit.sessionId)).toEqual(["strict-session", "partial-session"]);
+    for (let i = 0; i < 300; i++) {
+      insertTextChunk(db, {
+        sessionId: "strict-session",
+        entryId: `flood-${i}`,
+        entryType: "message",
+        ts: "2026-03-22T00:01:00.000Z",
+        sourceKind: "user_text",
+        text: "alpha beta gamma",
+      });
+    }
+    expect(
+      searchSessions(db, { query: "alpha beta gamma -forbidden", limit: 10 }).map(
+        (hit) => hit.sessionId,
+      ),
+    ).toEqual(["strict-session", "partial-session"]);
+    expect(searchSessions(db, { query: "alpha AND beta AND gamma", limit: 10 })).toHaveLength(1);
+    db.close();
   });
 
   it("filters changed files separately from touched files", () => {
@@ -548,6 +622,7 @@ describe("session-search db", () => {
       query: targetId,
       limit: 10,
     });
+    expect(searchSessions(searchDb, { query: `${targetId} -parser`, limit: 10 })).toEqual([]);
     searchDb.close();
 
     expect(compactHits[0]?.sessionId).toBe(targetId);

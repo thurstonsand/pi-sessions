@@ -139,9 +139,9 @@ try {
     const manager = SessionManager.open(writableSession);
     const controller = createSessionHookController({ indexPath });
     const attachStart = performance.now();
-    await controller.handleSessionStart(largest, manager.getCwd());
+    await controller.handleSessionStart(largest);
     const attachMs = performance.now() - attachStart;
-    await controller.handleSessionStart(writableSession, manager.getCwd());
+    await controller.handleSessionStart(writableSession);
     let parentId = manager.getLeafId();
     const incremental: number[] = [];
     for (let i = 0; i < samples; i++) {
@@ -162,10 +162,7 @@ try {
       );
       parentId = id;
       const started = performance.now();
-      assert(
-        await controller.handleTurnEnd(writableSession, manager.getCwd()),
-        "Incremental flush did not run",
-      );
+      assert(await controller.handleTurnEnd(writableSession), "Incremental flush did not run");
       incremental.push(performance.now() - started);
       assert(
         searchSessions(db, { query: `"BENCHMARK_INCREMENTAL_TOKEN_${i}"`, limit: 10 }).some(

@@ -6,8 +6,9 @@ import {
   type ModelRuntime,
   type Theme,
 } from "@earendil-works/pi-coding-agent";
-import type { Focusable, TUI } from "@earendil-works/pi-tui";
+import type { Focusable, TUI, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
 import { matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { LegendPointer } from "../shared/legend.ts";
 import type { RetitleCommandOutcome, RetitleMode, RetitleScope } from "./command.ts";
 import type { AutoRetitleStatus, SessionAutoTitleController } from "./controller.ts";
 import type { AutoTitleFailure, AutoTitleGeneration } from "./generate.ts";
@@ -90,6 +91,16 @@ export async function showRetitleWizard(
 class RetitleWizardPanel implements Focusable {
   focused = false;
 
+  private mouseTargets: Array<{
+    id: string;
+    row: number;
+    start: number;
+    end: number;
+    select: (() => void) | undefined;
+    run: () => void;
+  }> = [];
+  private readonly pointer: LegendPointer;
+  private pressedStep: RetitleWizardStep | undefined;
   private selectedIndex = 0;
   private step: RetitleWizardStep;
 
@@ -106,6 +117,7 @@ class RetitleWizardPanel implements Focusable {
     private readonly done: (result: RetitleCommandOutcome) => void,
     options?: RetitleWizardOptions,
   ) {
+    this.pointer = new LegendPointer(() => this.requestRender());
     this.step = options?.initialInvocation
       ? { kind: "scan", scope: options.initialInvocation.scope }
       : { kind: "scope" };
@@ -146,7 +158,29 @@ class RetitleWizardPanel implements Focusable {
     }
   }
 
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    const target = this.mouseTargets.find(
+      (target) => target.row === event.y && event.x >= target.start && event.x < target.end,
+    );
+    const result = this.pointer.handleMouse(event, target);
+    if (event.type === "press") {
+      this.pressedStep = this.step;
+      if (result?.handled) target?.select?.();
+    }
+    if (result) return result;
+    if (event.type === "wheel" && this.step.kind === "scope" && event.wheelDelta) {
+      this.selectedIndex = Math.max(
+        0,
+        Math.min(2, this.selectedIndex + Math.sign(event.wheelDelta)),
+      );
+      this.requestRender();
+      return { handled: true };
+    }
+    return undefined;
+  }
+
   render(width: number): string[] {
+    this.mouseTargets = [];
     const innerWidth = Math.max(1, width - 2);
     const lines: string[] = [this.theme.fg("border", `╭${"─".repeat(innerWidth)}╮`)];
 
@@ -361,20 +395,23 @@ class RetitleWizardPanel implements Focusable {
     );
     lines.push(this.renderRow(innerWidth, ""));
 
-    for (const option of options) {
+    for (const [index, option] of options.entries()) {
       const prefix = option.selected ? this.theme.fg("accent", "›") : " ";
       const text = `${this.theme.bold(option.key)}${option.suffix}`;
       const label = option.selected ? this.theme.fg("accent", text) : text;
-      lines.push(this.renderRow(innerWidth, ` ${prefix} ${label}`));
+      this.pushActionRow(lines, innerWidth, ` ${prefix} ${label}`, option.key, 2, () => {
+        this.selectedIndex = index;
+        this.requestRender();
+      });
     }
 
     if (failure) {
       lines.push(this.renderRow(innerWidth, ""));
-      lines.push(
-        this.renderRow(
-          innerWidth,
-          ` ${this.theme.fg("dim", this.theme.bold("y"))}${this.theme.fg("dim", " Copy last auto-title error")}`,
-        ),
+      this.pushActionRow(
+        lines,
+        innerWidth,
+        ` ${this.theme.fg("dim", this.theme.bold("y"))}${this.theme.fg("dim", " Copy last auto-title error")}`,
+        "y",
       );
     }
   }
@@ -409,27 +446,27 @@ class RetitleWizardPanel implements Focusable {
     lines.push(this.renderRow(innerWidth, ""));
     lines.push(this.renderRow(innerWidth, ` ${message}`));
     lines.push(this.renderRow(innerWidth, ""));
-    lines.push(this.renderRow(innerWidth, ` ${this.theme.fg("dim", "Enter")} close`));
-    lines.push(this.renderRow(innerWidth, ` ${this.theme.fg("dim", "Esc")} cancel`));
+    this.pushActionRow(lines, innerWidth, ` ${this.theme.fg("dim", "Enter")} close`, "\r");
+    this.pushActionRow(lines, innerWidth, ` ${this.theme.fg("dim", "Esc")} cancel`, "\u001b");
   }
 
   private renderConfirmModeStep(lines: string[], innerWidth: number, scan: RetitleScopeScan): void {
     const title = scan.scope === "folder" ? "In This Folder" : "All of Pi";
     lines.push(this.renderRow(innerWidth, ` ${this.theme.bold(this.theme.fg("accent", title))}`));
     lines.push(this.renderRow(innerWidth, ""));
-    lines.push(
-      this.renderRow(
-        innerWidth,
-        ` ${this.theme.bold("Enter")} Generate missing titles (${scan.untitledCount})`,
-      ),
+    this.pushActionRow(
+      lines,
+      innerWidth,
+      ` ${this.theme.bold("Enter")} Generate missing titles (${scan.untitledCount})`,
+      "\r",
     );
-    lines.push(
-      this.renderRow(
-        innerWidth,
-        ` ${this.theme.bold("a")} Regenerate all sessions, even ones that already have titles (${scan.totalCount})`,
-      ),
+    this.pushActionRow(
+      lines,
+      innerWidth,
+      ` ${this.theme.bold("a")} Regenerate all sessions, even ones that already have titles (${scan.totalCount})`,
+      "a",
     );
-    lines.push(this.renderRow(innerWidth, ` ${this.theme.fg("dim", "Esc")} cancel`));
+    this.pushActionRow(lines, innerWidth, ` ${this.theme.fg("dim", "Esc")} cancel`, "\u001b");
   }
 
   private renderWarningStep(lines: string[], innerWidth: number, sessionCount: number): void {
@@ -442,8 +479,8 @@ class RetitleWizardPanel implements Focusable {
     );
     lines.push(this.renderRow(innerWidth, " This may take some time and may be expensive."));
     lines.push(this.renderRow(innerWidth, ""));
-    lines.push(this.renderRow(innerWidth, ` ${this.theme.fg("accent", "Enter")} continue`));
-    lines.push(this.renderRow(innerWidth, ` ${this.theme.fg("dim", "Esc")} cancel`));
+    this.pushActionRow(lines, innerWidth, ` ${this.theme.fg("accent", "Enter")} continue`, "\r");
+    this.pushActionRow(lines, innerWidth, ` ${this.theme.fg("dim", "Esc")} cancel`, "\u001b");
   }
 
   private renderRunningStep(lines: string[], innerWidth: number, message: string): void {
@@ -481,9 +518,44 @@ class RetitleWizardPanel implements Focusable {
     return this.renderRow(innerWidth, `${left}${" ".repeat(gap)}${right}`);
   }
 
+  private pushActionRow(
+    lines: string[],
+    innerWidth: number,
+    content: string,
+    key: string,
+    start = 1,
+    select?: () => void,
+  ): void {
+    const step = this.step;
+    const visible = visibleWidth(content) <= innerWidth;
+    if (visible) {
+      this.mouseTargets.push({
+        id: key,
+        row: lines.length,
+        start: start + 1,
+        end: visibleWidth(content) + 1,
+        select,
+        run: () => {
+          if (this.step === step) this.handleInput(key);
+        },
+      });
+    }
+    const pressed =
+      visible && !select && this.pressedStep === step && this.pointer.pressedId === key;
+    lines.push(
+      this.renderRow(
+        innerWidth,
+        pressed
+          ? content.slice(0, start) + this.theme.bg("selectedBg", content.slice(start))
+          : content,
+      ),
+    );
+  }
+
   private renderRow(innerWidth: number, content: string): string {
-    const pad = Math.max(0, innerWidth - visibleWidth(content));
-    return `${this.theme.fg("border", "│")}${content}${" ".repeat(pad)}${this.theme.fg("border", "│")}`;
+    const text = truncateToWidth(content, innerWidth, "…");
+    const pad = Math.max(0, innerWidth - visibleWidth(text));
+    return `${this.theme.fg("border", "│")}${text}${" ".repeat(pad)}${this.theme.fg("border", "│")}`;
   }
 
   private requestRender(): void {

@@ -5,9 +5,12 @@ import {
   type KeyId,
   matchesKey,
   type TUI,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
   truncateToWidth,
   visibleWidth,
 } from "@earendil-works/pi-tui";
+import { type LegendHit, LegendPointer, layoutLegend, legendHitAt } from "../shared/legend.ts";
 import {
   stripSearchSnippetMarkers,
   transformSearchSnippetMatches,
@@ -22,6 +25,12 @@ interface PickerRightColumnWidths {
   marker: number;
   messageCount: number;
   modifiedAt: number;
+}
+
+interface PickerSessionHit {
+  row: number;
+  end: number;
+  sessionId: string;
 }
 
 export type SessionPickerResult =
@@ -66,6 +75,11 @@ export class SessionReferencePickerComponent implements Focusable {
   private includeAll = false;
   private items: SessionPickerItem[] = [];
   private selectedIndex = 0;
+  private sessionHits: PickerSessionHit[] = [];
+  private actionRows = new Map<number, LegendHit[]>();
+  private inputBounds: { row: number; width: number } | undefined;
+  private pressedSessionId: string | undefined;
+  private readonly legendPointer = new LegendPointer(() => this.tui.requestRender());
   private searchReloadTimer: ReturnType<typeof setTimeout> | undefined;
 
   get focused(): boolean {
@@ -101,10 +115,7 @@ export class SessionReferencePickerComponent implements Focusable {
     }
 
     if (this.keybindings.matches(data, "tui.input.tab")) {
-      this.includeAll = !this.includeAll;
-      this.cancelSearchReload();
-      this.reload();
-      this.tui.requestRender();
+      this.setScope(!this.includeAll);
       return;
     }
 
@@ -133,11 +144,7 @@ export class SessionReferencePickerComponent implements Focusable {
     }
 
     if (this.keybindings.matches(data, "tui.select.confirm")) {
-      this.flushSearchReload();
-      const selected = this.items[this.selectedIndex];
-      if (selected?.kind === "session") {
-        this.finish({ kind: "insert-session-token", sessionId: selected.sessionId });
-      }
+      this.confirmSelection();
       return;
     }
 
@@ -149,12 +156,88 @@ export class SessionReferencePickerComponent implements Focusable {
     }
   }
 
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (event.type === "press") this.pressedSessionId = undefined;
+    const action =
+      event.type === "press"
+        ? legendHitAt(this.actionRows.get(event.y) ?? [], event.x - 1)
+        : undefined;
+    const legend = this.legendPointer.handleMouse(event, action);
+    if (legend) return event.type === "press" ? { ...legend, focus: true } : legend;
+    if (event.type === "press") {
+      if (event.button !== "left") return undefined;
+      const session = this.sessionAt(event);
+      if (session) {
+        this.pressedSessionId = session.sessionId;
+        const index = this.items.findIndex(
+          (item) => item.kind === "session" && item.sessionId === session.sessionId,
+        );
+        if (index >= 0) this.selectedIndex = index;
+        return { handled: true, focus: true };
+      }
+      return undefined;
+    }
+    if (event.type === "wheel" && event.wheelDelta && this.sessionAt(event)) {
+      this.moveSelection(event.wheelDelta < 0 ? -1 : 1);
+      return { handled: true };
+    }
+    if (event.type !== "click" || event.button !== "left") return undefined;
+    const sessionId = this.pressedSessionId;
+    this.pressedSessionId = undefined;
+    if (sessionId) {
+      this.finish({ kind: "insert-session-token", sessionId });
+      return { handled: true };
+    }
+    const input = this.inputBounds;
+    if (input && event.y === input.row && event.x >= 1 && event.x < input.width + 1) {
+      // Input places its cursor on press; defer that call until click so text drags stay unhandled.
+      return this.input.handleMouse({
+        ...event,
+        type: "press",
+        x: event.x - 1,
+        y: 0,
+        width: input.width,
+        height: 1,
+      });
+    }
+    return undefined;
+  }
+
+  private sessionAt(event: TuiMouseEvent): PickerSessionHit | undefined {
+    return this.sessionHits.find((hit) => hit.row === event.y && event.x >= 1 && event.x < hit.end);
+  }
+
+  private setScope(includeAll: boolean): void {
+    this.includeAll = includeAll;
+    this.cancelSearchReload();
+    this.reload();
+    this.tui.requestRender();
+  }
+
+  private confirmSelection(): void {
+    this.flushSearchReload();
+    const selected = this.items[this.selectedIndex];
+    if (selected?.kind === "session") {
+      this.finish({ kind: "insert-session-token", sessionId: selected.sessionId });
+    }
+  }
+
   render(width: number): string[] {
+    this.sessionHits = [];
+    this.actionRows.clear();
+    this.inputBounds = undefined;
     const panelWidth = Math.max(0, width);
     const innerWidth = Math.max(0, panelWidth - 2);
-    const scopeText = this.includeAll
-      ? `${this.theme.fg("muted", "○ Current Folder | ")}${this.theme.fg("accent", "◉ All")}`
-      : `${this.theme.fg("accent", "◉ Current Folder")}${this.theme.fg("muted", " | ○ All")}`;
+    const folder = this.theme.fg(
+      this.includeAll ? "muted" : "accent",
+      `${this.includeAll ? "○" : "◉"} Current Folder`,
+    );
+    const all = this.theme.fg(
+      this.includeAll ? "accent" : "muted",
+      `${this.includeAll ? "◉" : "○"} All`,
+    );
+    const separator = this.theme.fg("muted", " | ");
+    const scopeText = `${folder}${separator}${all}`;
     const title = this.theme.bold("Add Session Reference to Prompt");
     const titleWidth = Math.max(0, innerWidth - visibleWidth(scopeText) - 1);
     const titleText = truncateToWidth(title, titleWidth, "…", true);
@@ -164,15 +247,57 @@ export class SessionReferencePickerComponent implements Focusable {
     );
 
     const lines = [this.theme.fg("border", `╭${"─".repeat(innerWidth)}╮`)];
-    lines.push(this.renderRow(`${titleText}${" ".repeat(headerSpacing)}${scopeText}`, innerWidth));
+    const scopeStart = visibleWidth(titleText) + headerSpacing;
+    if (scopeStart + visibleWidth(scopeText) <= innerWidth) {
+      const folderEnd = scopeStart + visibleWidth(folder);
+      const allStart = folderEnd + visibleWidth(separator);
+      this.actionRows.set(1, [
+        { id: "scope:folder", start: scopeStart, end: folderEnd, run: () => this.setScope(false) },
+        {
+          id: "scope:all",
+          start: allStart,
+          end: allStart + visibleWidth(all),
+          run: () => this.setScope(true),
+        },
+      ]);
+    }
+    const shownFolder =
+      this.actionRows.has(1) && this.legendPointer.pressedId === "scope:folder"
+        ? this.theme.bg("selectedBg", folder)
+        : folder;
+    const shownAll =
+      this.actionRows.has(1) && this.legendPointer.pressedId === "scope:all"
+        ? this.theme.bg("selectedBg", all)
+        : all;
     lines.push(
       this.renderRow(
-        this.theme.fg("muted", "enter add to prompt · esc cancel · tab scope"),
+        `${titleText}${" ".repeat(headerSpacing)}${shownFolder}${separator}${shownAll}`,
         innerWidth,
       ),
     );
+    const selected = this.items[this.selectedIndex];
+    const legend = layoutLegend(
+      this.theme,
+      [
+        {
+          key: "enter",
+          description: "add to prompt",
+          run: () => {
+            if (selected?.kind === "session") {
+              this.finish({ kind: "insert-session-token", sessionId: selected.sessionId });
+            }
+          },
+        },
+        { key: "esc", description: "cancel", run: () => this.finish({ kind: "cancel" }) },
+        { key: "tab", description: "scope", run: () => this.setScope(!this.includeAll) },
+      ],
+      { width: innerWidth, separator: " · ", pressedId: this.legendPointer.pressedId },
+    );
+    this.actionRows.set(lines.length, legend.hits);
+    lines.push(this.renderRow(legend.text, innerWidth));
     lines.push(this.renderRow("", innerWidth));
 
+    this.inputBounds = { row: lines.length, width: innerWidth };
     for (const inputLine of this.input.render(innerWidth)) {
       lines.push(this.renderRow(inputLine, innerWidth));
     }
@@ -183,7 +308,13 @@ export class SessionReferencePickerComponent implements Focusable {
     const rightWidths = this.getRightColumnWidths();
     for (const { item, index } of visibleItems) {
       lines.push(
-        ...this.renderPickerItem(item, index === this.selectedIndex, innerWidth, rightWidths),
+        ...this.renderPickerItem(
+          item,
+          index === this.selectedIndex,
+          innerWidth,
+          rightWidths,
+          lines.length,
+        ),
       );
     }
 
@@ -210,6 +341,7 @@ export class SessionReferencePickerComponent implements Focusable {
     selected: boolean,
     innerWidth: number,
     rightWidths: PickerRightColumnWidths,
+    firstRow: number,
   ): string[] {
     if (item.kind !== "session") {
       const message = [item.title, item.description].filter(Boolean).join(" — ");
@@ -232,7 +364,9 @@ export class SessionReferencePickerComponent implements Focusable {
       innerWidth - 2 - visibleWidth(cursor) - visibleWidth(left) - visibleWidth(right),
     );
     const titleLine = `${cursor}${left}${" ".repeat(spacing)}${right}`;
-    const lines = [this.renderSelectableRow(titleLine, innerWidth, selected)];
+    const lines = [
+      this.renderSelectableRow(titleLine, innerWidth, selected, firstRow, item.sessionId),
+    ];
 
     if (item.snippet && !highlightedTitle) {
       const snippet = this.formatSnippet(
@@ -241,7 +375,13 @@ export class SessionReferencePickerComponent implements Focusable {
       );
       if (snippet) {
         lines.push(
-          this.renderSelectableRow(`  ${this.theme.fg("dim", snippet)}`, innerWidth, selected),
+          this.renderSelectableRow(
+            `  ${this.theme.fg("dim", snippet)}`,
+            innerWidth,
+            selected,
+            firstRow + lines.length,
+            item.sessionId,
+          ),
         );
       }
     }
@@ -250,11 +390,19 @@ export class SessionReferencePickerComponent implements Focusable {
   }
 
   private renderRow(content: string, innerWidth: number): string {
+    content = truncateToWidth(content, innerWidth, "…");
     const pad = Math.max(0, innerWidth - visibleWidth(content));
     return `${this.theme.fg("border", "│")}${content}${" ".repeat(pad)}${this.theme.fg("border", "│")}`;
   }
 
-  private renderSelectableRow(content: string, innerWidth: number, selected: boolean): string {
+  private renderSelectableRow(
+    content: string,
+    innerWidth: number,
+    selected: boolean,
+    row: number,
+    sessionId: string,
+  ): string {
+    this.sessionHits.push({ row, end: 1 + Math.min(innerWidth, visibleWidth(content)), sessionId });
     return this.renderRow(selected ? this.theme.bg("selectedBg", content) : content, innerWidth);
   }
 
@@ -277,7 +425,7 @@ export class SessionReferencePickerComponent implements Focusable {
       return undefined;
     }
 
-    return truncateToWidth(rendered, maxWidth, "…", true);
+    return truncateToWidth(rendered, maxWidth, "…");
   }
 
   private highlightSnippetMatches(snippet: string): string | undefined {

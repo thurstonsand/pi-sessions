@@ -1,5 +1,11 @@
 import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
-import { Key, matchesKey } from "@earendil-works/pi-tui";
+import {
+  Key,
+  matchesKey,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
+} from "@earendil-works/pi-tui";
+import { type LegendHit, LegendPointer, layoutLegend, legendHitAt } from "../shared/legend.ts";
 import { renderStrongModal } from "./strong-modal.ts";
 
 export async function runHandoffTaskWithLoader<T>(
@@ -12,6 +18,13 @@ export async function runHandoffTaskWithLoader<T>(
   const result = await ctx.ui.custom<T | undefined>(
     (tui, theme, _keybindings, done) => {
       const abortController = new AbortController();
+      let cancelHits: LegendHit[] = [];
+      const pointer = new LegendPointer(() => tui.requestRender());
+      const cancel = () => {
+        abortController.abort();
+        done(undefined);
+        tui.requestRender();
+      };
 
       task(abortController.signal)
         .then(done)
@@ -24,19 +37,31 @@ export async function runHandoffTaskWithLoader<T>(
 
       return {
         render(width: number): string[] {
+          const legend = layoutLegend(
+            theme,
+            [{ key: "Esc", description: "to cancel.", run: cancel }],
+            { width: Math.max(20, width - 4) - 6, pressedId: pointer.pressedId },
+          );
+          cancelHits = legend.hits;
           return renderStrongModal(
-            [theme.fg("accent", theme.bold(label)), "", theme.fg("muted", "Press Esc to cancel.")],
+            [
+              theme.fg("accent", theme.bold(label)),
+              "",
+              `${theme.fg("muted", "Press ")}${legend.text}`,
+            ],
             width,
             theme,
           );
         },
         invalidate(): void {},
+        handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+          return pointer.handleMouse(
+            event,
+            event.y === 3 ? legendHitAt(cancelHits, event.x - 8) : undefined,
+          );
+        },
         handleInput(data: string): void {
-          if (matchesKey(data, Key.escape)) {
-            abortController.abort();
-            done(undefined);
-            tui.requestRender();
-          }
+          if (matchesKey(data, Key.escape)) cancel();
         },
       };
     },

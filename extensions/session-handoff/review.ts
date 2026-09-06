@@ -1,5 +1,5 @@
 import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
-import type { Component } from "@earendil-works/pi-tui";
+import type { Component, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
 import {
   Key,
   matchesKey,
@@ -7,6 +7,13 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+import {
+  type LegendHit,
+  type LegendItem,
+  LegendPointer,
+  layoutLegend,
+  legendHitAt,
+} from "../shared/legend.ts";
 import { renderStrongModal } from "./strong-modal.ts";
 
 const PREVIEW_TIMEOUT_MS = 8_000;
@@ -59,6 +66,8 @@ export class HandoffPreviewComponent implements Component {
   private isTimerActive = true;
   private scrollOffset = 0;
   private previewWidth = 80;
+  private legendRows = new Map<number, LegendHit[]>();
+  private readonly legendPointer = new LegendPointer(() => this.requestRender());
 
   public constructor(
     draft: string,
@@ -119,7 +128,26 @@ export class HandoffPreviewComponent implements Component {
     }
   }
 
+  public handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    const hit =
+      event.type === "press" && !this.isDone
+        ? legendHitAt(this.legendRows.get(event.y) ?? [], event.x - 2)
+        : undefined;
+    const legend = this.legendPointer.handleMouse(event, hit);
+    if (legend) {
+      if (event.type === "press") this.disableTimer();
+      return legend;
+    }
+    if (event.type === "wheel" && event.wheelDelta && !this.isDone) {
+      this.disableTimer();
+      this.scrollBy(event.wheelDelta);
+      return { handled: true };
+    }
+    return undefined;
+  }
+
   public render(width: number): string[] {
+    this.legendRows.clear();
     const modalWidth = Math.max(24, width - 4);
     const promptBoxWidth = Math.max(20, modalWidth - 4);
     this.previewWidth = Math.max(16, promptBoxWidth - 4);
@@ -133,13 +161,38 @@ export class HandoffPreviewComponent implements Component {
     const contentLines = [
       this.getTitleLine(),
       "",
-      this.theme.fg("muted", formatKeymapLine("Enter: start session", "Esc: cancel")),
-      this.theme.fg("muted", formatKeymapLine("e: edit prompt", "j/k: scroll")),
+      this.renderKeymapLine(
+        3,
+        width,
+        { key: "Enter:", description: "start session", run: () => this.finish("accept") },
+        { key: "Esc:", description: "cancel", run: () => this.finish("cancel") },
+      ),
+      this.renderKeymapLine(
+        4,
+        width,
+        { key: "e:", description: "edit prompt", run: () => this.finish("edit") },
+        { key: "j/k:", description: "scroll" },
+      ),
       "",
       ...promptLines,
     ];
 
     return renderStrongModal(contentLines, width, this.theme);
+  }
+
+  private renderKeymapLine(
+    row: number,
+    width: number,
+    left: LegendItem,
+    right: LegendItem,
+  ): string {
+    const legend = layoutLegend(this.theme, [left, right], {
+      width: Math.max(20, width - 4),
+      pressedId: this.legendPointer.pressedId,
+      separator: " ".repeat(Math.max(0, 27 - visibleWidth(`${left.key} ${left.description}`))),
+    });
+    this.legendRows.set(row, legend.hits);
+    return legend.text;
   }
 
   public invalidate(): void {}
@@ -200,10 +253,6 @@ export class HandoffPreviewComponent implements Component {
     const remainingMs = Math.max(0, this.deadlineAt - this.clock.now());
     return Math.ceil(remainingMs / 1_000);
   }
-}
-
-function formatKeymapLine(left: string, right: string): string {
-  return `${left.padEnd(27, " ")}${right}`;
 }
 
 function renderPromptSection(lines: string[], width: number, _theme: Theme): string[] {

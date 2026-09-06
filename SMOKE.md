@@ -279,3 +279,21 @@ Expected:
 ### Verify the board reflects every state
 
 Run `/handoff` and confirm the **Subagents** tab shows the right derived state for each worker across the run: `busy`, `completed`, `interrupted`, and `stopped`, with the stop / copy-observe / copy-resume actions gated by state. Confirm the **User sessions** tab lists any directional or deferred handoffs made during the run.
+
+## 12. Verify fullscreen mouse input
+
+Use Pi `0.85.0` or newer with `"tuiMode": "fullscreen"` in its settings.
+
+- Open `Alt+O`, type a query with enough results to scroll, and click a session near the bottom of the list. The inserted ID must belong to the pressed session even if pressing it scrolls another session into that row. Click the filter to place its cursor; drag across its text to select it for the clipboard.
+- Open `/handoff`, click both tab labels and several rows, and use the wheel. Hover must not change selection. Click `x stop` on a disposable worker, then `esc cancel`. The worker must keep running; stopping it requires a separate click on `x confirm`.
+- Open `/title`, click the folder scope, then cancel from its mode chooser. Clicks in row padding must do nothing.
+- In a handoff preview, press an action hint and hold past the countdown. Nothing starts until release. Wheel scrolling must also disable autostart.
+- Open `/session-index`, click `R rebuild from disk`, and decline the confirmation. Click its close hint to dismiss the panel. Loader cancel hints must do what their keyboard equivalents do; cancelling the reindex loader dismisses it without interrupting the rebuild.
+
+A deterministic renderer-level probe uses a disposable SQLite fixture and raw terminal SGR events, without a model call or a live index:
+
+```sh
+PI_SESSIONS_MOUSE_SMOKE=1 mise run test -- test/session-handoff.picker.test.ts -t 'routes real fullscreen' --silent=false --reporter=verbose
+```
+
+It prints the pressed row before and after selection reflow, verifies that release inserts Current session rather than Parent session, and verifies that a filter drag reaches Pi's clipboard-selection handler.

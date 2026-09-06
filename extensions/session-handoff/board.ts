@@ -1,26 +1,43 @@
 import {
   copyToClipboard,
   type ExtensionCommandContext,
-  type SessionEntry,
   type Theme,
   type ThemeColor,
 } from "@earendil-works/pi-coding-agent";
-import { type Focusable, matchesKey, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import {
+  type Focusable,
+  matchesKey,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
+  truncateToWidth,
+  visibleWidth,
+} from "@earendil-works/pi-tui";
+import {
+  type LegendHit,
+  type LegendItem,
+  type LegendLine,
+  LegendPointer,
+  layoutLegend,
+  legendHitAt,
+} from "../shared/legend.ts";
 import { formatCompactRelativeTime } from "../shared/time.ts";
 import type { SubagentState } from "../subagents/classify.ts";
-import type { SubagentRoster } from "../subagents/roster.ts";
+import { type HandoffBoardServices, loadHandoffBoardSnapshot } from "./board-loading.ts";
 import {
   buildHandoffBoardView,
   type HandoffBoardSnapshot,
   type HandoffBoardTab,
   type HandoffBoardView,
   type HandoffSubagentsView,
-  type UserSessionEntry,
   type UserSessionStatus,
   type UserSessionsView,
 } from "./board-view-model.ts";
-import { HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE } from "./metadata.ts";
-import { parseHandoffLaunchReceiptEntry } from "./receipt.ts";
+
+export {
+  collectUserSessions,
+  type HandoffBoardServices,
+  loadHandoffBoardSnapshot,
+} from "./board-loading.ts";
 
 const BOARD_WIDTH = 86;
 const ROW_VIEWPORT_SIZE = 8;
@@ -28,11 +45,15 @@ const STATUS_DURATION_MS = 3_000;
 
 export type { HandoffBoardSnapshot, UserSessionEntry } from "./board-view-model.ts";
 
-export interface HandoffBoardServices {
-  roster?: SubagentRoster | undefined;
-  cancelSubagent?: ((sessionId: string) => Promise<unknown>) | undefined;
-  listLiveSessions?: (() => Promise<string[]>) | undefined;
-  readSessionEntries?: ((sessionFile: string) => readonly SessionEntry[]) | undefined;
+interface BoardMouseTarget {
+  run(): void;
+  press?: () => void;
+}
+
+interface BoardRowHit {
+  tab: HandoffBoardTab;
+  sessionId: string;
+  end: number;
 }
 
 interface HandoffBoardActions {
@@ -74,87 +95,6 @@ export async function openHandoffBoard(
   );
 }
 
-export async function loadHandoffBoardSnapshot(
-  entries: readonly SessionEntry[],
-  services: HandoffBoardServices,
-): Promise<HandoffBoardSnapshot> {
-  const userSessions = collectUserSessions(entries);
-  const [branchRoster, liveSessionIds, hydratedUserSessions] = await Promise.all([
-    services.roster?.resolve("branch") ?? Promise.resolve({ entries: [], total: 0 }),
-    services.listLiveSessions?.() ?? Promise.resolve([]),
-    Promise.all(
-      userSessions.map(
-        async (entry): Promise<UserSessionEntry> => ({
-          ...entry,
-          runEvidence: loadUserSessionRunEvidence(entry, services),
-        }),
-      ),
-    ),
-  ]);
-  return {
-    subagents: branchRoster.entries,
-    userSessions: hydratedUserSessions,
-    liveSessionIds: new Set(liveSessionIds),
-    hasLiveSessionEvidence: services.listLiveSessions !== undefined,
-  };
-}
-
-export function collectUserSessions(entries: readonly SessionEntry[]): UserSessionEntry[] {
-  const bySessionId = new Map<string, UserSessionEntry>();
-  for (const entry of entries) {
-    const receipt = parseHandoffLaunchReceiptEntry(entry);
-    if (!receipt || receipt.launch === "subagent") {
-      continue;
-    }
-    const candidate = {
-      sessionId: receipt.sessionId,
-      timestamp: entry.timestamp,
-      receipt,
-    };
-    const existing = bySessionId.get(candidate.sessionId);
-    if (!existing || candidate.timestamp > existing.timestamp) {
-      bySessionId.set(candidate.sessionId, candidate);
-    }
-  }
-  return [...bySessionId.values()].sort((left, right) =>
-    right.timestamp.localeCompare(left.timestamp),
-  );
-}
-
-function loadUserSessionRunEvidence(
-  entry: UserSessionEntry,
-  services: HandoffBoardServices,
-): NonNullable<UserSessionEntry["runEvidence"]> {
-  if (!services.readSessionEntries) {
-    return unavailableRunEvidence();
-  }
-
-  try {
-    return {
-      transcriptAvailable: true,
-      hasStarted: services
-        .readSessionEntries(entry.receipt.childSessionFile)
-        .some(isSessionStartupEvidence),
-    };
-  } catch {
-    return unavailableRunEvidence();
-  }
-}
-
-function unavailableRunEvidence(): NonNullable<UserSessionEntry["runEvidence"]> {
-  return { transcriptAvailable: false, hasStarted: false };
-}
-
-function isSessionStartupEvidence(entry: SessionEntry): boolean {
-  if (entry.type === "session_info") {
-    return false;
-  }
-  if (entry.type !== "custom") {
-    return true;
-  }
-  return entry.customType !== HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE;
-}
-
 export class HandoffBoard implements Focusable {
   focused = false;
   private tab: HandoffBoardTab = "subagents";
@@ -163,6 +103,10 @@ export class HandoffBoard implements Focusable {
   private status: string | undefined;
   private statusGeneration = 0;
   private busy = false;
+  private rowHits = new Map<number, BoardRowHit>();
+  private controlHits = new Map<number, LegendHit[]>();
+  private pressedTarget: BoardMouseTarget | undefined;
+  private readonly legendPointer = new LegendPointer(() => this.requestRender());
 
   constructor(
     private readonly theme: Theme,
@@ -225,31 +169,100 @@ export class HandoffBoard implements Focusable {
     }
   }
 
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (event.type === "press") this.pressedTarget = undefined;
+    const hit =
+      event.type === "press" && !this.busy
+        ? legendHitAt(this.controlHits.get(event.y) ?? [], event.x - 2)
+        : undefined;
+    const legend = this.legendPointer.handleMouse(
+      event,
+      hit
+        ? {
+            ...hit,
+            run: () => {
+              if (!this.busy) hit.run();
+            },
+          }
+        : undefined,
+    );
+    if (legend) return event.type === "press" ? { ...legend, focus: true } : legend;
+    if (event.type === "press") {
+      this.pressedTarget =
+        event.button === "left" && !this.busy ? this.mouseTargetAt(event) : undefined;
+      if (!this.pressedTarget) return undefined;
+      this.pressedTarget.press?.();
+      return { handled: true, focus: true };
+    }
+    if (event.type === "click") {
+      // Pi keeps press-time coordinates even when selection reflows the board.
+      const target = this.pressedTarget;
+      this.pressedTarget = undefined;
+      if (event.button !== "left" || !target || this.busy) return undefined;
+      target.run();
+      return { handled: true };
+    }
+    if (event.type === "wheel" && event.wheelDelta && this.rowHitAt(event)) {
+      if (!this.busy) this.moveSelection(Math.sign(event.wheelDelta));
+      return { handled: true };
+    }
+    return undefined;
+  }
+
+  private rowHitAt(event: TuiMouseEvent): BoardRowHit | undefined {
+    const hit = this.rowHits.get(event.y);
+    return hit && event.x >= 2 && event.x < hit.end ? hit : undefined;
+  }
+
+  private mouseTargetAt(event: TuiMouseEvent): BoardMouseTarget | undefined {
+    const row = this.rowHitAt(event);
+    if (row) {
+      const select = () => this.selectSession(row.tab, row.sessionId);
+      return { press: select, run: select };
+    }
+    return undefined;
+  }
+
+  private sessionIdAt(tab: HandoffBoardTab, index: number): string | undefined {
+    return tab === "subagents"
+      ? this.snapshot.subagents[index]?.sessionId
+      : this.snapshot.userSessions[index]?.sessionId;
+  }
+
+  private selectSession(tab: HandoffBoardTab, sessionId: string): void {
+    if (this.tab !== tab) return;
+    const entries = tab === "subagents" ? this.snapshot.subagents : this.snapshot.userSessions;
+    const index = entries.findIndex((entry) => entry.sessionId === sessionId);
+    if (index < 0) return;
+    this.selectedByTab[tab] = index;
+    this.clearTransientState();
+    this.requestRender();
+  }
+
   render(width: number): string[] {
+    this.rowHits.clear();
+    this.controlHits.clear();
     const modalWidth = Math.max(20, Math.min(width, BOARD_WIDTH));
     const innerWidth = modalWidth - 2;
     const bodyWidth = innerWidth - 2;
     const border = (text: string) => this.theme.fg("border", text);
     const row = (content = "") => `${border("│")} ${fitCell(content, bodyWidth)} ${border("│")}`;
     const view = this.currentView();
-    const rows =
-      view.tab === "subagents"
-        ? this.renderSubagentRows(view, bodyWidth)
-        : this.renderUserSessionRows(view, bodyWidth);
-
-    return [
+    const lines = [
       border(`╭${"─".repeat(innerWidth)}╮`),
       row(this.renderHeader(view, bodyWidth)),
       row(),
-      row(this.renderTabs()),
-      row(),
-      ...rows.map(row),
-      row(),
-      ...this.renderDetails(view, bodyWidth).map(row),
-      row(),
-      row(this.renderFooter(view, bodyWidth)),
-      border(`╰${"─".repeat(innerWidth)}╯`),
     ];
+    lines.push(row(this.renderTabs(lines.length, bodyWidth)), row());
+    const rows =
+      view.tab === "subagents"
+        ? this.renderSubagentRows(view, bodyWidth, lines.length + 1)
+        : this.renderUserSessionRows(view, bodyWidth, lines.length + 1);
+    lines.push(...rows.map(row), row(), ...this.renderDetails(view, bodyWidth).map(row), row());
+    const footer = this.renderFooter(view, bodyWidth);
+    this.controlHits.set(lines.length, footer.hits);
+    lines.push(row(footer.text), border(`╰${"─".repeat(innerWidth)}╯`));
+    return lines;
   }
 
   private renderHeader(view: HandoffBoardView, width: number): string {
@@ -264,7 +277,14 @@ export class HandoffBoard implements Focusable {
     return fitLine(`${title}${" ".repeat(gap)}${count}`, width);
   }
 
-  private renderTabs(): string {
+  private renderTabs(row: number, width: number): string {
+    this.controlHits.set(
+      row,
+      [
+        { id: "tab:subagents", start: 0, end: 9, run: () => this.setTab("subagents") },
+        { id: "tab:user-sessions", start: 11, end: 24, run: () => this.setTab("user-sessions") },
+      ].filter((hit) => hit.end <= width),
+    );
     const subagents =
       this.tab === "subagents"
         ? this.theme.fg("accent", this.theme.bold("Subagents"))
@@ -273,10 +293,22 @@ export class HandoffBoard implements Focusable {
       this.tab === "user-sessions"
         ? this.theme.fg("accent", this.theme.bold("User sessions"))
         : this.theme.fg("dim", "User sessions");
-    return `${subagents}  ${userSessions}`;
+    const shownSubagents =
+      width >= 9 && this.legendPointer.pressedId === "tab:subagents"
+        ? this.theme.bg("selectedBg", subagents)
+        : subagents;
+    const shownUserSessions =
+      width >= 24 && this.legendPointer.pressedId === "tab:user-sessions"
+        ? this.theme.bg("selectedBg", userSessions)
+        : userSessions;
+    return `${shownSubagents}  ${shownUserSessions}`;
   }
 
-  private renderSubagentRows(view: HandoffSubagentsView, width: number): string[] {
+  private renderSubagentRows(
+    view: HandoffSubagentsView,
+    width: number,
+    firstRow: number,
+  ): string[] {
     const rows = view.rows;
     const statusWidth = 11;
     const ageWidth = 4;
@@ -298,6 +330,7 @@ export class HandoffBoard implements Focusable {
       ...rows.slice(start, start + ROW_VIEWPORT_SIZE).map((entry, visibleIndex) => {
         const index = start + visibleIndex;
         const selected = index === this.selectedByTab.subagents;
+        this.recordRowHit(firstRow + visibleIndex, view.tab, index, width);
         const indent = "  ".repeat(Math.max(0, entry.depth - 1));
         const dot = this.theme.fg(stateColor(entry.status), stateDot(entry.status));
         const first = `${indent}${dot} ${entry.title}`;
@@ -320,7 +353,7 @@ export class HandoffBoard implements Focusable {
     ];
   }
 
-  private renderUserSessionRows(view: UserSessionsView, width: number): string[] {
+  private renderUserSessionRows(view: UserSessionsView, width: number, firstRow: number): string[] {
     const rows = view.rows;
     const statusWidth = 11;
     const ageWidth = 4;
@@ -342,6 +375,7 @@ export class HandoffBoard implements Focusable {
       ...rows.slice(start, start + ROW_VIEWPORT_SIZE).map((entry, visibleIndex) => {
         const index = start + visibleIndex;
         const selected = index === this.selectedByTab["user-sessions"];
+        this.recordRowHit(firstRow + visibleIndex, view.tab, index, width);
         const line = gridRow(
           [
             { text: entry.title, width: firstWidth },
@@ -363,6 +397,11 @@ export class HandoffBoard implements Focusable {
         return selected ? this.theme.bg("selectedBg", line) : line;
       }),
     ];
+  }
+
+  private recordRowHit(row: number, tab: HandoffBoardTab, index: number, width: number): void {
+    const sessionId = this.sessionIdAt(tab, index);
+    if (sessionId) this.rowHits.set(row, { tab, sessionId, end: width + 2 });
   }
 
   private renderDetails(view: HandoffBoardView, width: number): string[] {
@@ -404,44 +443,117 @@ export class HandoffBoard implements Focusable {
     return view.details.map((detail) => detailLine(this.theme, detail.label, detail.value));
   }
 
-  private renderFooter(view: HandoffBoardView, width: number): string {
+  private renderFooter(view: HandoffBoardView, width: number): LegendLine {
     if (this.busy) {
-      return this.theme.fg("dim", "Working…");
+      return { text: this.theme.fg("dim", "Working…"), hits: [] };
     }
     if (this.confirmingStopSessionId) {
+      const sessionId = this.confirmingStopSessionId;
       const prefix = "Stop “";
       const suffix = "”?  x confirm  ·  esc cancel";
       const titleWidth = Math.max(1, width - visibleWidth(prefix) - visibleWidth(suffix));
       const title = truncateToWidth(view.action?.subagent?.title ?? "subagent", titleWidth, "…");
-      return this.theme.fg("warning", `${prefix}${title}${suffix}`);
+      const question = `${prefix}${title}”?  `;
+      const legend = layoutLegend(
+        this.theme,
+        [
+          {
+            key: "x",
+            description: "confirm",
+            run: this.guardAction(view, () => this.handleStop()),
+          },
+          {
+            key: "esc",
+            description: "cancel",
+            run: () => {
+              if (this.confirmingStopSessionId !== sessionId) return;
+              this.clearTransientState();
+              this.requestRender();
+            },
+          },
+        ],
+        {
+          width: Math.max(0, width - visibleWidth(question)),
+          separator: "  ·  ",
+          pressedId: this.legendPointer.pressedId,
+        },
+      );
+      return {
+        text: this.theme.fg("warning", `${question}${legend.text}`),
+        hits: legend.hits.map((hit) => ({
+          ...hit,
+          start: hit.start + visibleWidth(question),
+          end: hit.end + visibleWidth(question),
+        })),
+      };
     }
     if (this.status) {
-      return this.theme.fg("dim", this.status);
+      return { text: this.theme.fg("dim", this.status), hits: [] };
     }
 
     const action = view.action;
-    const parts = [this.hint("<>", "tab"), this.hint("↑↓", "select")];
+    const items: LegendItem[] = [
+      { key: "<>", description: "tab" },
+      { key: "↑↓", description: "select" },
+    ];
     if (action?.canStop) {
-      parts.push(this.hint("x", "stop"));
+      items.push({
+        key: "x",
+        description: "stop",
+        run: this.guardAction(view, () => this.handleStop()),
+      });
     }
     if (action?.observeCommand) {
-      parts.push(this.hint("a", "copy observe"));
+      items.push({
+        key: "a",
+        description: "copy observe",
+        run: this.guardAction(view, () => this.handleCopyObserve()),
+      });
     }
     if (action?.resumeCommand) {
-      parts.push(this.hint("c", "copy resume"));
+      items.push({
+        key: "c",
+        description: "copy resume",
+        run: this.guardAction(view, () => this.handleCopyResume()),
+      });
     }
-    parts.push(this.hint("esc", "close"));
+    items.push({
+      key: "esc",
+      description: "close",
+      run: () => {
+        this.clearTransientState();
+        this.done(undefined);
+      },
+    });
 
-    const left = parts.join("  ");
-    const position = view.rows.length
-      ? this.theme.fg("dim", `${this.selectedByTab[this.tab] + 1} of ${view.rows.length}`)
-      : "";
-    const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(position));
-    return fitLine(`${left}${" ".repeat(gap)}${position}`, width);
+    return layoutLegend(this.theme, items, {
+      width,
+      pressedId: this.legendPointer.pressedId,
+      trailing: view.rows.length
+        ? `${this.selectedByTab[this.tab] + 1} of ${view.rows.length}`
+        : "",
+    });
   }
 
-  private hint(key: string, description: string): string {
-    return this.theme.fg("dim", key) + this.theme.fg("muted", ` ${description}`);
+  private guardAction(view: HandoffBoardView, run: () => void): () => void {
+    const sessionId = this.sessionIdAt(view.tab, this.selectedByTab[view.tab]);
+    const confirming = this.confirmingStopSessionId;
+    return () => {
+      if (
+        this.tab !== view.tab ||
+        this.sessionIdAt(this.tab, this.selectedByTab[this.tab]) !== sessionId
+      )
+        return;
+      if (this.confirmingStopSessionId !== confirming) return;
+      const action = this.currentView().action;
+      if (
+        action?.canStop !== view.action?.canStop ||
+        action?.observeCommand !== view.action?.observeCommand ||
+        action?.resumeCommand !== view.action?.resumeCommand
+      )
+        return;
+      run();
+    };
   }
 
   private setTab(tab: HandoffBoardTab): void {

@@ -4,7 +4,6 @@
     "config:recommended",
     "customManagers:biomeVersions",
     ":configMigration",
-    ":maintainLockFilesWeekly",
     "security:minimumReleaseAgeNpm",
     "abandonments:recommended",
     ":enableVulnerabilityAlertsWithAdditionalLabel(security)"
@@ -12,7 +11,10 @@
   "dependencyDashboard": true,
   "timezone": "America/New_York",
   "labels": ["dependencies"],
-  "schedule": ["* * * * 1"],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["at any time"]
+  },
   "customManagers": [
     {
       "customType": "regex",

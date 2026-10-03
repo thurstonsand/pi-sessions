@@ -7,7 +7,7 @@ experimental = true
 enter = "mise bootstrap --yes --quiet"
 
 [tools]
-hk = "1.58.1"
+hk = "2.4.0"
 node = "24"
 
 [env]

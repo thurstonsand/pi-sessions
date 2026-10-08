@@ -57,7 +57,7 @@ run = "git diff --exit-code -- dist"
 description = "Run Renovate"
 run = "PATH=\"{{ tools.node.path }}/bin:$PATH\" renovate"
 tools.node = "24"
-tools."npm:renovate" = { version = "44.132.2", allow_builds = [
+tools."npm:renovate" = { version = "44.138.0", allow_builds = [
   "re2",
 ], trust_policy_excludes = [
   "@yarnpkg/libzip@3.2.2",
@@ -67,7 +67,7 @@ tools."npm:renovate" = { version = "44.132.2", allow_builds = [
 description = "Validate Renovate configuration"
 run = "PATH=\"{{ tools.node.path }}/bin:$PATH\" renovate-config-validator renovate.json"
 tools.node = "24"
-tools."npm:renovate" = { version = "44.132.2", allow_builds = [
+tools."npm:renovate" = { version = "44.138.0", allow_builds = [
   "re2",
 ], trust_policy_excludes = [
   "@yarnpkg/libzip@3.2.2",

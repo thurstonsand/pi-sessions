@@ -48,6 +48,7 @@ export function installAutoTitle(
 
   // An explicit thinkingLevel setting overrides a thinking suffix on the configured model.
   const buildGeneration = (
+    ctx: ExtensionContext,
     resolution: AutoTitleModelResolution | undefined,
   ): AutoTitleGeneration => ({
     systemPrompt: settings.autoTitle.prompt,
@@ -55,6 +56,7 @@ export function installAutoTitle(
     tokenBudget: settings.autoTitle.tokenBudget,
     thinkingLevel: settings.autoTitle.thinkingLevel ?? resolution?.thinkingLevel,
     persistRuns: settings.autoTitle.persistRuns,
+    sessionId: ctx.sessionManager.getSessionId(),
   });
 
   pi.registerCommand("title", {
@@ -83,7 +85,7 @@ export function installAutoTitle(
           ctx,
           resolution?.model,
           invocation,
-          buildGeneration(resolution),
+          buildGeneration(ctx, resolution),
         );
       },
     ),
@@ -108,7 +110,7 @@ export function installAutoTitle(
       existingPlan: result.plan,
       getSessionEpoch,
       notifyOnSuccess: false,
-      generation: buildGeneration(resolution),
+      generation: buildGeneration(ctx, resolution),
     })
       .then((outcome) => {
         if (outcome.ok) {

@@ -20,6 +20,7 @@ export interface AutoTitleGeneration {
   tokenBudget: number;
   thinkingLevel: ThinkingLevel | undefined;
   persistRuns: boolean;
+  sessionId: string | undefined;
 }
 
 export type AutoTitleGenerationResult =
@@ -88,6 +89,14 @@ export async function generateAutoTitle(
         {
           maxTokens: generation.tokenBudget,
           ...(thinkingLevel && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
+          // opencode.ai rejects requests without this header; pi adds it in its own request
+          // wrapper (provider-attribution), which this direct modelRegistry call bypasses.
+          transformHeaders: async (requestHeaders) => ({
+            ...requestHeaders,
+            ...(generation.sessionId && model.baseUrl.includes("opencode.ai")
+              ? { "x-opencode-session": generation.sessionId, "x-opencode-client": "pi" }
+              : {}),
+          }),
           signal: abortController.signal,
           cacheRetention: "none",
         },

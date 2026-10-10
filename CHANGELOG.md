@@ -2,6 +2,13 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.17.0] - 2026-10-10
+
+### Added
+
+- A project's `.pi/settings.json` now overrides the `sessions` settings in `~/.pi/agent/settings.json`, merged the way pi merges its own settings: nested objects key by key, project values win.
+- `sessions.handoff.deferred.enable` (default `true`) turns the `deferred` launch off. With `sessions.subagents.enable` also off, `session_handoff` offers only host and split launches.
+
 ## [0.16.0] - 2026-10-09
 
 ### Fixed

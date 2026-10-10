@@ -35,6 +35,7 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
       roster: Type.Optional(Type.Array(Type.String())),
       deferred: Type.Optional(
         Type.Object({
+          enable: Type.Optional(Type.Boolean()),
           copyToClipboard: Type.Optional(Type.Boolean()),
         }),
       ),
@@ -103,6 +104,7 @@ export interface HandoffSettings extends AgentModelSettings {
   /** Patterns naming the models a handoff may launch a child on. Empty means unrestricted. */
   roster: readonly ModelSelection[];
   deferred: {
+    enable: boolean;
     copyToClipboard: boolean;
   };
 }
@@ -228,9 +230,14 @@ function normalizeAutoTitlePrompt(value: string | undefined): string {
   return trimmed ? trimmed : DEFAULT_AUTO_TITLE_PROMPT;
 }
 
+/**
+ * pi's merged view: project `.pi/settings.json` deep-merged over the global file.
+ * Extensions load before `pi.getSettings()` is bound, and the trust decision it
+ * honors is not visible at load time, so project settings apply regardless of trust.
+ */
 function loadSessionFileSettings(): SessionFileSettings {
-  const globalSettings = SettingsManager.create(process.cwd()).getGlobalSettings();
-  const parsed = parseTypeBoxValue(ROOT_SETTINGS_SCHEMA, globalSettings, "Invalid settings");
+  const mergedSettings = SettingsManager.create(process.cwd()).getSettings();
+  const parsed = parseTypeBoxValue(ROOT_SETTINGS_SCHEMA, mergedSettings, "Invalid settings");
   return parsed.sessions ?? {};
 }
 
@@ -263,6 +270,7 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
       persistRuns: fileSettings.handoff?.persistRuns ?? false,
       roster: normalizeRoster(fileSettings.handoff?.roster),
       deferred: {
+        enable: fileSettings.handoff?.deferred?.enable ?? true,
         copyToClipboard: fileSettings.handoff?.deferred?.copyToClipboard ?? true,
       },
     },

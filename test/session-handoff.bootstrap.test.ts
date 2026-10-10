@@ -106,7 +106,7 @@ describe("session handoff bootstrap", () => {
       model: "openai-codex/gpt-5.6-terra",
       thinkingLevel: "low" as const,
       persistRuns: true,
-      deferred: { copyToClipboard: true },
+      deferred: { enable: true, copyToClipboard: true },
     };
 
     await consumePendingHandoffBootstrap(
@@ -275,7 +275,7 @@ function consumeBootstrap(pi: unknown, ctx: unknown): Promise<void> {
       pickerShortcut: "alt+o" as const,
       roster: [],
       persistRuns: false,
-      deferred: { copyToClipboard: true },
+      deferred: { enable: true, copyToClipboard: true },
     },
   );
 }

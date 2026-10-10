@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_AUTO_TITLE_PROMPT,
   DEFAULT_AUTO_TITLE_REFRESH_TURNS,
@@ -18,6 +18,7 @@ afterEach(() => {
   } else {
     process.env.PI_CODING_AGENT_DIR = originalAgentDir;
   }
+  vi.restoreAllMocks();
   testFs.cleanup();
 });
 
@@ -34,6 +35,8 @@ describe("pi-sessions auto-title settings", () => {
     expect(settings.autoTitle.persistRuns).toBe(false);
     expect(settings.ask.persistRuns).toBe(false);
     expect(settings.handoff.persistRuns).toBe(false);
+    expect(settings.features.subagents).toBe(true);
+    expect(settings.handoff.deferred.enable).toBe(true);
   });
 
   it("reads explicit auto-title settings from global settings", () => {
@@ -124,10 +127,11 @@ describe("pi-sessions auto-title settings", () => {
     expect(settings.ask.persistRuns).toBe(true);
   });
 
-  it("ignores project settings and only reads global auto-title settings", () => {
+  it("merges project settings over global settings", () => {
     const agentDir = testFs.createTempDir();
     const cwd = testFs.createTempDir();
     process.env.PI_CODING_AGENT_DIR = agentDir;
+    vi.spyOn(process, "cwd").mockReturnValue(cwd);
     mkdirSync(path.join(cwd, ".pi"), { recursive: true });
 
     writeFileSync(
@@ -136,6 +140,7 @@ describe("pi-sessions auto-title settings", () => {
         {
           sessions: {
             autoTitle: { refreshTurns: 5, model: "google/gemini-flash-lite-latest" },
+            handoff: { deferred: { copyToClipboard: false } },
           },
         },
         null,
@@ -147,7 +152,11 @@ describe("pi-sessions auto-title settings", () => {
       path.join(cwd, ".pi", "settings.json"),
       `${JSON.stringify(
         {
-          sessions: { autoTitle: { refreshTurns: 9, model: "openai/gpt-5.4-mini" } },
+          sessions: {
+            autoTitle: { refreshTurns: 9 },
+            subagents: { enable: false },
+            handoff: { deferred: { enable: false } },
+          },
         },
         null,
         2,
@@ -156,8 +165,11 @@ describe("pi-sessions auto-title settings", () => {
     );
 
     const settings = loadSettings();
-    expect(settings.autoTitle.refreshTurns).toBe(5);
+    expect(settings.autoTitle.refreshTurns).toBe(9);
     expect(settings.autoTitle.model).toBe("google/gemini-flash-lite-latest");
+    expect(settings.features.subagents).toBe(false);
+    expect(settings.handoff.deferred.enable).toBe(false);
+    expect(settings.handoff.deferred.copyToClipboard).toBe(false);
   });
 
   it("uses the default auto-title prompt for blank prompt settings", () => {

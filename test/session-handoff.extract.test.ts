@@ -488,7 +488,7 @@ function createHandoffSettings(persistRuns = false): HandoffSettings {
     pickerShortcut: "alt+o",
     roster: [],
     persistRuns,
-    deferred: { copyToClipboard: true },
+    deferred: { enable: true, copyToClipboard: true },
   };
 }
 

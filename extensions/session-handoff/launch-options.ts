@@ -1,5 +1,6 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { Host } from "../hosts/contract.ts";
+import type { HandoffSettings } from "../shared/settings.ts";
 import { createDeferredLaunchBackend } from "./launch/deferred.ts";
 import type { SplitLaunchBackend } from "./launch/resolution.ts";
 import {
@@ -18,7 +19,7 @@ export interface ResolvedHandoffLaunchTarget {
 export function createHandoffLaunchTargets(options: {
   pi: ExtensionAPI;
   splitBackend: SplitLaunchBackend | undefined;
-  copyDeferredToClipboard: boolean;
+  deferred: HandoffSettings["deferred"];
   additionalTargets: readonly HandoffLaunchTarget[];
   hosts?: readonly Host[];
 }): HandoffLaunchTarget[] {
@@ -35,11 +36,15 @@ export function createHandoffLaunchTargets(options: {
         ),
       )
     : [];
-  const deferred = createBackendLaunchTarget(
-    DEFERRED_LAUNCH,
-    createDeferredLaunchBackend({ copyToClipboard: options.copyDeferredToClipboard }),
-    "'deferred' creates the session and returns its resume command without opening anything.",
-  );
+  const deferredTargets = options.deferred.enable
+    ? [
+        createBackendLaunchTarget(
+          DEFERRED_LAUNCH,
+          createDeferredLaunchBackend({ copyToClipboard: options.deferred.copyToClipboard }),
+          "'deferred' creates the session and returns its resume command without opening anything.",
+        ),
+      ]
+    : [];
   return [
     ...hosts.map((host) =>
       createBackendLaunchTarget(
@@ -50,7 +55,7 @@ export function createHandoffLaunchTargets(options: {
       ),
     ),
     ...splitTargets,
-    deferred,
+    ...deferredTargets,
     ...options.additionalTargets,
   ];
 }

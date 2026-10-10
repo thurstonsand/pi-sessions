@@ -28,7 +28,11 @@ import {
 } from "./tool.ts";
 import { HANDOFF_TOOL_DETAILS_SCHEMA } from "./tool-contract.ts";
 import { HandoffToolComponent } from "./tool-renderer.ts";
-import { buildHandoffLaunchSchema, buildHandoffPromptGuidelines } from "./tool-schema.ts";
+import {
+  buildHandoffLaunchSchema,
+  buildHandoffPromptGuidelines,
+  offersSubagentLaunch,
+} from "./tool-schema.ts";
 import { buildHandoffToolView } from "./tool-view-model.ts";
 import { formatHandoffError } from "./ui.ts";
 
@@ -66,14 +70,16 @@ export function installHandoff(
     launchTargets: readonly HandoffLaunchTarget[],
     roster: HandoffRoster | undefined,
   ): void {
+    const offersSubagent = offersSubagentLaunch(launchTargets);
     pi.registerTool({
       name: "session_handoff",
       label: "Session Handoff",
       description: "Start a new Pi session with a self-contained task.",
       // Nested calls write no toolResult entry, so the board would never see the launch receipt.
       exposure: "model-only",
-      promptSnippet:
-        "Delegate bounded work to a background subagent or hand off context to another Pi session",
+      promptSnippet: offersSubagent
+        ? "Delegate bounded work to a background subagent or hand off context to another Pi session"
+        : "Hand off context to another Pi session",
       promptGuidelines: buildHandoffPromptGuidelines(launchTargets, models, roster),
       parameters: Type.Object({
         goal: Type.String({
@@ -93,8 +99,7 @@ export function installHandoff(
         ),
         requestResponse: Type.Optional(
           Type.Boolean({
-            description:
-              "Whether the child session should report completion/results of its task back to this session. Defaults to true for subagent launches and false otherwise.",
+            description: `Whether the child session should report completion/results of its task back to this session. ${offersSubagent ? "Defaults to true for subagent launches and false otherwise." : "Defaults to false."}`,
           }),
         ),
         provider: Type.Optional(
@@ -111,8 +116,9 @@ export function installHandoff(
           Type.Union(
             THINKING_LEVELS.map((level) => Type.Literal(level)),
             {
-              description:
-                "Thinking level for the child session. For directional or deferred, override only when the user requests it.",
+              description: offersSubagent
+                ? "Thinking level for the child session. For launches other than subagent, override only when the user requests it."
+                : "Thinking level for the child session. Override only when the user requests it.",
             },
           ),
         ),
@@ -215,7 +221,7 @@ export function installHandoff(
         createHandoffLaunchTargets({
           pi,
           splitBackend,
-          copyDeferredToClipboard: settings.handoff.deferred.copyToClipboard,
+          deferred: settings.handoff.deferred,
           additionalTargets: deps.getLaunchTargets?.() ?? [],
           hosts: deps.getHosts?.() ?? [],
         }),

@@ -74,6 +74,8 @@ Open the frontend implementation task in a session to the right.
 | Session Index      | `/session-index` slash command                                         | Shows index status and rebuilds the local session index |
 | Session Auto Title | in background, `/title` slash command                                  | Give sessions titles                                    |
 
+Settings live under `sessions` in `~/.pi/agent/settings.json`. A project's `.pi/settings.json` overrides them the way pi merges its own settings: nested objects merge key by key, and the project wins.
+
 Every feature is on by default. Turn one off with `enable: false` under its own settings namespace. Index recovery and startup/switch sync always run, including when search is disabled. `hooks.enable` controls turn, tree, and compaction sync, not startup recovery.
 
 ```json
@@ -199,6 +201,7 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
       "thinkingLevel": "low",
       "roster": ["anthropic/*", "openai-codex/gpt-5.6-terra:high"],
       "deferred": {
+        "enable": true,
         "copyToClipboard": true
       }
     }
@@ -209,6 +212,8 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
 `model` and `thinkingLevel` configure the agent that builds handoff prompts. They default to the new session's values when absent.
 
 `roster` limits which models a handoff may launch a child session on. Defaults to pi's own `enabledModels` scoping, then to all configured models. May optionally include a thinking level; listing a model more than once adds to the levels it allows.
+
+`deferred.enable` (default `true`) offers the `deferred` launch. Turn it off, along with `sessions.subagents.enable`, to leave only host and split launches.
 
 `deferred.copyToClipboard` (default `true`) controls whether deferred handoffs copy the resume command to the clipboard. When off, the resume command is only shown in the tool call.
 

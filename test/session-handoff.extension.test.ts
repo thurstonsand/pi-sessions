@@ -61,7 +61,7 @@ beforeEach(() => {
       pickerShortcut: "alt+o",
       persistRuns: false,
       roster: [],
-      deferred: { copyToClipboard: true },
+      deferred: { enable: true, copyToClipboard: true },
     },
     index: { path: "/tmp/pi-sessions/index.sqlite" },
     autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
@@ -156,7 +156,7 @@ describe("session handoff extension", () => {
         pickerShortcut: "alt+p",
         persistRuns: false,
         roster: [],
-        deferred: { copyToClipboard: true },
+        deferred: { enable: true, copyToClipboard: true },
       },
       index: { path: "/tmp/pi-sessions/index.sqlite" },
       autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
@@ -270,11 +270,45 @@ describe("session handoff extension", () => {
     const definition = registerTool.mock.calls.at(-1)?.[0];
     expect(launchValues(definition)).toEqual(["deferred"]);
     expect(promptGuidelines(definition)).toEqual([
-      "Use session_handoff directional or deferred launches only when the user requests one.",
+      "Use session_handoff deferred launches only when the user requests one.",
       "Leave provider and model unset to run the handoff on this session's current model.",
       "To run the handoff on a different model, set both provider and model together (both are required).",
       "Only override the model when the task clearly warrants it.",
     ]);
+  });
+
+  it("offers only the registered host when deferred handoffs are disabled", async () => {
+    mockLoadSettings.mockReturnValue({
+      ...mockLoadSettings(),
+      handoff: {
+        ...mockLoadSettings().handoff,
+        deferred: { enable: false, copyToClipboard: true },
+      },
+    });
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+
+    installHandoffAndWire(
+      installHandoff,
+      pi,
+      [],
+      [{ name: "swb", launch: vi.fn().mockResolvedValue({ success: true }) }],
+    );
+    await handlers.get("session_start")?.(
+      {},
+      createSessionStartContext({ sessionId: "x" }) as never,
+    );
+
+    const definition = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as {
+      promptSnippet: string;
+    };
+    expect(launchValues(definition)).toEqual(["swb"]);
+    expect(definition.promptSnippet).toBe("Hand off context to another Pi session");
+    expect(promptGuidelines(definition)[0]).toBe(
+      "Use session_handoff host launches only when the user requests one.",
+    );
+    expect(JSON.stringify(definition)).not.toMatch(/subagent|deferred/);
   });
 
   it("offers an injected subagent target and defaults its response request to true", async () => {
@@ -505,7 +539,7 @@ describe("session handoff extension", () => {
         pickerShortcut: "alt+o",
         persistRuns: false,
         roster: [parseModelSelection("openai/*")],
-        deferred: { copyToClipboard: true },
+        deferred: { enable: true, copyToClipboard: true },
       },
       index: { path: "/tmp/pi-sessions/index.sqlite" },
       autoTitle: { refreshTurns: 4, model: undefined, prompt: "Default auto-title prompt" },
@@ -587,6 +621,7 @@ function installHandoffAndWire(
   installHandoff: typeof import("../extensions/session-handoff/install.ts").installHandoff,
   pi: ReturnType<typeof createPiApi>,
   additionalTargets: readonly import("../extensions/session-handoff/launch-target.ts").HandoffLaunchTarget[] = [],
+  hosts: readonly import("../extensions/hosts/contract.ts").Host[] = [],
 ): void {
   const settings = mockLoadSettings() as { index: { path: string } };
   const lifecycle = installHandoff(pi as never, {
@@ -598,6 +633,7 @@ function installHandoffAndWire(
         available: modelRegistry.getAvailable(),
       }) as never,
     getLaunchTargets: () => additionalTargets,
+    getHosts: () => hosts,
     board: {},
   });
   if (lifecycle.onSessionStart) {

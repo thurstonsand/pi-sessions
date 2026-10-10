@@ -66,7 +66,7 @@ async function installCommand(): Promise<{
       handoff: {
         pickerShortcut: "alt+o",
         persistRuns: false,
-        deferred: { copyToClipboard: true },
+        deferred: { enable: true, copyToClipboard: true },
       },
     } as never,
     index: { path: "/tmp/index.sqlite" },

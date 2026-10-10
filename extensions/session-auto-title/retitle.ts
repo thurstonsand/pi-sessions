@@ -279,7 +279,7 @@ async function retitleStoredSession(
     model,
     titleContext,
     plan.reason,
-    generation,
+    { ...generation, sessionId: sessionManager.getSessionId() },
   );
   if (!generatedTitle.ok) {
     return "failed";

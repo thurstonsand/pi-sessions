@@ -7,6 +7,15 @@ import type { AutoTitleTrigger } from "./state.ts";
 
 const AUTO_TITLE_CHAR_MAX = 80;
 
+function isOpenCodeHost(baseUrl: string): boolean {
+  try {
+    const { hostname } = new URL(baseUrl);
+    return hostname === "opencode.ai" || hostname.endsWith(".opencode.ai");
+  } catch {
+    return false;
+  }
+}
+
 export interface AutoTitleFailure {
   at: string;
   trigger: AutoTitleTrigger;
@@ -20,6 +29,7 @@ export interface AutoTitleGeneration {
   tokenBudget: number;
   thinkingLevel: ThinkingLevel | undefined;
   persistRuns: boolean;
+  sessionId: string | undefined;
 }
 
 export type AutoTitleGenerationResult =
@@ -88,6 +98,14 @@ export async function generateAutoTitle(
         {
           maxTokens: generation.tokenBudget,
           ...(thinkingLevel && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
+          // opencode.ai rejects requests without this header; pi adds it in its own request
+          // wrapper (provider-attribution), which this direct modelRegistry call bypasses.
+          transformHeaders: async (requestHeaders) => ({
+            ...requestHeaders,
+            ...(generation.sessionId && isOpenCodeHost(model.baseUrl)
+              ? { "x-opencode-session": generation.sessionId, "x-opencode-client": "pi" }
+              : {}),
+          }),
           signal: abortController.signal,
           cacheRetention: "none",
         },

@@ -334,6 +334,7 @@ describe("session picker mouse", () => {
       clearScreen() {},
       setTitle() {},
       setProgress() {},
+      setProgramStatus() {},
     };
     const copySelection = vi.fn(async (_text: string) => true);
     const tui = new TuiAltScreen(terminal, false, undefined, { copySelection });

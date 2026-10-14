@@ -2,6 +2,16 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.18.0] - 2026-10-14
+
+### Fixed
+
+- Auto-title requests now carry the titled session's id, so session-routed providers such as OpenCode Go accept them instead of rejecting every request with `400 MissingSessionID`. Bulk `/title` runs send each stored session's own id.
+
+### Changed
+
+- Updated Pi development dependencies to 1.1.0 and Renovate to 44.148.5.
+
 ## [0.17.0] - 2026-10-10
 
 ### Added

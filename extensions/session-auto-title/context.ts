@@ -6,6 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 
 export interface AutoTitleContext {
+  sessionId: string;
   cwd: string | undefined;
   currentTitle: string | undefined;
   conversationText: string;
@@ -16,7 +17,7 @@ export interface AutoTitleContext {
 export function buildAutoTitleContext(
   entries: SessionEntry[],
   leafId: string | null,
-  options?: { cwd?: string; currentTitle?: string | undefined },
+  options: { sessionId: string; cwd: string | undefined; currentTitle: string | undefined },
 ): AutoTitleContext {
   const sessionContext = buildSessionContext(entries, leafId);
   const conversationText = serializeConversation(convertToLlm(sessionContext.messages));
@@ -32,8 +33,9 @@ export function buildAutoTitleContext(
   }
 
   return {
-    cwd: options?.cwd,
-    currentTitle: options?.currentTitle,
+    sessionId: options.sessionId,
+    cwd: options.cwd,
+    currentTitle: options.currentTitle,
     conversationText,
     userTurnCount,
     assistantTurnCount,

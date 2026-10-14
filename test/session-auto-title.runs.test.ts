@@ -22,6 +22,7 @@ afterEach(() => {
 });
 
 const titleContext = {
+  sessionId: "session-under-test",
   cwd: "/repo/app",
   currentTitle: undefined,
   conversationText: "user: rename the widget factory",

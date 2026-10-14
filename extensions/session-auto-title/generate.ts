@@ -90,6 +90,7 @@ export async function generateAutoTitle(
           ...(thinkingLevel && thinkingLevel !== "off" ? { reasoning: thinkingLevel } : {}),
           signal: abortController.signal,
           cacheRetention: "none",
+          sessionId: context.sessionId,
         },
       )
       .result();

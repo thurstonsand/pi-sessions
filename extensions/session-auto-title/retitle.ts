@@ -202,6 +202,7 @@ export async function runRetitlePlan(
     ctx.sessionManager.getEntries(),
     ctx.sessionManager.getLeafId(),
     {
+      sessionId: ctx.sessionManager.getSessionId(),
       cwd: ctx.cwd,
       currentTitle: plan.currentTitle,
     },
@@ -265,6 +266,7 @@ async function retitleStoredSession(
     sessionManager.getEntries(),
     sessionManager.getLeafId(),
     {
+      sessionId: sessionManager.getSessionId(),
       cwd: sessionManager.getCwd(),
       currentTitle,
     },

@@ -54,6 +54,29 @@ describe("session auto-title extension", () => {
     expect(pi.setSessionName).toHaveBeenCalledWith("Resolved Title");
   });
 
+  it("sends the titled session's id so session-routed providers accept the request", async () => {
+    const { installAutoTitle } = await import("../extensions/session-auto-title/install.ts");
+    const { commands, pi } = createExtensionApi();
+
+    const lifecycle = installAutoTitle(pi as never, buildDeps());
+    const title = commands.get("title");
+    const ctx = createRetitleContext({
+      availableModels: [],
+      currentModel: { provider: "opencode-go", id: "mimo-v2.6-flash" },
+    });
+    completeSimpleMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "Routed Title" }],
+    });
+
+    await lifecycle.onSessionStart?.({} as never, ctx as never);
+    await title?.("", ctx as never);
+
+    expect(completeSimpleMock.mock.calls[0]?.[2]).toMatchObject({
+      sessionId: "session-under-test",
+    });
+  });
+
   it("uses the configured auto-title prompt in the user request", async () => {
     loadSettingsMock.mockReturnValue({
       autoTitle: {
@@ -109,6 +132,7 @@ describe("session auto-title extension", () => {
       modelRuntime,
       { provider: "openai", id: "gpt-5.4-mini" } as never,
       {
+        sessionId: "session-under-test",
         cwd: "/repo/app",
         currentTitle: "Existing Title",
         conversationText: "user: keep working",
@@ -128,6 +152,7 @@ describe("session auto-title extension", () => {
       modelRuntime,
       { provider: "openai", id: "gpt-5.4-mini" } as never,
       {
+        sessionId: "session-under-test",
         cwd: "/repo/app",
         currentTitle: "Existing Title",
         conversationText: "user: keep working",
@@ -177,6 +202,7 @@ describe("session auto-title extension", () => {
       createRuntime(ctx),
       { provider: "mockvllm", id: "sidecar-ornith-9b" } as never,
       {
+        sessionId: "session-under-test",
         cwd: "/repo/app",
         currentTitle: undefined,
         conversationText: "user: hello",
@@ -215,6 +241,7 @@ describe("session auto-title extension", () => {
       createRuntime(ctx),
       { provider: "openai", id: "gpt-5.4-mini" } as never,
       {
+        sessionId: "session-under-test",
         cwd: "/repo/app",
         currentTitle: undefined,
         conversationText: "user: hello",
@@ -246,6 +273,7 @@ describe("session auto-title extension", () => {
     });
 
     const titleContext = {
+      sessionId: "session-under-test",
       cwd: "/repo/app",
       currentTitle: undefined,
       conversationText: "user: hello",
@@ -444,6 +472,9 @@ function createRetitleContext(options: {
       },
       getSessionFile() {
         return "/tmp/session.jsonl";
+      },
+      getSessionId() {
+        return "session-under-test";
       },
       getSessionName() {
         return undefined;

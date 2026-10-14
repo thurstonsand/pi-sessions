@@ -50,7 +50,7 @@ describe("pi-sessions auto-title settings", () => {
           sessions: {
             autoTitle: {
               refreshTurns: 6,
-              tokenBudget: 512,
+              tokenBudget: 1024,
               model: " openai/gpt-5.4-mini ",
               prompt: " Use terse subsystem titles. ",
               persistRuns: true,
@@ -65,7 +65,7 @@ describe("pi-sessions auto-title settings", () => {
 
     const settings = loadSettings();
     expect(settings.autoTitle.refreshTurns).toBe(6);
-    expect(settings.autoTitle.tokenBudget).toBe(512);
+    expect(settings.autoTitle.tokenBudget).toBe(1024);
     expect(settings.autoTitle.model).toBe("openai/gpt-5.4-mini");
     expect(settings.autoTitle.prompt).toBe("Use terse subsystem titles.");
     expect(settings.autoTitle.persistRuns).toBe(true);

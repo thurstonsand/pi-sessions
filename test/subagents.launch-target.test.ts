@@ -31,6 +31,7 @@ describe("subagent launch target", () => {
         childSessionId: "child-session",
         ownerSessionId: parentId,
         requestResponse: true,
+        agent: undefined,
       }),
     ).toEqual({
       childSessionId: "child-session",

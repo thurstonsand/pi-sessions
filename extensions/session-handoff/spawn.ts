@@ -21,6 +21,7 @@ export function prepareHandoffLaunch(options: {
   parentSessionFile: string;
   title: string;
   model: string | undefined;
+  tools: readonly string[] | undefined;
   approveProjectTrust: boolean;
   useDefaultSessionDir?: boolean;
   buildBootstrap: (sessionId: string) => HandoffBootstrap;
@@ -54,6 +55,7 @@ export function prepareHandoffLaunch(options: {
     sessionId: manager.getSessionId(),
     sessionDir: manager.usesDefaultSessionDir() ? undefined : manager.getSessionDir(),
     model: options.model,
+    tools: options.tools,
     approveProjectTrust: options.approveProjectTrust,
   });
 
@@ -94,6 +96,7 @@ export function buildPiResumeCommand(options: {
   sessionId: string;
   sessionDir?: string | undefined;
   model?: string | undefined;
+  tools?: readonly string[] | undefined;
   approveProjectTrust: boolean;
 }): string {
   const args = ["pi"];
@@ -106,6 +109,9 @@ export function buildPiResumeCommand(options: {
   }
   if (options.model) {
     args.push("--model", shellQuote(options.model));
+  }
+  if (options.tools) {
+    args.push("--tools", shellQuote(options.tools.join(",")));
   }
 
   const command = args.join(" ");

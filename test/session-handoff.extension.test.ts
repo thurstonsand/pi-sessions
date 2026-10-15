@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createChildGeneratedHandoffBootstrap,
@@ -57,6 +60,7 @@ beforeEach(() => {
   vi.clearAllMocks();
 
   mockLoadSettings.mockReturnValue({
+    subagents: { maxDepth: 2, agentsDir: "/nonexistent/pi-sessions-agents" },
     handoff: {
       pickerShortcut: "alt+o",
       persistRuns: false,
@@ -356,6 +360,139 @@ describe("session handoff extension", () => {
     expect(result.content[0]?.text).toContain('"requestResponse": true');
   });
 
+  it("offers agent profiles on subagent_launch and launches the child as one", async () => {
+    useAgentProfiles({
+      "oracle.md": [
+        "---",
+        "name: oracle",
+        "description: Read-only second opinion on a plan or diff.",
+        "model: anthropic/claude-fable-5-1:high",
+        "---",
+        "You review. You do not edit.",
+      ].join("\n"),
+    });
+    const target = createSubagentTarget();
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi, [target]);
+
+    const result = await runTool(
+      pi,
+      handlers,
+      { goal: "Review the plan", title: "Review", requestResponse: true, agent: "oracle" },
+      { availableModels: PROFILE_MODELS },
+    );
+
+    const definitions = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls.map(
+      (call) => call[0] as { name: string; parameters: { properties: Record<string, unknown> } },
+    );
+    const peer = definitions.find((definition) => definition.name === "session_handoff");
+    const subagent = definitions.find((definition) => definition.name === "subagent_launch");
+    expect(peer?.parameters.properties).not.toHaveProperty("agent");
+    expect(promptGuidelines(peer).join("\n")).not.toContain("oracle");
+    expect(subagent?.parameters.properties).toHaveProperty("agent");
+    expect(promptGuidelines(subagent).slice(-2)).toEqual([
+      "Set agent to run a subagent as one of the agent profiles below when its description fits the task; the profile supplies the model, so leave provider, model, and thinkingLevel unset unless the user asks otherwise.",
+      'Agent profile "oracle": Read-only second opinion on a plan or diff.',
+    ]);
+
+    expect(mockPrepareHandoffLaunch).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "anthropic/claude-fable-5-1:high", tools: undefined }),
+    );
+    const preparation = mockPrepareHandoffLaunch.mock.calls.at(-1)?.[0] as {
+      buildBootstrap: (sessionId: string) => { subagent: { agent?: unknown } };
+    };
+    expect(preparation.buildBootstrap("child-session-999").subagent.agent).toEqual({
+      name: "oracle",
+      instructions: "You review. You do not edit.",
+    });
+    expect(result.details).toMatchObject({ provider: "anthropic", thinkingLevel: "high" });
+  });
+
+  it("lets explicit model choices override a profile's and keeps the report tool", async () => {
+    useAgentProfiles({
+      "oracle.md": [
+        "---",
+        "name: oracle",
+        "description: Reviewer.",
+        "model: anthropic/claude-fable-5-1:high",
+        "thinkingLevel: xhigh",
+        "tools: read,grep",
+        "---",
+        "Review.",
+      ].join("\n"),
+    });
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi, [createSubagentTarget()]);
+
+    await runTool(
+      pi,
+      handlers,
+      {
+        goal: "Review the plan",
+        title: "Review",
+        requestResponse: true,
+        agent: "oracle",
+        provider: "openai",
+        model: "gpt-5.4",
+      },
+      { availableModels: PROFILE_MODELS },
+    );
+
+    expect(mockPrepareHandoffLaunch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "openai/gpt-5.4:xhigh",
+        tools: ["read", "grep", "submit_task_report"],
+      }),
+    );
+  });
+
+  it("holds a profile's model to the handoff roster", async () => {
+    useAgentProfiles({
+      "oracle.md":
+        "---\nname: oracle\ndescription: Reviewer.\nmodel: anthropic/claude-fable-5-1\n---\nReview.\n",
+    });
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi, [createSubagentTarget()]);
+
+    await expect(
+      runTool(
+        pi,
+        handlers,
+        { goal: "Review", title: "Review", requestResponse: true, agent: "oracle" },
+        { availableModels: PROFILE_MODELS, scopedModels: [{ model: PROFILE_MODELS[0] }] },
+      ),
+    ).rejects.toThrow(
+      'Model "anthropic/claude-fable-5-1" is not on the handoff roster. Allowed models: openai/gpt-5.4.',
+    );
+    expect(mockPrepareHandoffLaunch).not.toHaveBeenCalled();
+  });
+
+  it("refuses an agent profile on a peer launch", async () => {
+    useAgentProfiles({
+      "oracle.md": "---\nname: oracle\ndescription: Reviewer.\n---\nReview.\n",
+    });
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi);
+
+    await expect(
+      runTool(pi, handlers, {
+        goal: "Review",
+        title: "Review",
+        launch: "deferred",
+        requestResponse: false,
+        agent: "oracle",
+      }),
+    ).rejects.toThrow("Agent profiles apply only to subagent launches.");
+  });
+
   it("rejects overlong titles before preparing a child session", async () => {
     const { installHandoff } = await import("../extensions/session-handoff/install.ts");
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
@@ -522,7 +659,7 @@ describe("session handoff extension", () => {
   it("restricts the advertised and accepted models to a configured roster", async () => {
     mockLoadSettings.mockReturnValue({
       features: {},
-      subagents: { maxDepth: 2 },
+      subagents: { maxDepth: 2, agentsDir: "/nonexistent/pi-sessions-agents" },
       handoff: {
         pickerShortcut: "alt+o",
         persistRuns: false,
@@ -604,6 +741,43 @@ describe("session handoff extension", () => {
     expect(ctx.shutdown).not.toHaveBeenCalled();
   });
 });
+
+const PROFILE_MODELS = [
+  { provider: "openai", id: "gpt-5.4" },
+  { provider: "anthropic", id: "claude-fable-5-1" },
+];
+
+function useAgentProfiles(files: Record<string, string>): void {
+  const agentsDir = mkdtempSync(join(tmpdir(), "pi-sessions-agents-"));
+  for (const [name, content] of Object.entries(files)) {
+    writeFileSync(join(agentsDir, name), content);
+  }
+  const settings = mockLoadSettings() as Record<string, unknown>;
+  mockLoadSettings.mockReturnValue({ ...settings, subagents: { maxDepth: 2, agentsDir } });
+}
+
+function createSubagentTarget() {
+  return {
+    value: "subagent" as const,
+    bootstrapMode: "automatic" as const,
+    approveProjectTrust: true,
+    requiredTools: ["submit_task_report"],
+    describeSubagentChild: (input: {
+      childSessionId: string;
+      ownerSessionId: string;
+      requestResponse: boolean;
+      agent: { name: string; instructions: string } | undefined;
+    }) => ({
+      childSessionId: input.childSessionId,
+      ownerSessionId: input.ownerSessionId,
+      depth: 1,
+      requestResponse: input.requestResponse,
+      ...(input.agent ? { agent: input.agent } : {}),
+    }),
+    prepareChild: vi.fn(),
+    launch: vi.fn().mockResolvedValue({ success: true, backend: "tmux" }),
+  };
+}
 
 function installHandoffAndWire(
   installHandoff: typeof import("../extensions/session-handoff/install.ts").installHandoff,

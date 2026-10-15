@@ -53,6 +53,28 @@ export function resolveChildModel(
 }
 
 /**
+ * Resolves an agent profile's model. The pattern is user-written, so it gets Pi's
+ * CLI grammar, but the model it lands on must still clear the roster.
+ */
+export function resolveProfileModel(
+  modelRuntime: ModelRuntime,
+  roster: HandoffRoster | undefined,
+  modelPattern: string,
+  thinkingLevel: ThinkingLevel | undefined,
+): HandoffModelOverride {
+  const resolved = resolveModelPattern(modelRuntime, modelPattern, thinkingLevel);
+  if (!roster) {
+    return resolved;
+  }
+  return resolveChildModel(
+    modelRuntime,
+    roster,
+    { provider: resolved.model.provider, modelId: resolved.model.id },
+    resolved.thinkingLevel,
+  );
+}
+
+/**
  * Resolves a user-configured model pattern with Pi's CLI grammar, including fuzzy
  * aliases. Only for settings the user writes by hand; never for a model's choice.
  */

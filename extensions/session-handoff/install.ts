@@ -8,6 +8,11 @@ import { isTuiMode } from "../shared/pi-mode.ts";
 import type { SessionSettings } from "../shared/settings.ts";
 import { THINKING_LEVELS } from "../shared/thinking-levels.ts";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
+import {
+  type AgentProfileCatalog,
+  EMPTY_AGENT_PROFILE_CATALOG,
+  loadAgentProfiles,
+} from "./agent-profiles.ts";
 import { type HandoffBoardServices, openHandoffBoard } from "./board.ts";
 import { consumePendingHandoffBootstrap } from "./bootstrap.ts";
 import { renderHandoffBootstrapFailedEntry } from "./bootstrap-failed-renderer.ts";
@@ -64,9 +69,11 @@ export function installHandoff(
     models: readonly Model<Api>[],
     launchTargets: readonly HandoffLaunchTarget[],
     roster: HandoffRoster | undefined,
+    agentProfiles: AgentProfileCatalog,
     name: "session_handoff" | "subagent_launch",
   ): void {
     const offersSubagent = offersSubagentLaunch(launchTargets);
+    const offersAgents = name === "subagent_launch" && agentProfiles.profiles.length > 0;
     pi.registerTool({
       name,
       label: "Session Handoff",
@@ -76,7 +83,12 @@ export function installHandoff(
       promptSnippet: offersSubagent
         ? "Delegate bounded work to a background subagent"
         : "Hand off context to another Pi session",
-      promptGuidelines: buildHandoffPromptGuidelines(launchTargets, models, roster),
+      promptGuidelines: buildHandoffPromptGuidelines(
+        launchTargets,
+        models,
+        roster,
+        offersAgents ? agentProfiles.profiles : [],
+      ),
       parameters: Type.Object({
         goal: Type.String({
           description:
@@ -117,6 +129,16 @@ export function installHandoff(
             },
           ),
         ),
+        ...(offersAgents
+          ? {
+              agent: Type.Optional(
+                Type.String({
+                  description:
+                    "Agent profile to run the subagent as. The profile adds instructions to the subagent's system prompt and may set its model and thinking level; explicit provider/model and thinkingLevel take precedence.",
+                }),
+              ),
+            }
+          : {}),
       }),
       renderCall(args, theme, context) {
         const state = context.state as HandoffToolRendererState;
@@ -151,14 +173,18 @@ export function installHandoff(
         if (typeof launch !== "string") throw new Error("session_handoff requires launch.");
         if (name === "subagent_launch" && !deps.getLaunchTargets?.().length)
           throw new Error("Subagent launch is unavailable.");
+        const { agent, ...rest } = params;
+        if (agent !== undefined && typeof agent !== "string")
+          throw new Error("agent must name an agent profile.");
         const modelRuntime = await deps.getModelRuntime(ctx.modelRegistry);
         return executeSessionHandoffTool(
           pi,
-          { ...params, launch },
+          { ...rest, launch, ...(agent === undefined ? {} : { agent }) },
           ctx,
           modelRuntime,
           launchTargets,
           roster,
+          agentProfiles,
           (sessionId, status) => clipboardStatusBySessionId.set(sessionId, status),
         );
       },
@@ -222,6 +248,10 @@ export function installHandoff(
         patterns: settings.handoff.roster,
         scopedModels: ctx.scopedModels,
       });
+      const subagentTargets = deps.getLaunchTargets?.() ?? [];
+      const agentProfiles = subagentTargets.length
+        ? loadAgentProfiles(settings.subagents.agentsDir)
+        : EMPTY_AGENT_PROFILE_CATALOG;
       if (!deps.claimsPeers?.()) {
         registerHandoffTool(
           models,
@@ -232,15 +262,15 @@ export function installHandoff(
             additionalTargets: [],
           }),
           roster,
+          EMPTY_AGENT_PROFILE_CATALOG,
           "session_handoff",
         );
         pi.setActiveTools([...new Set([...pi.getActiveTools(), "session_handoff"])]);
       } else {
         pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "session_handoff"));
       }
-      const subagentTargets = deps.getLaunchTargets?.() ?? [];
       if (subagentTargets.length) {
-        registerHandoffTool(models, subagentTargets, roster, "subagent_launch");
+        registerHandoffTool(models, subagentTargets, roster, agentProfiles, "subagent_launch");
         pi.setActiveTools([...new Set([...pi.getActiveTools(), "subagent_launch"])]);
       } else {
         pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "subagent_launch"));

@@ -2,7 +2,7 @@ import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { formatError } from "../shared/errors.ts";
 import type { ClipboardStatus, LaunchBackend } from "./launch/backend.ts";
-import type { HandoffSubagent } from "./metadata.ts";
+import type { HandoffSubagent, HandoffSubagentAgent } from "./metadata.ts";
 import type { PreparedHandoff } from "./spawn.ts";
 
 export const DEFERRED_LAUNCH = "deferred" as const;
@@ -61,11 +61,14 @@ export interface HandoffLaunchTarget {
   /** Unattended children skip the startup trust prompt; watched ones let the user answer it. */
   approveProjectTrust: boolean;
   useDefaultSessionDir?: boolean;
+  /** Tools the child keeps when an agent profile narrows its tool allowlist. */
+  requiredTools?: readonly string[];
   /** Subagent launches stamp their child's identity into the child bootstrap. */
   describeSubagentChild?(input: {
     childSessionId: string;
     ownerSessionId: string;
     requestResponse: boolean;
+    agent: HandoffSubagentAgent | undefined;
   }): HandoffSubagent;
   prepareChild(input: HandoffLaunchTargetPreparation): void;
   launch(input: HandoffLaunchTargetInput): Promise<HandoffLaunchTargetOutcome>;

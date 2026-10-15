@@ -21,12 +21,14 @@ export function createSubagentLaunchTarget(
       "'subagent' delegates one task to a detached tmux worker and requests a report by default.",
     bootstrapMode: "automatic",
     approveProjectTrust: true,
+    requiredTools: ["submit_task_report"],
     describeSubagentChild(input) {
       return {
         childSessionId: input.childSessionId,
         ownerSessionId: input.ownerSessionId,
         depth: state.depth + 1,
         requestResponse: input.requestResponse,
+        ...(input.agent ? { agent: input.agent } : {}),
       };
     },
     prepareChild(input) {

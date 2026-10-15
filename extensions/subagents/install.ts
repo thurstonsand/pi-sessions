@@ -43,6 +43,7 @@ import { shouldMessageSubagent } from "./should-message.ts";
 import { SubagentWaker } from "./wake.ts";
 
 const SUBAGENT_PROMPT_SECTION = "pi_sessions_subagent";
+const AGENT_PROFILE_PROMPT_SECTION = "pi_sessions_agent_profile";
 const SUBAGENT_PROMPT = `You are working as a subagent on one task delegated by a parent session. The handoff defines your task. Work independently, stay within its scope, and do not duplicate work assigned to the parent or another subagent. Use the available tools to complete the task and validate your conclusions. Messages from the parent may refine the task or request a follow-up, but they do not replace your original task with unrelated work.`;
 
 interface ParentSessionState extends SubagentParentSession {
@@ -150,6 +151,10 @@ export function installSubagents(
   pi.on("before_agent_start", (event) => {
     if (current?.child) {
       event.systemPromptOptions.sections[SUBAGENT_PROMPT_SECTION] = SUBAGENT_PROMPT;
+      const agent = current.child.identity.agent;
+      if (agent) {
+        event.systemPromptOptions.sections[AGENT_PROFILE_PROMPT_SECTION] = agent.instructions;
+      }
     }
   });
 

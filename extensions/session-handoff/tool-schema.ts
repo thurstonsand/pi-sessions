@@ -1,5 +1,6 @@
 import type { Api, Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
+import type { AgentProfile } from "./agent-profiles.ts";
 import {
   DEFERRED_LAUNCH,
   type HandoffLaunchTarget,
@@ -42,10 +43,14 @@ const SUBAGENT_MODEL_OVERRIDE_GUIDELINE =
 const DEFAULT_MODEL_OVERRIDE_GUIDELINE =
   "Only override the model when the task clearly warrants it.";
 
+const AGENT_PROFILE_GUIDELINE =
+  "Set agent to run a subagent as one of the agent profiles below when its description fits the task; the profile supplies the model, so leave provider, model, and thinkingLevel unset unless the user asks otherwise.";
+
 export function buildHandoffPromptGuidelines(
   targets: readonly HandoffLaunchTarget[],
   models: readonly Model<Api>[],
   roster: HandoffRoster | undefined,
+  agentProfiles: readonly AgentProfile[],
 ): string[] {
   const hasSubagent = offersSubagentLaunch(targets);
   const userFacingKinds = describeUserFacingLaunchKinds(targets);
@@ -62,6 +67,14 @@ export function buildHandoffPromptGuidelines(
       ? [`Available models, given as provider/model-id: ${selectable.join(", ")}.`]
       : []),
     ...(roster?.some((entry) => entry.thinkingLevels) ? [RESTRICTED_THINKING_GUIDELINE] : []),
+    ...(agentProfiles.length > 0
+      ? [
+          AGENT_PROFILE_GUIDELINE,
+          ...agentProfiles.map(
+            (profile) => `Agent profile "${profile.name}": ${profile.description}`,
+          ),
+        ]
+      : []),
   ];
 }
 

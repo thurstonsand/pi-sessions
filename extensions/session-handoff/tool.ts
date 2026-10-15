@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ExtensionAPI, ExtensionContext, ModelRuntime } from "@earendil-works/pi-coding-agent";
+import { type AgentProfileCatalog, requireAgentProfile } from "./agent-profiles.ts";
 import { resolveHandoffSource } from "./extract.ts";
 import type { ClipboardStatus } from "./launch/backend.ts";
 import { resolveHandoffLaunchTarget } from "./launch-options.ts";
@@ -10,9 +11,10 @@ import {
   DEFERRED_LAUNCH,
   type HandoffLaunchTarget,
   type HandoffLaunchValue,
+  SUBAGENT_LAUNCH,
 } from "./launch-target.ts";
 import { createChildGeneratedHandoffBootstrap } from "./metadata.ts";
-import { formatModelArgument, resolveChildModel } from "./model.ts";
+import { formatModelArgument, resolveChildModel, resolveProfileModel } from "./model.ts";
 import { buildLaunchReceipt } from "./receipt.ts";
 import type { HandoffRoster } from "./roster.ts";
 import { formatHandoffLaunchFailure, prepareHandoffLaunch } from "./spawn.ts";
@@ -32,6 +34,7 @@ export interface HandoffToolParams {
   provider?: string | undefined;
   model?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
+  agent?: string | undefined;
 }
 
 export async function executeSessionHandoffTool(
@@ -41,6 +44,7 @@ export async function executeSessionHandoffTool(
   modelRuntime: ModelRuntime,
   launchTargets: readonly HandoffLaunchTarget[],
   roster: HandoffRoster | undefined,
+  agentProfiles: AgentProfileCatalog,
   recordClipboardStatus: (sessionId: string, status: ClipboardStatus) => void,
 ) {
   const goal = params.goal.trim();
@@ -61,6 +65,11 @@ export async function executeSessionHandoffTool(
   }
 
   const { target, degradedFrom } = resolveHandoffLaunchTarget(params.launch, launchTargets);
+  if (params.agent !== undefined && target.value !== SUBAGENT_LAUNCH) {
+    throw new Error("Agent profiles apply only to subagent launches.");
+  }
+  const profile =
+    params.agent === undefined ? undefined : requireAgentProfile(agentProfiles, params.agent);
 
   const targetCwd = resolveHandoffCwd(ctx.cwd, params.cwd);
   if (targetCwd.error) {
@@ -90,12 +99,15 @@ export async function executeSessionHandoffTool(
   if (Boolean(provider) !== Boolean(modelId)) {
     throw new Error("session_handoff requires provider and model together, or neither.");
   }
+  const requestedThinkingLevel = params.thinkingLevel ?? profile?.thinkingLevel;
   const override =
     provider && modelId
-      ? resolveChildModel(modelRuntime, roster, { provider, modelId }, params.thinkingLevel)
-      : undefined;
+      ? resolveChildModel(modelRuntime, roster, { provider, modelId }, requestedThinkingLevel)
+      : profile?.model
+        ? resolveProfileModel(modelRuntime, roster, profile.model, requestedThinkingLevel)
+        : undefined;
   const childModel = override?.model ?? ctx.model;
-  const thinkingLevel = override?.thinkingLevel ?? params.thinkingLevel ?? pi.getThinkingLevel();
+  const thinkingLevel = override?.thinkingLevel ?? requestedThinkingLevel ?? pi.getThinkingLevel();
   const model = formatModelArgument(childModel, thinkingLevel);
   if (!model) {
     throw new Error("No active model is available for the handoff.");
@@ -107,6 +119,7 @@ export async function executeSessionHandoffTool(
     parentSessionFile,
     title,
     model,
+    tools: profile?.tools && [...new Set([...profile.tools, ...(target.requiredTools ?? [])])],
     approveProjectTrust: target.approveProjectTrust,
     useDefaultSessionDir: target.useDefaultSessionDir ?? false,
     buildBootstrap: (sessionId) =>
@@ -123,6 +136,7 @@ export async function executeSessionHandoffTool(
           childSessionId: sessionId,
           ownerSessionId: ctx.sessionManager.getSessionId(),
           requestResponse,
+          agent: profile && { name: profile.name, instructions: profile.instructions },
         }),
       }),
     prepareChild: (manager, childSessionId) =>

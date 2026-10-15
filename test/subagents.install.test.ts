@@ -397,8 +397,32 @@ describe("subagent installation", () => {
     expect(event.systemPromptOptions.sections.pi_sessions_subagent).toContain(
       "You are working as a subagent on one task delegated by a parent session.",
     );
+    expect(event.systemPromptOptions.sections.pi_sessions_agent_profile).toBeUndefined();
     expect(event.systemPromptOptions.sections.other_extension).toBe("Current instructions");
     expect(event.systemPrompt).toBe("Old rendered prompt");
+  });
+
+  it("adds a launched agent profile's instructions to the child's prompt", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true });
+    const handle = installSubagents(pi as never, createDeps(2));
+    const entries = pendingChildEntries(1, true) as Array<{
+      data: { subagent: Record<string, unknown> };
+    }>;
+    const bootstrap = entries[0];
+    if (!bootstrap) throw new Error("missing bootstrap");
+    bootstrap.data.subagent.agent = { name: "oracle", instructions: "Review; do not edit." };
+    const ctx = createContext(childId, entries);
+
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    const event = createPromptEvent();
+    await handlers.get("before_agent_start")?.(event, ctx);
+
+    expect(event.systemPromptOptions.sections.pi_sessions_subagent).toContain(
+      "You are working as a subagent",
+    );
+    expect(event.systemPromptOptions.sections.pi_sessions_agent_profile).toBe(
+      "Review; do not edit.",
+    );
   });
 
   it("does not recognize a child from a cancelled bootstrap", async () => {

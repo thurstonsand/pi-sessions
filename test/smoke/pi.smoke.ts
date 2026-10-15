@@ -206,6 +206,23 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
       },
     }),
   );
+  if (!withHost) {
+    // The standalone worker runs as an agent profile from Pi's default agents directory.
+    mkdirSync(join(agentDir, "agents"));
+    writeFileSync(
+      join(agentDir, "agents", "smoke-reviewer.md"),
+      [
+        "---",
+        "name: smoke-reviewer",
+        "description: Credential-free reviewer profile.",
+        "model: smoke/scripted",
+        "tools: read",
+        "---",
+        "SMOKE_PROFILE_INSTRUCTIONS",
+      ].join("\n"),
+    );
+    writeFileSync(join(childCwd, "AGENTS.md"), "SMOKE_PROJECT_CONTEXT\n");
+  }
   const tmux = (...args: string[]) =>
     execFileSync("tmux", ["-S", socket, ...args], {
       cwd,
@@ -239,7 +256,7 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
       hostStarted = true;
       hostTmux("set-option", "-g", "default-shell", "/bin/sh");
     }
-    const ready = async (id: string, rpc?: RpcSession) => {
+    const ready = async (id: string, rpc?: RpcSession, profiled = false) => {
       const file = join(agentDir, `${id}.ready.json`);
       await waitFor(`ready ${id}`, () => {
         rpc?.assertRunning();
@@ -253,7 +270,9 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
       expect(result.packageEntry).toBe(join(packageRoot, "extensions/pi-sessions.ts"));
       expect(result.agentDir).toBe(agentDir);
       expect(result.sessionFile.startsWith(`${agentDir}/sessions/`)).toBe(true);
-      expect(result.tools).toContain("session_search");
+      // A profiled worker's `--tools` allowlist hides every other extension tool.
+      if (profiled) expect(result.tools).not.toContain("session_search");
+      else expect(result.tools).toContain("session_search");
       return result;
     };
     const parent = new RpcSession(cwd, env, parentId, join(artifacts, "parent.jsonl"));
@@ -305,6 +324,7 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
       title: "Smoke worker",
       cwd: childCwd,
       requestResponse: true,
+      ...(withHost ? {} : { agent: "smoke-reviewer" }),
     });
     const receipt = parseTypeBoxValue(
       HANDOFF_TOOL_DETAILS_SCHEMA,
@@ -312,7 +332,12 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
       "Invalid handoff",
     );
     childId = receipt.sessionId;
-    const childReady = await ready(receipt.sessionId);
+    if (!withHost) {
+      expect(receipt.resumeCommand).toContain(
+        "--approve --model 'smoke/scripted:off' --tools 'read,submit_task_report'",
+      );
+    }
+    const childReady = await ready(receipt.sessionId, undefined, !withHost);
     expect(childReady.cwd).toBe(childCwd);
     const windows = tmux("list-windows", "-a", "-F", "#{window_id}\t#{@pi_session_id}");
     const workerWindow = windows
@@ -352,7 +377,7 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
         ? true
         : undefined,
     );
-    const resumed = await ready(receipt.sessionId);
+    const resumed = await ready(receipt.sessionId, undefined, !withHost);
     expect(resumed.pid).not.toBe(childReady.pid);
     const visibleReports = () =>
       SessionManager.open(parentReady.sessionFile)
@@ -375,6 +400,19 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
     expect(messages).toHaveLength(2);
     expect(new Set(messages.map((message) => message.reportId)).size).toBe(2);
     expect(messages.every((message) => message.provenance === "live")).toBe(true);
+    if (!withHost) {
+      const views = readFileSync(join(agentDir, "worker-model-view.jsonl"), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { systemPrompt: string; tools: string[] });
+      expect(views).toHaveLength(2);
+      for (const view of views) {
+        expect(view.tools.sort()).toEqual(["read", "submit_task_report"]);
+        expect(view.systemPrompt).toContain("You are working as a subagent");
+        expect(view.systemPrompt).toContain("SMOKE_PROFILE_INSTRUCTIONS");
+        expect(view.systemPrompt).toContain("SMOKE_PROJECT_CONTEXT");
+      }
+    }
     const cancelled = await parent.tool("subagent_cancel", { session: receipt.sessionId });
     expect(cancelled.details).toMatchObject({
       kind: "managed",
@@ -452,6 +490,7 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
           "report delivery",
           "dormant wake",
           "second report",
+          ...(withHost ? [] : ["agent profile prompt, model, and tools across wake"]),
           ...(withHost
             ? [
                 "external host enum",

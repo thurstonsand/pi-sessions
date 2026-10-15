@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -8,7 +8,7 @@ import {
   type JsonObject,
   type TranscriptContext,
 } from "@earendil-works/pi-ai";
-import { getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
 import { type ExtensionAPI, getAgentDir } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { contentToText } from "../../extensions/shared/text.ts";
@@ -43,6 +43,14 @@ export default function install(pi: ExtensionAPI): void {
       );
     }
     if (tools.some((tool) => tool.name === "submit_task_report")) {
+      // What the worker's model actually received, for checking an agent profile's effect.
+      appendFileSync(
+        join(getAgentDir(), "worker-model-view.jsonl"),
+        `${JSON.stringify({
+          systemPrompt: getCurrentSystemPrompt(context.messages),
+          tools: tools.map((tool) => tool.name),
+        })}\n`,
+      );
       const deadline = Date.now() + 30_000;
       while (!existsSync(join(getAgentDir(), "release-worker"))) {
         if (Date.now() > deadline) throw new Error("Smoke worker was never released.");

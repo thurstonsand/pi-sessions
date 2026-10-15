@@ -33,6 +33,7 @@ describe("session handoff spawn helpers", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-cwd-"));
 
     const prepared = prepareHandoffLaunch({
+      tools: undefined,
       targetCwd: cwd,
       parentCwd: cwd,
       parentSessionDir: sessionDir,
@@ -80,6 +81,7 @@ describe("session handoff spawn helpers", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-cwd-"));
 
     const prepared = prepareHandoffLaunch({
+      tools: undefined,
       targetCwd: cwd,
       parentCwd: cwd,
       parentSessionDir: sessionDir,
@@ -121,6 +123,7 @@ describe("session handoff spawn helpers", () => {
     agentDir: string,
   ) {
     const prepared = prepareHandoffLaunch({
+      tools: undefined,
       targetCwd,
       parentCwd,
       parentSessionDir,
@@ -176,6 +179,21 @@ describe("session handoff spawn helpers", () => {
 
     expect(resumeCommand).toBe(
       "pi --session-dir '/custom/sessions' --session-id 'child-session-123' --model 'openai/gpt-5.4:medium'",
+    );
+  });
+
+  it("narrows the child's tools only when given an allowlist", () => {
+    const resumeCommand = buildPiResumeCommand({
+      targetCwd: "/repo/app",
+      parentCwd: "/repo/app",
+      sessionId: "child-session-123",
+      model: "anthropic/claude-fable-5-1:high",
+      tools: ["read", "grep", "submit_task_report"],
+      approveProjectTrust: true,
+    });
+
+    expect(resumeCommand).toBe(
+      "pi --session-id 'child-session-123' --approve --model 'anthropic/claude-fable-5-1:high' --tools 'read,grep,submit_task_report'",
     );
   });
 
@@ -243,6 +261,7 @@ describe("session handoff spawn helpers", () => {
     const cwd = mkdtempSync(join(tmpdir(), "pi-sessions-handoff-cwd-"));
 
     const prepared = prepareHandoffLaunch({
+      tools: undefined,
       targetCwd: cwd,
       parentCwd: cwd,
       parentSessionDir: sessionDir,

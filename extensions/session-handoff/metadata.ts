@@ -20,6 +20,14 @@ export const HANDOFF_STALE_SESSION_MESSAGE =
 export const SESSION_STARTING_MESSAGE =
   "Target session is still starting. wait for session_reachable to report it as live, then resend.";
 
+// An agent profile's instructions travel with the child, which injects them
+// into its own system prompt, so they survive wakes and restarts without
+// depending on the profile file.
+export const HANDOFF_SUBAGENT_AGENT_SCHEMA = Type.Object({
+  name: Type.String(),
+  instructions: Type.String(),
+});
+
 // A subagent's self-knowledge, stamped into its child-local bootstrap so the
 // child never opens the parent transcript to learn who it is.
 export const HANDOFF_SUBAGENT_SCHEMA = Type.Object({
@@ -27,6 +35,7 @@ export const HANDOFF_SUBAGENT_SCHEMA = Type.Object({
   ownerSessionId: Type.String(),
   depth: Type.Integer({ minimum: 1 }),
   requestResponse: Type.Boolean(),
+  agent: Type.Optional(HANDOFF_SUBAGENT_AGENT_SCHEMA),
 });
 
 const HANDOFF_METADATA_BASE = {
@@ -84,6 +93,7 @@ export const HANDOFF_BOOTSTRAP_CONSUMED_SCHEMA = Type.Object({
 });
 
 export type HandoffSubagent = Static<typeof HANDOFF_SUBAGENT_SCHEMA>;
+export type HandoffSubagentAgent = Static<typeof HANDOFF_SUBAGENT_AGENT_SCHEMA>;
 export type HandoffSessionMetadata = Static<typeof HANDOFF_SESSION_METADATA_SCHEMA>;
 export type HandoffBootstrap = Static<typeof HANDOFF_BOOTSTRAP_SCHEMA>;
 export type ChildGeneratedHandoffBootstrap = HandoffBootstrap;

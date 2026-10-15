@@ -116,7 +116,7 @@ When a host claims peers, pi-sessions leaves all user-facing coordination and la
 
 Run `/handoff` to open the **Handoffs** board. The Subagents and User sessions tabs show status, age, launch details, and the actions currently available: stop, copy an observation command, or copy a resume command. With a peer-claiming host, only Subagents are shown.
 
-Both launch tools take `goal`, `title` (at most 64 characters), and `requestResponse`, with optional `cwd`, `provider`, `model`, and `thinkingLevel` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). `session_handoff` additionally requires `launch` (`left`, `right`, `up`, `down` when a split backend is available, or `deferred` when enabled). `subagent_launch` has no `launch` parameter. Provider and model must be supplied together.
+Both launch tools take `goal`, `title` (at most 64 characters), and `requestResponse`, with optional `cwd`, `provider`, `model`, and `thinkingLevel` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). `session_handoff` additionally requires `launch` (`left`, `right`, `up`, `down` when a split backend is available, or `deferred` when enabled). `subagent_launch` has no `launch` parameter, but takes an optional `agent` naming an [agent profile](#agent-profiles). Provider and model must be supplied together.
 
 ## Session Messaging
 
@@ -235,6 +235,27 @@ Subagents require the handoff and messaging features. Limit recursive delegation
 ```
 
 `contextLimit` sets a max context limit before compaction is triggered. It works identically to setting a global value in pi itself, but only applies to subagents.
+
+### Agent profiles
+
+An agent profile lets `subagent_launch` start a subagent with extra instructions, a pinned model, and a thinking level, by name. Profiles are Markdown files in `~/.pi/agent/agents/`, in Claude Code's subagent format, so the same file works in both:
+
+```markdown
+---
+name: oracle
+description: Read-only second opinion on a plan, diff, or hard bug. Use for reviews and high-impact judgment calls.
+model: anthropic/claude-fable-5-1:high
+---
+
+You are the Oracle: a read-only reviewer. Do not modify files. ...
+```
+
+- `name` must match the file name, and `description` tells the calling agent when to use the profile; both are required. The `subagent_launch` prompt guidelines list every valid profile with its description.
+- `model` is a pi model pattern (`provider/id` or a bare id, optionally with `:<thinking>`), and `thinkingLevel` sets the level separately. Explicit `provider`/`model` and `thinkingLevel` on the launch win, and the resolved model must still be on the handoff roster.
+- `tools` is a comma-separated allowlist passed to `--tools`; `submit_task_report` is always kept. Without it, the subagent has every tool.
+- The body is added to the subagent's system prompt, after its own instructions; `AGENTS.md`, extensions, and the report flow are unchanged. The instructions are stored in the child session when it launches, so later edits to the file don't change a running subagent.
+
+Naming a missing or malformed profile fails the launch with the reason. Profiles apply only to subagents, not to `session_handoff`. Move the directory with `sessions.subagents.agentsDir` (an absolute path or one starting with `~/`).
 
 ## Session Index
 

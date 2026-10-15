@@ -23,6 +23,7 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
       enable: Type.Optional(Type.Boolean()),
       maxDepth: Type.Optional(Type.Integer({ minimum: 0 })),
       contextLimit: Type.Optional(Type.Integer({ minimum: 1 })),
+      agentsDir: Type.Optional(Type.String()),
     }),
   ),
   handoff: Type.Optional(
@@ -125,6 +126,8 @@ export interface SessionSettings {
     maxDepth: number;
     /** Effective context window for a subagent, when smaller than its model's. */
     contextLimit?: number;
+    /** Where agent profiles for subagent launches live. */
+    agentsDir: string;
   };
   handoff: HandoffSettings;
   index: {
@@ -138,6 +141,10 @@ type SessionFileSettings = Static<typeof SESSION_FILE_SETTINGS_SCHEMA>;
 
 export function getDefaultIndexDir(): string {
   return path.join(getAgentDir(), "pi-sessions");
+}
+
+export function getDefaultAgentsDir(): string {
+  return path.join(getAgentDir(), "agents");
 }
 
 export function getDefaultIndexPath(): string {
@@ -168,19 +175,19 @@ function expandHome(rawPath: string): string {
   return rawPath;
 }
 
-function normalizeIndexDir(value: string | undefined): string {
+function normalizeDir(value: string | undefined, defaultDir: string, key: string): string {
   if (value === undefined) {
-    return getDefaultIndexDir();
+    return defaultDir;
   }
 
   const trimmed = value.trim();
   if (trimmed.length === 0) {
-    return getDefaultIndexDir();
+    return defaultDir;
   }
 
   const expanded = expandHome(trimmed);
   if (!path.isAbsolute(expanded)) {
-    throw new Error('sessions.index.dir must be an absolute path or start with "~/".');
+    throw new Error(`${key} must be an absolute path or start with "~/".`);
   }
 
   return path.normalize(expanded);
@@ -254,7 +261,11 @@ function resolveFeatureToggles(value: SessionFileSettings): FeatureToggles {
 }
 
 function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSettings {
-  const indexDir = normalizeIndexDir(fileSettings.index?.dir);
+  const indexDir = normalizeDir(
+    fileSettings.index?.dir,
+    getDefaultIndexDir(),
+    "sessions.index.dir",
+  );
 
   return {
     features: resolveFeatureToggles(fileSettings),
@@ -263,6 +274,11 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
       ...(fileSettings.subagents?.contextLimit === undefined
         ? {}
         : { contextLimit: fileSettings.subagents.contextLimit }),
+      agentsDir: normalizeDir(
+        fileSettings.subagents?.agentsDir,
+        getDefaultAgentsDir(),
+        "sessions.subagents.agentsDir",
+      ),
     },
     handoff: {
       ...resolveAgentModelSettings(fileSettings.handoff),

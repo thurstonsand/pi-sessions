@@ -2,6 +2,17 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.20.0] - 2026-10-15
+
+### Added
+
+- **Agent profiles for subagents.** `subagent_launch` takes an optional `agent` naming a Markdown file in `~/.pi/agent/agents/`, in Claude Code's subagent format; move it with `sessions.subagents.agentsDir`. The profile's body follows the standard subagent instructions in the subagent's system prompt, its `model` and `thinkingLevel` apply unless the launch sets its own, and `tools` narrows the subagent's tools. The prompt guidelines list each profile with its description, and a missing or malformed profile fails the launch.
+
+### Changed
+
+- Pressing Escape in a subagent's pane pauses it. The child no longer gets a "submit_task_report now" reminder or closes on a second Escape; it stays open and still owes its parent a report. Prompting it again resumes the paused turn, and a report sent before the Escape still counts. `subagent_cancel` from the parent is unchanged.
+- Updated Pi development dependencies to 1.3.0 and Renovate to 44.155.1.
+
 ## [0.19.0] - 2026-10-15
 
 - **Peer coordination can be handed to a host** - An extension such as Agent Switchboard can take over the peer tools in its sessions, and subagents get their own `subagent_*` tools.

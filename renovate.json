@@ -59,6 +59,11 @@
       "description": "@types/node describes the runtime, so it tracks the Node these packages run on rather than the newest DefinitelyTyped release. Types from a later major describe APIs that are not there and hide ones that were removed, and tsc believes them either way. Raise the ceiling when the toolchain in mise.toml moves.",
       "matchPackageNames": ["@types/node"],
       "allowedVersions": "<25"
+    },
+    {
+      "description": "Pi releases land as soon as they ship. Extensions run inside whatever pi the user has installed, so our types and smoke tests must track the newest release rather than wait out the npm release-age gate.",
+      "matchPackageNames": ["@earendil-works/**"],
+      "minimumReleaseAge": null
     }
   ]
 }

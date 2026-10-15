@@ -397,7 +397,6 @@ describe("subagent installation", () => {
     expect(event.systemPromptOptions.sections.pi_sessions_subagent).toContain(
       "You are working as a subagent on one task delegated by a parent session.",
     );
-    expect(event.systemPromptOptions.sections.pi_sessions_agent_profile).toBeUndefined();
     expect(event.systemPromptOptions.sections.other_extension).toBe("Current instructions");
     expect(event.systemPrompt).toBe("Old rendered prompt");
   });
@@ -417,11 +416,11 @@ describe("subagent installation", () => {
     const event = createPromptEvent();
     await handlers.get("before_agent_start")?.(event, ctx);
 
-    expect(event.systemPromptOptions.sections.pi_sessions_subagent).toContain(
-      "You are working as a subagent",
-    );
-    expect(event.systemPromptOptions.sections.pi_sessions_agent_profile).toBe(
-      "Review; do not edit.",
+    const section = event.systemPromptOptions.sections.pi_sessions_subagent;
+    expect(section?.startsWith("You are working as a subagent")).toBe(true);
+    expect(section?.endsWith("\n\nReview; do not edit.")).toBe(true);
+    expect(Object.keys(event.systemPromptOptions.sections)).not.toContain(
+      "pi_sessions_agent_profile",
     );
   });
 

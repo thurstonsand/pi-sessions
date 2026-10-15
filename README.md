@@ -253,7 +253,7 @@ You are the Oracle: a read-only reviewer. Do not modify files. ...
 - `name` must match the file name, and `description` tells the calling agent when to use the profile; both are required. The `subagent_launch` prompt guidelines list every valid profile with its description.
 - `model` is a pi model pattern (`provider/id` or a bare id, optionally with `:<thinking>`), and `thinkingLevel` sets the level separately. Explicit `provider`/`model` and `thinkingLevel` on the launch win, and the resolved model must still be on the handoff roster.
 - `tools` is a comma-separated allowlist passed to `--tools`; `submit_task_report` is always kept. Without it, the subagent has every tool.
-- The body is added to the subagent's system prompt, after its own instructions; `AGENTS.md`, extensions, and the report flow are unchanged. The instructions are stored in the child session when it launches, so later edits to the file don't change a running subagent.
+- The body is added to the subagent's system prompt, in the subagent section after its standard instructions; `AGENTS.md`, extensions, and the report flow are unchanged. The instructions are stored in the child session when it launches, so later edits to the file don't change a running subagent.
 
 Naming a missing or malformed profile fails the launch with the reason. Profiles apply only to subagents, not to `session_handoff`. Move the directory with `sessions.subagents.agentsDir` (an absolute path or one starting with `~/`).
 

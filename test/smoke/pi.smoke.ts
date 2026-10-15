@@ -408,8 +408,10 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
       expect(views).toHaveLength(2);
       for (const view of views) {
         expect(view.tools.sort()).toEqual(["read", "submit_task_report"]);
-        expect(view.systemPrompt).toContain("You are working as a subagent");
-        expect(view.systemPrompt).toContain("SMOKE_PROFILE_INSTRUCTIONS");
+        expect(view.systemPrompt).toMatch(
+          /<pi_sessions_subagent>\nYou are working as a subagent[^<]*\n\nSMOKE_PROFILE_INSTRUCTIONS\n<\/pi_sessions_subagent>/,
+        );
+        expect(view.systemPrompt).not.toContain("pi_sessions_agent_profile");
         expect(view.systemPrompt).toContain("SMOKE_PROJECT_CONTEXT");
       }
     }

@@ -20,8 +20,8 @@ export const HANDOFF_STALE_SESSION_MESSAGE =
 export const SESSION_STARTING_MESSAGE =
   "Target session is still starting. wait for session_reachable to report it as live, then resend.";
 
-// An agent profile's instructions travel with the child, which injects them
-// into its own system prompt, so they survive wakes and restarts without
+// An agent profile's instructions travel with the child, which adds them to
+// its subagent prompt section, so they survive wakes and restarts without
 // depending on the profile file.
 export const HANDOFF_SUBAGENT_AGENT_SCHEMA = Type.Object({
   name: Type.String(),

@@ -2,6 +2,25 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.19.0] - 2026-10-15
+
+- **Peer coordination can be handed to a host** - An extension such as Agent Switchboard can take over the peer tools in its sessions, and subagents get their own `subagent_*` tools.
+
+### Changed
+
+- **Host API.** The channel is now `pi-sessions:hosts`, and it takes only `{ name, peers: true }`: a host that registers it owns peer coordination, and pi-sessions registers none of its peer tools in that session. `pi-sessions:hosts:v1`, with its `launch`, `listSessions`, and `wake`, and the external-host launch targets, are gone.
+- **Peer and subagent tools are separate.** `session_reachable`, `session_send_message`, `session_cancel`, and `session_handoff` address user-facing sessions only; subagents have `subagent_list` (the old `branch` and `tree` scopes), `subagent_send`, `subagent_cancel`, and `subagent_launch` (the old `session_handoff` `launch: "subagent"`). Both sets come from one implementation over a session directory.
+- `requestResponse` is required on `session_send_message`, `subagent_send`, `session_handoff`, and `subagent_launch`; the model decides each time instead of inheriting a default.
+- Updated Pi development dependencies to 1.2.0.
+
+### Added
+
+- A `pi-sessions.lineage` custom entry, `{ parentSessionId, parentSessionFile? }`, names a session's parent when the transcript's first line, pi's session header, names none, so another extension can record lineage that the index keeps.
+
+### Fixed
+
+- A subagent's report could arrive marked recovered instead of live when the parent reconciled, by listing or messaging its subagents, between the child saving the report and sending it. A running child's report is left to its own send; recovery waits until the child stops.
+
 ## [0.18.1] - 2026-10-15
 
 ### Changed

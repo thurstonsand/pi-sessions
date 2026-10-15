@@ -256,7 +256,7 @@ Durable intent precedes runtime mutation (crash between intent and kill converge
 
 ### 10. The missing-report policy is bounded by durable markers
 
-A `requestResponse: true` child that settles without reporting gets exactly one reminder, recorded as a durable child-side marker (no re-reminding after restarts). If it settles reportless again, the system appends a closure record (`no_report_after_reminder`) and the child exits; the parent sees `interrupted`-grade detail in the roster. Fire-and-forget children write their closure at first settle — lifecycle completion without model-facing delivery on either side.
+A `requestResponse: true` child that settles without reporting gets exactly one reminder, recorded as a durable child-side marker (no re-reminding after restarts). If it settles reportless again, the system appends a closure record (`no_report_after_reminder`) and the child exits; the parent sees `interrupted`-grade detail in the roster. Fire-and-forget children write their closure at first settle — lifecycle completion without model-facing delivery on either side. A settle aborted from the child's pane (Escape) pauses the turn instead: no reminder, closure, or exit, and the report obligation and its baseline carry into the resumed run until a settle that was not aborted.
 
 ### 11. Search is a selector over three evidence planes; branch vantage is a relationship-plane axis
 

@@ -566,6 +566,33 @@ describe("subagent installation", () => {
     );
   });
 
+  it("pauses an escaped child turn until a settle that was not aborted", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true, attachedResponses: [false] });
+    const entries = childEntries(1, true);
+    const handle = installSubagents(pi as never, createDeps(2));
+    const ctx = createContext(childId, entries);
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+    await handlers.get("agent_start")?.({}, ctx);
+    await handlers.get("agent_settled")?.({ aborted: true }, ctx);
+    await handlers.get("agent_start")?.({}, ctx);
+    entries.push({
+      type: "custom",
+      id: "report",
+      parentId: "kickoff",
+      customType: SUBAGENT_REPORT_CUSTOM_TYPE,
+      data: { reportId: "report-1", status: "done", summary: "Complete." },
+    });
+    await handlers.get("agent_settled")?.({ aborted: true }, ctx);
+    await handlers.get("agent_start")?.({}, ctx);
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    expect(pi.appendEntry).not.toHaveBeenCalled();
+    expect(ctx.shutdown).not.toHaveBeenCalled();
+
+    await handlers.get("agent_settled")?.({ aborted: false }, ctx);
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    expect(ctx.shutdown).toHaveBeenCalledOnce();
+  });
+
   it("keeps a settled child resident without a reminder while its owned subagent runs", async () => {
     vi.useFakeTimers();
     const entries = childEntriesWithGrandchild();

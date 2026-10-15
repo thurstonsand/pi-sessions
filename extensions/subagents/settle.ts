@@ -17,6 +17,7 @@ export interface SubagentChildSessionState {
   identity: HandoffSubagent;
   requestResponse: boolean;
   reportsAtTurnStart: number;
+  paused: boolean;
 }
 
 export interface SettledChildParentSession {
@@ -159,6 +160,7 @@ export function refreshSubagentChildState(
     identity,
     requestResponse: identity.requestResponse,
     reportsAtTurnStart: reports,
+    paused: false,
   };
 }
 

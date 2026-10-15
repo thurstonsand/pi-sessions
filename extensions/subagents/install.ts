@@ -166,12 +166,12 @@ export function installSubagents(
 
   pi.on("agent_start", (_event, ctx) => {
     settledChildLifecycle.cancel();
-    if (current?.child) {
+    if (current?.child && !current.child.paused) {
       current.child.reportsAtTurnStart = countSubagentReports(ctx.sessionManager.getBranch());
     }
   });
 
-  pi.on("agent_settled", async (_event, ctx) => {
+  pi.on("agent_settled", async (event, ctx) => {
     const session = current;
     if (!session || session.parent.sessionId !== ctx.sessionManager.getSessionId()) {
       return;
@@ -187,7 +187,11 @@ export function installSubagents(
     }
     if (session.child) {
       await contextLimit.compactIfOverLimit(ctx);
-      await settledChildLifecycle.settle(session.parent, session.child, reconciliation);
+      // Escape in the child's pane pauses the delegated turn; it still owes its parent a report.
+      session.child.paused = event.aborted;
+      if (!event.aborted) {
+        await settledChildLifecycle.settle(session.parent, session.child, reconciliation);
+      }
     }
   });
 

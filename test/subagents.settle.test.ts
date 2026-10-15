@@ -102,6 +102,7 @@ describe("settled child recovery", () => {
         },
         requestResponse: true,
         reportsAtTurnStart: 0,
+        paused: false,
       };
 
       const original = reconciler.reconcile();

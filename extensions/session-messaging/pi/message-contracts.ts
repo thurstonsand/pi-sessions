@@ -11,12 +11,10 @@ export const SEND_MESSAGE_PARAMS = Type.Object({
   message: Type.String({
     description: "Message to send to the target session.",
   }),
-  requestResponse: Type.Optional(
-    Type.Boolean({
-      description:
-        "Whether the target session should respond with completion/results back to this session.",
-    }),
-  ),
+  requestResponse: Type.Boolean({
+    description:
+      "Whether the target session should respond with completion/results back to this session.",
+  }),
 });
 
 export const SEND_MESSAGE_TOOL_DETAILS_SCHEMA = Type.Object({

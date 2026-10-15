@@ -230,7 +230,7 @@ describe("subagent installation", () => {
     },
   );
 
-  it("registers a parent-refusing send-message tool for a subagent session", async () => {
+  it("resolves the owning parent without registering peer messaging", async () => {
     const { pi } = createPi({ tmuxInstalled: true });
     const handle = installSubagents(pi as never, createDeps(2));
 
@@ -239,22 +239,10 @@ describe("subagent installation", () => {
       createContext(childId, childEntries(1, true)) as never,
     );
 
-    const registered = pi.registerTool.mock.calls
-      .map((call) => call[0] as ToolDefinition)
-      .find((tool) => tool.name === "session_send_message");
-    expect(registered?.description).toBe("Send a message to another subagent.");
-    if (!registered) {
-      throw new Error("session_send_message was not registered for the subagent session.");
-    }
-    await expect(
-      registered.execute(
-        "call-1",
-        { session: parentId, message: "Done." },
-        undefined,
-        undefined,
-        {} as never,
-      ),
-    ).rejects.toThrow("The parent session cannot be messaged. Use submit_task_report.");
+    expect(handle.getParentSessionId()).toBe(parentId);
+    expect(
+      pi.registerTool.mock.calls.map((call) => (call[0] as ToolDefinition).name),
+    ).not.toContain("session_send_message");
   });
 
   it("provides a working report tool when a rewind arms the parent refusal", async () => {
@@ -282,16 +270,6 @@ describe("subagent installation", () => {
     await handlers.get("session_tree")?.({}, ctx);
 
     expect(handle.getParentSessionId()).toBe(parentId);
-    const send = registeredTool(pi, "session_send_message");
-    await expect(
-      send.execute(
-        "send-1",
-        { session: parentId, message: "Done." },
-        undefined,
-        undefined,
-        ctx as never,
-      ),
-    ).rejects.toThrow("The parent session cannot be messaged. Use submit_task_report.");
     expect(pi.getActiveTools()).toContain("submit_task_report");
     const report = registeredTool(pi, "submit_task_report");
     const result = await report.execute(

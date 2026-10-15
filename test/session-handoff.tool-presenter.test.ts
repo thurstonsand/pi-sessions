@@ -12,6 +12,7 @@ describe("handoff-tool presenter", () => {
     expect(
       buildHandoffToolPresentation(
         {
+          toolName: "session_handoff",
           launch: "deferred",
           title: "Review rendering",
           goal: "Inspect the renderer.",

@@ -36,6 +36,7 @@ function snapshot(overrides?: {
     userSessions: overrides?.userSessions ?? [],
     liveSessionIds: overrides?.liveSessionIds ?? new Set(),
     hasLiveSessionEvidence: overrides?.hasLiveSessionEvidence ?? true,
+    showUserSessions: true,
   };
 }
 

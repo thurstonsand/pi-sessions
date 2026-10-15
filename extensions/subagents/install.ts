@@ -10,10 +10,6 @@ import type {
   SendMessageResult,
 } from "../session-messaging/install.ts";
 import type { SessionWaker } from "../session-messaging/message-router.ts";
-import {
-  createSessionCancelTool,
-  createSessionSendMessageTool,
-} from "../session-messaging/pi/tools.ts";
 import type { SessionLifecycle } from "../shared/composition.ts";
 import type { CompactionThresholdSettings, SessionSettings } from "../shared/settings.ts";
 import { isTmuxInstalled } from "../shared/tmux.ts";
@@ -82,7 +78,6 @@ export function installSubagents(
     messaging: MessagingHandle;
     readCompactionSettings: (cwd: string) => CompactionThresholdSettings;
     sendMessage(request: SendMessageRequest): Promise<SendMessageResult>;
-    hasHostedSessions?: () => boolean;
   },
 ): SubagentsHandle {
   pi.registerMessageRenderer(SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE, renderSubagentReportMessage);
@@ -225,28 +220,9 @@ export function installSubagents(
     }
   };
 
-  const registerMessagingTools = (): void => {
-    const isSubagent = handle.getParentSessionId() !== undefined;
-    pi.registerTool(
-      createSessionSendMessageTool(handle, {
-        role: isSubagent ? { kind: "subagent" } : { kind: "wakeCapable" },
-        hostedSessions: deps.hasHostedSessions?.() ?? false,
-        getCachedRelationTo: deps.messaging.getCachedRelationTo,
-        getParentSessionId: () => handle.getParentSessionId(),
-      }),
-    );
-    pi.registerTool(
-      createSessionCancelTool(handle, {
-        role: isSubagent ? { kind: "subagent" } : { kind: "plain" },
-        getParentSessionId: () => handle.getParentSessionId(),
-      }),
-    );
-  };
-
   pi.on("session_tree", async (_event, ctx) => {
     settledChildLifecycle.cancel();
     refreshChildSession();
-    registerMessagingTools();
     try {
       await reconciler.reconcileAndRestoreSuspended();
     } catch (error) {
@@ -303,9 +279,6 @@ export function installSubagents(
       reconciler.beginSession();
       current = { parent };
       refreshChildSession();
-      if (identity) {
-        registerMessagingTools();
-      }
       try {
         if (_event.reason === "reload") {
           await reconciler.reconcile();

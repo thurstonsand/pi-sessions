@@ -1,9 +1,21 @@
-import type { Host, HostLaunchInput } from "../../hosts/contract.ts";
-
 export type HandoffSplitDirection = "left" | "right" | "up" | "down";
 
-export type LaunchInput = HostLaunchInput;
+export interface LaunchInput {
+  sessionId: string;
+  sessionFile: string;
+  cwd: string;
+  title: string;
+  model: string;
+  resumeCommand: string;
+}
 
 export type ClipboardStatus = "copied" | "failed";
 
-export type LaunchBackend = Host;
+export interface LaunchBackend {
+  name: string;
+  launch(
+    input: LaunchInput,
+  ): Promise<
+    { success: true; clipboardStatus?: ClipboardStatus } | { success: false; error: string }
+  >;
+}

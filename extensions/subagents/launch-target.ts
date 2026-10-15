@@ -19,7 +19,6 @@ export function createSubagentLaunchTarget(
     value: SUBAGENT_LAUNCH,
     description:
       "'subagent' delegates one task to a detached tmux worker and requests a report by default.",
-    requestResponseDefault: true,
     bootstrapMode: "automatic",
     approveProjectTrust: true,
     describeSubagentChild(input) {

@@ -278,6 +278,8 @@ export class HandoffBoard implements Focusable {
   }
 
   private renderTabs(row: number, width: number): string {
+    if (!this.snapshot.showUserSessions)
+      return this.theme.fg("accent", this.theme.bold("Subagents"));
     this.controlHits.set(
       row,
       [
@@ -493,7 +495,7 @@ export class HandoffBoard implements Focusable {
 
     const action = view.action;
     const items: LegendItem[] = [
-      { key: "<>", description: "tab" },
+      ...(!this.snapshot.showUserSessions ? [] : [{ key: "<>", description: "tab" }]),
       { key: "↑↓", description: "select" },
     ];
     if (action?.canStop) {
@@ -557,6 +559,7 @@ export class HandoffBoard implements Focusable {
   }
 
   private setTab(tab: HandoffBoardTab): void {
+    if (tab === "user-sessions" && !this.snapshot.showUserSessions) return;
     this.tab = tab;
     this.clearTransientState();
     this.clampSelection();

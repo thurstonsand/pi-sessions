@@ -11,9 +11,9 @@ mise run smoke
 
 The smoke lane requires tmux and a `pi` CLI matching the installed development dependency. Local bootstrap removes the dependency's CLI shim so local runs exercise the global Pi; CI uses the dependency's CLI installed by `npm ci`. It runs real Pi processes with Pi's scripted faux provider: no credentials or paid model calls. It checks hook-maintained file-touch freshness from another process, live discovery, message delivery, a cross-directory handoff to a stamped tmux worker, report delivery, dormant wake, and exactly two distinct visible report messages and receipts.
 
-It runs both standalone and with an independent fake host extension. The host variant checks the host/deferred/subagent enum with tmux present, starts a child in a separate tmux server without `TMUX` or `TMUX_PANE`, verifies automatic bootstrap, reaps it, discovers it as dormant, and wakes it by messaging. The fake host imports no pi-sessions code.
+It runs standalone and with an independent v2 fake host extension. The claiming host variant verifies peer tools are absent while subagent launch/list/send/cancel remain available. A third variant registers host-owned peer tools at extension load, proving the overlapping names do not cause Pi's hard extension conflict and the host's tools remain active. All variants launch/list a worker, receive reports, wake it on follow-up, and cancel it after completion. Standalone also verifies live peer discovery and delivery. The fake host imports no pi-sessions code.
 
-Both variants start without an index. Four additional recovery cases start two Pis together with search and turn-time hooks disabled: fresh creation, an older schema, a newer schema, and a forced publication failure. They verify one atomic publication, reachable-session metadata, a persistent reload warning with byte-for-byte preservation of the newer database, and shared backoff instead of repeated builds.
+All variants start without an index. Four additional recovery cases start two Pis together with search and turn-time hooks disabled: fresh creation, an older schema, a newer schema, and a forced publication failure. They verify one atomic publication, reachable-session metadata, a persistent reload warning with byte-for-byte preservation of the newer database, and shared backoff instead of repeated builds.
 
 Each run has a disposable home, agent directory, index, broker directory, and private tmux server. Its settings pin this checkout's package path; parent, peer, and resumed child assert the loaded extension's source path. It does not rewrite global Pi settings or alter production resume commands. Shell configuration, other extensions, and provider credentials are not inherited. Auto-title is disabled.
 
@@ -95,7 +95,7 @@ Expected:
 - the current session is absent
 - titles and cwd come from the session index; a live session missing from the index is still returned as a bare id
 
-With a subagent running, ask for `scope: "branch"` and expect the worker rows with `state`, `depth`, and goal.
+With a subagent running, call `subagent_list` with `scope: "branch"` and expect worker rows with `state`, `depth`, and goal. `session_reachable` has no scope parameter.
 
 ## 5. Verify follow-up analysis
 
@@ -229,7 +229,7 @@ Delegate two subagents: one to summarize README.md, and one to summarize CHANGEL
 
 Expected:
 
-- two `session_handoff` calls with `launch: "subagent"`
+- two `subagent_launch` calls (no `launch` parameter)
 - both launches succeed on the first attempt; neither fails with `duplicate session: pi-<parent-id-prefix>`
 - `tmux ls` shows a detached `pi-<parent-id-prefix>` session with one window per worker
 - `/handoff` opens the **Handoffs** board with both workers on the **Subagents** tab, showing `starting` then `busy`

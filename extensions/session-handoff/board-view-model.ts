@@ -20,6 +20,7 @@ export interface UserSessionEntry {
 }
 
 export interface HandoffBoardSnapshot {
+  showUserSessions: boolean;
   subagents: readonly SubagentRosterEntry[];
   userSessions: readonly UserSessionEntry[];
   liveSessionIds: ReadonlySet<string>;

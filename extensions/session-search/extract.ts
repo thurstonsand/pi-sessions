@@ -23,6 +23,7 @@ import {
   type HandoffSessionMetadata,
   parseHandoffSessionMetadata,
 } from "../session-handoff/metadata.ts";
+import { LINEAGE_CUSTOM_TYPE, LINEAGE_SCHEMA, type SessionLineage } from "../shared/lineage.ts";
 import type { SessionOrigin } from "../shared/session-index/index.ts";
 import { contentToText, isRecord } from "../shared/text.ts";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
@@ -97,6 +98,7 @@ export interface SessionEntryScan {
   sessionNameEntryId?: string | undefined;
   sessionNameTs?: string | undefined;
   handoffMetadata?: DurableHandoffMetadataRecord | undefined;
+  lineage?: SessionLineage | undefined;
 }
 
 export interface SessionTailBaseline {
@@ -194,7 +196,10 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
     chunks.push(...scan.chunks);
     appendDurableHandoffMetadataChunks(chunks, scan.handoffMetadata);
 
-    const parentSessionPath = normalizeParentSessionPath(header.parentSession);
+    const lineage = header.parentSession ? undefined : scan.lineage;
+    const parentSessionPath = normalizeParentSessionPath(
+      header.parentSession ?? lineage?.parentSessionFile,
+    );
     const parentSession = parentSessionPath
       ? inspectParentSession(parentSessionPath, header.id, sessionPath)
       : undefined;
@@ -211,7 +216,7 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
       messageCount: scan.messageCount,
       entryCount: scan.entryCount,
       parentSessionPath,
-      parentSessionId: parentSession?.sessionId,
+      parentSessionId: lineage?.parentSessionId ?? parentSession?.sessionId,
       sessionOrigin: deriveSessionOrigin(
         parentSessionPath,
         parentSession?.launchedSubagent ?? false,
@@ -306,6 +311,7 @@ export function scanSessionEntries(
   let sessionNameEntryId: string | undefined;
   let sessionNameTs: string | undefined;
   let handoffMetadata: DurableHandoffMetadataRecord | undefined;
+  let lineage: SessionLineage | undefined;
 
   for (const entry of entries) {
     if (!isSessionEntry(entry)) continue;
@@ -336,6 +342,9 @@ export function scanSessionEntries(
         continue;
       }
       case "custom": {
+        if (entry.customType === LINEAGE_CUSTOM_TYPE && !lineage) {
+          lineage = safeParseTypeBoxValue(LINEAGE_SCHEMA, entry.data);
+        }
         const nextHandoffMetadata = extractHandoffMetadata(entry, entryTs);
         if (nextHandoffMetadata && !handoffMetadata) {
           handoffMetadata = nextHandoffMetadata;
@@ -393,6 +402,7 @@ export function scanSessionEntries(
     sessionNameEntryId,
     sessionNameTs,
     handoffMetadata,
+    lineage,
   };
 }
 

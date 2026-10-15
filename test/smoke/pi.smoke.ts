@@ -154,7 +154,9 @@ class RpcSession {
   }
 }
 
-test.each([false, true])("real Pi integration (host: %s)", async (withHost) => {
+test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", async (variant) => {
+  const withHost = variant !== "standalone";
+  const hostTools = variant === "host-tools";
   const version = execFileSync("pi", ["--version"], { encoding: "utf8" }).trim();
   const expected = JSON.parse(
     readFileSync(
@@ -182,6 +184,7 @@ test.each([false, true])("real Pi integration (host: %s)", async (withHost) => {
     PI_CODING_AGENT_DIR: agentDir,
     PI_SESSIONS_MESSAGING_DIR: join(root, "broker"),
     ...(withHost ? { SMOKE_HOST_SOCKET: hostSocket } : {}),
+    ...(hostTools ? { SMOKE_HOST_TOOLS: "1" } : {}),
   };
   for (const directory of [agentDir, cwd, childCwd, artifacts, join(agentDir, "pi-sessions")]) {
     mkdirSync(directory, { recursive: true });
@@ -261,36 +264,47 @@ test.each([false, true])("real Pi integration (host: %s)", async (withHost) => {
     await ready(peerId, peer);
 
     await parent.tool("write", { path: "fresh.txt", content: "SMOKE_FRESH_TOKEN" });
-    if (withHost) {
-      const tools = JSON.parse(readFileSync(join(agentDir, `${parentId}.tools.json`), "utf8")) as {
+    // Read after startup completes, not the scenario extension's earlier session_start.
+    const toolNames = (
+      JSON.parse(readFileSync(join(agentDir, `${parentId}.tools.json`), "utf8")) as {
         name: string;
-        parameters: unknown;
-      }[];
-      expect(tools.find((tool) => tool.name === "session_handoff")?.parameters).toMatchObject({
-        properties: {
-          launch: {
-            anyOf: [{ const: "fake-host" }, { const: "deferred" }, { const: "subagent" }],
-          },
-        },
-      });
+      }[]
+    ).map((tool) => tool.name);
+    for (const name of [
+      "session_reachable",
+      "session_send_message",
+      "session_cancel",
+      "session_handoff",
+    ]) {
+      expect(toolNames.includes(name)).toBe(
+        name === "session_handoff" ? !withHost : !withHost || hostTools,
+      );
     }
+    if (hostTools) {
+      expect(toolNames).toContain("session_launch");
+      expect((await parent.tool("session_reachable", {})).details).toEqual({ host: "fake-host" });
+    }
+    for (const name of ["subagent_list", "subagent_send", "subagent_cancel", "subagent_launch"])
+      expect(toolNames).toContain(name);
     const search = await peer.tool("session_search", { files: { changed: ["fresh.txt"] } });
     expect(JSON.stringify(search.details)).toContain(parentId);
     expect(readFileSync(join(cwd, "fresh.txt"), "utf8")).toBe("SMOKE_FRESH_TOKEN");
-    const reachable = await parent.tool("session_reachable", { scope: "user" });
-    expect(JSON.stringify(reachable.details)).toContain(peerId);
-    const sent = await parent.tool("session_send_message", {
-      session: peerId,
-      message: "SMOKE_MESSAGE",
-      requestResponse: false,
-    });
-    expect(sent.details).toMatchObject({ delivered: true });
+    if (!withHost) {
+      const reachable = await parent.tool("session_reachable", {});
+      expect(JSON.stringify(reachable.details)).toContain(peerId);
+      const sent = await parent.tool("session_send_message", {
+        session: peerId,
+        message: "SMOKE_MESSAGE",
+        requestResponse: false,
+      });
+      expect(sent.details).toMatchObject({ delivered: true });
+    }
 
-    const handoff = await parent.tool("session_handoff", {
+    const handoff = await parent.tool("subagent_launch", {
       goal: "Report SMOKE_REPORT to the parent.",
       title: "Smoke worker",
-      launch: "subagent",
       cwd: childCwd,
+      requestResponse: true,
     });
     const receipt = parseTypeBoxValue(
       HANDOFF_TOOL_DETAILS_SCHEMA,
@@ -324,7 +338,9 @@ test.each([false, true])("real Pi integration (host: %s)", async (withHost) => {
         ? true
         : undefined,
     );
-    const followup = await parent.tool("session_send_message", {
+    const listed = await parent.tool("subagent_list", { scope: "tree" });
+    expect(JSON.stringify(listed.details)).toContain(receipt.sessionId);
+    const followup = await parent.tool("subagent_send", {
       session: receipt.sessionId,
       message: "Report SMOKE_REPORT again.",
       requestResponse: true,
@@ -359,77 +375,12 @@ test.each([false, true])("real Pi integration (host: %s)", async (withHost) => {
     expect(messages).toHaveLength(2);
     expect(new Set(messages.map((message) => message.reportId)).size).toBe(2);
     expect(messages.every((message) => message.provenance === "live")).toBe(true);
-    if (withHost) {
-      const handoff = await parent.tool("session_handoff", {
-        goal: "Start work without draft review",
-        title: "Hosted smoke child",
-        launch: "fake-host",
-        cwd: childCwd,
-      });
-      const hosted = parseTypeBoxValue(
-        HANDOFF_TOOL_DETAILS_SCHEMA,
-        handoff.details,
-        "host receipt",
-      );
-      const first = await ready(hosted.sessionId);
-      expect(first.cwd).toBe(childCwd);
-      expect(hosted.backend).toBe("fake-host");
-      const accepted = () =>
-        SessionManager.open(hosted.childSessionFile)
-          .getEntries()
-          .some((entry) => entry.type === "message" && entry.message.role === "assistant");
-      await waitFor("host automatic first turn", () => (accepted() ? true : undefined));
-      const input = JSON.parse(readFileSync(join(agentDir, "host-session.json"), "utf8"));
-      expect(input).toMatchObject({
-        sessionId: hosted.sessionId,
-        sessionFile: hosted.childSessionFile,
-        cwd: childCwd,
-        title: "Hosted smoke child",
-        model: "smoke/scripted:off",
-      });
-      hostTmux("kill-window", "-t", `host:${hosted.sessionId}`);
-      // Query through the tool until the broker has observed the process exit.
-      let dormant = false;
-      for (let attempt = 0; attempt < 20; attempt += 1) {
-        const result = await parent.tool("session_reachable", {});
-        const details = result.details as {
-          sessions: { sessionId: string; state: string; host?: string }[];
-        };
-        const entry = details.sessions.find((session) => session.sessionId === hosted.sessionId);
-        if (entry?.state === "dormant") {
-          expect(entry.host).toBe("fake-host");
-          dormant = true;
-          break;
-        }
-      }
-      expect(dormant).toBe(true);
-      const delivered = await parent.tool("session_send_message", {
-        session: hosted.sessionId,
-        message: "HOST_WAKE_DELIVERY",
-        requestResponse: false,
-      });
-      expect(delivered.details).toMatchObject({ delivered: true });
-      await waitFor("host message in transcript", () =>
-        readFileSync(hosted.childSessionFile, "utf8").includes("HOST_WAKE_DELIVERY")
-          ? true
-          : undefined,
-      );
-      expect((await ready(hosted.sessionId)).pid).not.toBe(first.pid);
-      const live = await parent.tool("session_reachable", {});
-      expect(live.details).toMatchObject({
-        sessions: expect.arrayContaining([
-          expect.objectContaining({
-            sessionId: hosted.sessionId,
-            state: "live",
-            host: "fake-host",
-          }),
-        ]),
-      });
-      writeFileSync(
-        join(artifacts, "host-pane.txt"),
-        hostTmux("capture-pane", "-p", "-t", `host:${hosted.sessionId}`, "-S", "-100"),
-      );
-    }
+    const cancelled = await parent.tool("subagent_cancel", { session: receipt.sessionId });
+    expect(cancelled.details).toMatchObject({
+      kind: "managed",
+      accepted: true,
+      state: "completed",
+    });
     passed = true;
   } catch (error) {
     errors.push(error);

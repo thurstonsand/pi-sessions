@@ -4,6 +4,7 @@ import { isThinkingLevel } from "../shared/thinking-levels.ts";
 import type { HandoffToolDetails } from "./tool-contract.ts";
 
 export interface HandoffToolViewModel {
+  toolName: string;
   launch?: string | undefined;
   title?: string | undefined;
   goal?: string | undefined;
@@ -15,14 +16,17 @@ export interface HandoffToolViewModel {
 
 export function buildHandoffToolView(
   args: unknown,
-  result?: HandoffToolDetails | undefined,
+  result: HandoffToolDetails | undefined,
+  toolName: string,
 ): HandoffToolViewModel {
   const record = isRecord(args) ? args : {};
   const provider = normalizeOptionalText(result?.provider) ?? readString(record.provider);
   const model = normalizeOptionalText(result?.modelName) ?? readString(record.model);
   const thinkingLevel = result?.thinkingLevel ?? readThinkingLevel(record.thinkingLevel);
   return {
-    launch: readString(record.launch) ?? result?.launch,
+    toolName,
+    launch:
+      toolName === "subagent_launch" ? "subagent" : (readString(record.launch) ?? result?.launch),
     title: readString(record.title) ?? result?.title,
     goal: readString(record.goal),
     ...(provider ? { provider } : {}),

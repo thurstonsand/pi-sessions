@@ -150,6 +150,26 @@ describe("subagent reconciliation", () => {
     expect(fixture.sent).toHaveLength(1);
   });
 
+  it("leaves a running child's report to its live send, and recovers it once the child stops", async () => {
+    let live = [childId];
+    const fixture = createFixture([launchEntry()], [reportEntry()], true, async () => live);
+
+    await fixture.reconciler.reconcile();
+    expect(fixture.sent).toHaveLength(0);
+    expect(fixture.appended).toHaveLength(0);
+
+    fixture.closeWindow();
+    live = [];
+    await fixture.reconciler.reconcile();
+    expect(fixture.sent).toEqual([
+      expect.objectContaining({
+        message: expect.objectContaining({
+          details: expect.objectContaining({ reportId: "report-1", provenance: "recovered" }),
+        }),
+      }),
+    ]);
+  });
+
   it("recovers a missed report and wakes an idle parent with its contents", async () => {
     const fixture = createFixture([launchEntry()], [reportEntry()]);
 
@@ -536,6 +556,9 @@ function createFixture(
     killed: () => killed,
     sessionKilled: () => sessionKilled,
     windowExists: () => windowExists,
+    closeWindow: () => {
+      windowExists = false;
+    },
     get releaseCreate() {
       return releaseCreate;
     },

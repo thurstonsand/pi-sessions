@@ -22,7 +22,8 @@ const details = {
 
 function getTool() {
   return createSessionSendMessageTool({ sendMessage: vi.fn() } as never, {
-    role: { kind: "plain" },
+    name: "session_send_message",
+    wording: { description: "Send", promptSnippet: "Send", promptGuidelines: [] },
     getCachedRelationTo: vi.fn(() => "child"),
   }) as {
     renderCall: (

@@ -8,12 +8,25 @@ import {
   createChildGeneratedHandoffBootstrap,
   HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
 } from "../extensions/session-handoff/metadata.ts";
-import { SESSION_REACHABLE_TOOL_DETAILS_SCHEMA } from "../extensions/session-messaging/pi/reachable-contract.ts";
 import {
-  createSessionReachableTool,
+  createPeerDirectory,
+  createSubagentDirectory,
+  type SessionDirectory,
+} from "../extensions/session-messaging/directory.ts";
+import {
+  listReachableSubagents,
+  listReachableUserSessions,
   type ReachableSubagentEntry,
   type SessionReachableDeps,
-} from "../extensions/session-messaging/pi/reachable-tool.ts";
+} from "../extensions/session-messaging/directory-list.ts";
+import type { MessagingHandle } from "../extensions/session-messaging/install.ts";
+import { MessageRouter } from "../extensions/session-messaging/message-router.ts";
+import {
+  SESSION_REACHABLE_PARAMS,
+  SESSION_REACHABLE_TOOL_DETAILS_SCHEMA,
+  SESSION_REACHABLE_USER_PARAMS,
+} from "../extensions/session-messaging/pi/reachable-contract.ts";
+import { createSessionReachableTool as buildReachableTool } from "../extensions/session-messaging/pi/reachable-tool.ts";
 import {
   initializeSchema,
   insertSession,
@@ -21,6 +34,7 @@ import {
   rebuildSessionLineageRelations,
   setMetadata,
 } from "../extensions/shared/session-index/index.ts";
+import type { SubagentsHandle } from "../extensions/subagents/install.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-reachable-");
@@ -34,51 +48,55 @@ afterEach(() => {
 });
 
 describe("session_reachable tool", () => {
-  it("merges hosted sessions without duplicating live IDs or trusting host liveness", async () => {
-    const dbPath = createIndex((db) => {
+  it("enforces purpose boundaries while retaining live sibling messaging", async () => {
+    const indexPath = createIndex((db) => {
+      insertIndexedSession(db, { sessionId: "parent", sessionName: "Parent" });
+      insertIndexedSession(db, { sessionId: "peer", sessionName: "User" });
       insertIndexedSession(db, {
-        sessionId: "worker",
+        sessionId: "sibling",
         sessionName: "Worker",
         sessionOrigin: "subagent",
       });
     });
-    const tool = createSessionReachableTool(
-      createDeps(dbPath, {
-        listSessions: async () => ["awake"],
-        getParentSessionId: () => "parent",
-        listHostedSessions: async () =>
-          ["awake", "asleep", "current-session", "parent", "worker"].map((sessionId) => ({
-            sessionId,
-            title: sessionId,
-            cwd: "/host/project",
-            host: "swb",
-          })),
-      }),
+    const messaging = {
+      listSessions: async () => ["parent", "peer", "sibling"],
+      getCachedRelationTo: () => undefined,
+      sendMessage: vi.fn(async () => ({
+        delivered: true,
+        messageId: "message",
+        target: { sessionId: "sibling" },
+      })),
+    } as unknown as MessagingHandle;
+    const subagents = {
+      roster: { resolve: async () => ({ entries: [], total: 0 }) },
+      getParentSessionId: () => "parent",
+      waker: { owns: () => false },
+    } as unknown as SubagentsHandle;
+    const router = new MessageRouter(
+      messaging,
+      () => subagents.waker,
+      () => 1,
     );
-    const result = await tool.execute("reachable", {}, undefined, undefined, createToolContext());
-    expect(result.details).toEqual({
-      scope: "user",
-      sessions: [
-        {
-          kind: "user",
-          sessionId: "awake",
-          state: "live",
-          title: "awake",
-          cwd: "/host/project",
-          host: "swb",
-        },
-        {
-          kind: "user",
-          sessionId: "asleep",
-          state: "dormant",
-          title: "asleep",
-          cwd: "/host/project",
-          host: "swb",
-        },
-      ],
+    const workers = createSubagentDirectory(subagents, router, messaging, indexPath);
+    const peers = createPeerDirectory(messaging, {
+      indexPath,
+      listSessions: messaging.listSessions,
+      getRelationTo: () => undefined,
+      getParentSessionId: () => "parent",
     });
-    expect(Value.Check(SESSION_REACHABLE_TOOL_DETAILS_SCHEMA, result.details)).toBe(true);
-    expect(renderTool(tool, {}, result)).toContain("dormant");
+    const ctx = createToolContext();
+    await expect(peers.resolve("sibling", ctx)).rejects.toThrow("No reachable user session");
+    await expect(peers.resolve("peer", ctx)).resolves.toMatchObject({ sessionId: "peer" });
+    await expect(
+      workers.send({ target: "sibling", body: "Coordinate" }, ctx),
+    ).resolves.toMatchObject({ delivered: true });
+    expect(messaging.sendMessage).toHaveBeenCalledWith({ target: "sibling", body: "Coordinate" });
+    await expect(workers.send({ target: "peer", body: "Wrong directory" }, ctx)).rejects.toThrow(
+      "No reachable subagent",
+    );
+    await expect(workers.send({ target: "parent", body: "Report" }, ctx)).rejects.toThrow(
+      "Use submit_task_report",
+    );
   });
 
   it("lists live user sessions with relations and drops self and foreign subagents", async () => {
@@ -237,7 +255,7 @@ describe("session_reachable tool", () => {
     expect(rendered).toContain("[completed • depth 1 • history]");
   });
 
-  it("hides the scope parameter when subagents are inactive", () => {
+  it("keeps peer discovery scope-free and subagent discovery scoped", () => {
     const dbPath = createIndex(() => {});
     const withSubagents = createSessionReachableTool(
       createDeps(dbPath, { listSubagents: async () => [] }),
@@ -248,13 +266,13 @@ describe("session_reachable tool", () => {
     expect(Object.keys(schemaProperties(withoutSubagents.parameters))).toEqual([]);
   });
 
-  it("rejects subagent scopes when subagents are inactive", async () => {
+  it("rejects subagent scopes in the peer directory", async () => {
     const dbPath = createIndex(() => {});
     const tool = createSessionReachableTool(createDeps(dbPath));
 
     await expect(
       tool.execute("tool-1", { scope: "tree" }, undefined, undefined, createToolContext()),
-    ).rejects.toThrow('session_reachable scope "tree" requires subagents to be active.');
+    ).rejects.toThrow("Peer discovery has no subagent scope.");
   });
 
   it("reports a broker failure instead of returning an empty list", async () => {
@@ -275,6 +293,27 @@ describe("session_reachable tool", () => {
 
 function schemaProperties(schema: unknown): Record<string, unknown> {
   return (schema as { properties: Record<string, unknown> }).properties;
+}
+
+function createSessionReachableTool(deps: SessionReachableDeps) {
+  const subagents = Boolean(deps.listSubagents);
+  return buildReachableTool(
+    {
+      list: (scope, ctx) => {
+        if (subagents && scope !== "user") return listReachableSubagents(deps, scope);
+        if (!subagents && scope === "user") return listReachableUserSessions(deps, ctx);
+        throw new Error("Peer discovery has no subagent scope.");
+      },
+    } as SessionDirectory,
+    {
+      name: subagents ? "subagent_list" : "session_reachable",
+      description: "List",
+      promptSnippet: "List",
+      promptGuidelines: [],
+      parameters: subagents ? SESSION_REACHABLE_PARAMS : SESSION_REACHABLE_USER_PARAMS,
+      defaultScope: subagents ? "branch" : "user",
+    },
+  );
 }
 
 function createIndex(seed: (db: ReturnType<typeof openIndexDatabase>) => void): string {

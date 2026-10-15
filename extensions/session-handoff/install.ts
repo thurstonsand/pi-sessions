@@ -2,7 +2,6 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import type { Host } from "../hosts/contract.ts";
 import type { IndexHandle, SessionLifecycle } from "../shared/composition.ts";
 import type { ModelRuntimeProvider } from "../shared/model-runtime.ts";
 import { isTuiMode } from "../shared/pi-mode.ts";
@@ -21,11 +20,7 @@ import { HANDOFF_BOOTSTRAP_FAILED_CUSTOM_TYPE } from "./metadata.ts";
 import { openSessionReferencePicker } from "./picker.ts";
 import { SESSION_TOKEN_PREFIX } from "./query.ts";
 import { type HandoffRoster, resolveHandoffRoster } from "./roster.ts";
-import {
-  executeSessionHandoffTool,
-  type HandoffToolParams,
-  MAX_HANDOFF_TITLE_LENGTH,
-} from "./tool.ts";
+import { executeSessionHandoffTool, MAX_HANDOFF_TITLE_LENGTH } from "./tool.ts";
 import { HANDOFF_TOOL_DETAILS_SCHEMA } from "./tool-contract.ts";
 import { HandoffToolComponent } from "./tool-renderer.ts";
 import {
@@ -51,7 +46,7 @@ export function installHandoff(
     index: IndexHandle;
     getModelRuntime: ModelRuntimeProvider;
     getLaunchTargets?: (() => readonly HandoffLaunchTarget[]) | undefined;
-    getHosts?: () => readonly Host[];
+    claimsPeers: () => boolean;
     board: HandoffBoardServices;
   },
 ): SessionLifecycle {
@@ -69,16 +64,17 @@ export function installHandoff(
     models: readonly Model<Api>[],
     launchTargets: readonly HandoffLaunchTarget[],
     roster: HandoffRoster | undefined,
+    name: "session_handoff" | "subagent_launch",
   ): void {
     const offersSubagent = offersSubagentLaunch(launchTargets);
     pi.registerTool({
-      name: "session_handoff",
+      name,
       label: "Session Handoff",
       description: "Start a new Pi session with a self-contained task.",
       // Nested calls write no toolResult entry, so the board would never see the launch receipt.
       exposure: "model-only",
       promptSnippet: offersSubagent
-        ? "Delegate bounded work to a background subagent or hand off context to another Pi session"
+        ? "Delegate bounded work to a background subagent"
         : "Hand off context to another Pi session",
       promptGuidelines: buildHandoffPromptGuidelines(launchTargets, models, roster),
       parameters: Type.Object({
@@ -91,17 +87,16 @@ export function installHandoff(
           description:
             "Short display title for the child session, 64 characters or less. Summarize the mission; do not repeat the full goal.",
         }),
-        launch: buildHandoffLaunchSchema(launchTargets),
+        ...(name === "session_handoff" ? { launch: buildHandoffLaunchSchema(launchTargets) } : {}),
         cwd: Type.Optional(
           Type.String({
             description: "Optional target working directory (defaults to current).",
           }),
         ),
-        requestResponse: Type.Optional(
-          Type.Boolean({
-            description: `Whether the child session should report completion/results of its task back to this session. ${offersSubagent ? "Defaults to true for subagent launches and false otherwise." : "Defaults to false."}`,
-          }),
-        ),
+        requestResponse: Type.Boolean({
+          description:
+            "Whether the child session should report completion/results of its task back to this session.",
+        }),
         provider: Type.Optional(
           Type.String({
             description: "Model provider for the child session.",
@@ -127,7 +122,7 @@ export function installHandoff(
         const state = context.state as HandoffToolRendererState;
         const component = state.callComponent ?? new HandoffToolComponent(theme);
         state.callComponent = component;
-        component.update(buildHandoffToolView(args), context.expanded);
+        component.update(buildHandoffToolView(args, undefined, name), context.expanded);
         return component;
       },
       renderResult(result, options, theme, context) {
@@ -143,17 +138,23 @@ export function installHandoff(
         }
 
         state.callComponent.update(
-          buildHandoffToolView(context.args, details),
+          buildHandoffToolView(context.args, details, name),
           options.expanded,
           clipboardStatusBySessionId.get(details.sessionId),
         );
         return new Text("", 0, 0);
       },
-      async execute(_toolCallId, params: HandoffToolParams, _signal, _onUpdate, ctx) {
+      async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+        if (name === "session_handoff" && deps.claimsPeers())
+          throw new Error("Peer tools belong to the current host.");
+        const launch = name === "subagent_launch" ? "subagent" : params.launch;
+        if (typeof launch !== "string") throw new Error("session_handoff requires launch.");
+        if (name === "subagent_launch" && !deps.getLaunchTargets?.().length)
+          throw new Error("Subagent launch is unavailable.");
         const modelRuntime = await deps.getModelRuntime(ctx.modelRegistry);
         return executeSessionHandoffTool(
           pi,
-          params,
+          { ...params, launch },
           ctx,
           modelRuntime,
           launchTargets,
@@ -205,7 +206,7 @@ export function installHandoff(
   });
 
   pi.on("before_agent_start", async (event, ctx) => {
-    if (!deps.getHosts?.().length && splitBackend?.identifyTerminalId && ctx) {
+    if (!deps.claimsPeers() && splitBackend?.identifyTerminalId && ctx) {
       identifiedGhosttyTerminalId =
         (await splitBackend.identifyTerminalId(ctx.cwd)) ?? identifiedGhosttyTerminalId;
     }
@@ -216,21 +217,34 @@ export function installHandoff(
   return {
     async onSessionStart(_event, ctx) {
       const models = ctx.modelRegistry.getAvailable();
-      registerHandoffTool(
+      const roster = resolveHandoffRoster({
         models,
-        createHandoffLaunchTargets({
-          pi,
-          splitBackend,
-          deferred: settings.handoff.deferred,
-          additionalTargets: deps.getLaunchTargets?.() ?? [],
-          hosts: deps.getHosts?.() ?? [],
-        }),
-        resolveHandoffRoster({
+        patterns: settings.handoff.roster,
+        scopedModels: ctx.scopedModels,
+      });
+      if (!deps.claimsPeers?.()) {
+        registerHandoffTool(
           models,
-          patterns: settings.handoff.roster,
-          scopedModels: ctx.scopedModels,
-        }),
-      );
+          createHandoffLaunchTargets({
+            pi,
+            splitBackend,
+            deferred: settings.handoff.deferred,
+            additionalTargets: [],
+          }),
+          roster,
+          "session_handoff",
+        );
+        pi.setActiveTools([...new Set([...pi.getActiveTools(), "session_handoff"])]);
+      } else {
+        pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "session_handoff"));
+      }
+      const subagentTargets = deps.getLaunchTargets?.() ?? [];
+      if (subagentTargets.length) {
+        registerHandoffTool(models, subagentTargets, roster, "subagent_launch");
+        pi.setActiveTools([...new Set([...pi.getActiveTools(), "subagent_launch"])]);
+      } else {
+        pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "subagent_launch"));
+      }
 
       await consumePendingHandoffBootstrap(
         pi,

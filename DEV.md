@@ -53,8 +53,9 @@ Pi loads extension code directly from TypeScript source. Only the detached messa
 - **Session index**: `extensions/session-index/install.ts`; recovery and reconciliation at `extensions/shared/session-index/recovery.ts`.
 - **Session hooks**: `extensions/session-hooks/install.ts`; incremental sync at `extensions/shared/session-index/sync.ts`. Startup/switch sync runs independently of feature toggles.
 - **Session handoff**: `extensions/session-handoff/install.ts`; core logic at `extensions/session-handoff/`.
-- **Hosts**: public event contract and runtime registration at `extensions/hosts/`; the composition root discovers hosts at session start and composes host and subagent wakers through `extensions/session-messaging/message-router.ts`.
-- **Session messaging**: `extensions/session-messaging/install.ts`; broker/client/runtime logic and reachable-session discovery at `extensions/session-messaging/`.
+- **Hosts**: v2 peer-ownership event contract and synchronous registration at `extensions/hosts/`; the composition root discovers claims at each session start before registering peer tools.
+- **Session messaging**: `extensions/session-messaging/install.ts` owns transport; `directory.ts` implements peer and subagent addressability. `pi/directory-tools.ts` builds both sets through shared tool execution and presenters; `pi/install.ts` owns late registration and active-tool transitions. `message-router.ts` only coordinates owned subagent wake/recovery, never host ownership.
+- **Lineage**: public custom-entry schema at `extensions/shared/lineage.ts`; extraction at `extensions/session-search/extract.ts`, incremental/full indexing at `extensions/shared/session-index/sync.ts`.
 - **Session reference picker**: `extensions/session-handoff/install.ts`; core logic at `extensions/session-handoff/picker.ts` and `extensions/session-handoff/query.ts`.
 - **Session auto-title**: `extensions/session-auto-title/install.ts`; core logic at `extensions/session-auto-title/`.
 - **Subagents**: `extensions/subagents/install.ts`; tmux launch and wake behavior, task reporting, recursive child lifecycle, classification, roster traversal, and lifecycle reconciliation at `extensions/subagents/`.

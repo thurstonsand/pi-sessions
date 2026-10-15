@@ -1,5 +1,4 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import type { Host } from "../hosts/contract.ts";
 import type { HandoffSettings } from "../shared/settings.ts";
 import { createDeferredLaunchBackend } from "./launch/deferred.ts";
 import type { SplitLaunchBackend } from "./launch/resolution.ts";
@@ -21,10 +20,8 @@ export function createHandoffLaunchTargets(options: {
   splitBackend: SplitLaunchBackend | undefined;
   deferred: HandoffSettings["deferred"];
   additionalTargets: readonly HandoffLaunchTarget[];
-  hosts?: readonly Host[];
 }): HandoffLaunchTarget[] {
-  const hosts = options.hosts ?? [];
-  const splitBackend = hosts.length ? undefined : options.splitBackend;
+  const splitBackend = options.splitBackend;
   const splitTargets = splitBackend
     ? LAUNCH_DIRECTIONS.map((direction, index) =>
         createBackendLaunchTarget(
@@ -45,19 +42,7 @@ export function createHandoffLaunchTargets(options: {
         ),
       ]
     : [];
-  return [
-    ...hosts.map((host) =>
-      createBackendLaunchTarget(
-        host.name,
-        host,
-        `'${host.name}' opens a session in ${host.name}.`,
-        true,
-      ),
-    ),
-    ...splitTargets,
-    ...deferredTargets,
-    ...options.additionalTargets,
-  ];
+  return [...splitTargets, ...deferredTargets, ...options.additionalTargets];
 }
 
 export function resolveHandoffLaunchTarget(

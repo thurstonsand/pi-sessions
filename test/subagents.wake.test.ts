@@ -143,7 +143,12 @@ function createRouter(
     (epoch) => epoch === 4,
     { ...(afterOwnedSend ? { afterSend: afterOwnedSend } : {}) },
   );
-  return new MessageRouter(messaging, [waker], () => 4, 25);
+  return new MessageRouter(
+    messaging,
+    () => waker,
+    () => 4,
+    25,
+  );
 }
 
 function createMessaging(options: { live?: string[]; waits?: boolean[] } = {}) {

@@ -1,4 +1,8 @@
-import { defineTool, type ToolDefinition } from "@earendil-works/pi-coding-agent";
+import {
+  defineTool,
+  type ExtensionContext,
+  type ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { formatError } from "../../shared/errors.ts";
 import { ExpandableContentLayout } from "../../shared/rendering/expandable-content-layout.ts";
@@ -26,10 +30,11 @@ import { buildDeliveredMessageView, buildSendingMessageView } from "./send-messa
 import type { CancelSessionResult, SendMessageRequest, SendMessageResult } from "./service.ts";
 
 interface SendMessageService {
-  sendMessage(request: SendMessageRequest): Promise<SendMessageResult>;
+  sendMessage(request: SendMessageRequest, ctx: ExtensionContext): Promise<SendMessageResult>;
 }
 
-interface ManagedCancelSessionResult {
+/** A subagent's cancel goes through its parent's ledger, which reports the state it reconciled to. */
+export interface ManagedCancelSessionResult {
   kind: "managed";
   accepted: true;
   target: {
@@ -43,17 +48,15 @@ interface ManagedCancelSessionResult {
 }
 
 interface CancelSessionService {
-  cancelSession(sessionId: string): Promise<CancelSessionResult | ManagedCancelSessionResult>;
+  cancelSession(
+    sessionId: string,
+    ctx: ExtensionContext,
+  ): Promise<CancelSessionResult | ManagedCancelSessionResult>;
 }
 
-export type SessionSendMessageRole =
-  | { kind: "plain" }
-  | { kind: "wakeCapable" }
-  | { kind: "subagent" };
-
 export interface SessionSendMessageToolOptions {
-  role: SessionSendMessageRole;
-  hostedSessions?: boolean;
+  name: string;
+  wording: SendMessageToolWording;
   getCachedRelationTo(sessionId: string | undefined): string | undefined;
   /**
    * Resolved on every call: subagent identity depends on the active branch, so a rewind can
@@ -62,10 +65,9 @@ export interface SessionSendMessageToolOptions {
   getParentSessionId?: (() => string | undefined) | undefined;
 }
 
-export type SessionCancelRole = { kind: "plain" } | { kind: "subagent" };
-
 export interface SessionCancelToolOptions {
-  role: SessionCancelRole;
+  name: string;
+  wording: SendMessageToolWording;
   /**
    * Resolved on every call: subagent identity depends on the active branch, so a rewind can
    * turn a plain session into a subagent without re-registering this tool.
@@ -73,36 +75,10 @@ export interface SessionCancelToolOptions {
   getParentSessionId?: (() => string | undefined) | undefined;
 }
 
-interface SendMessageToolWording {
+export interface SendMessageToolWording {
   description: string;
   promptSnippet: string;
   promptGuidelines: string[];
-}
-
-function getSendMessageWording(role: SessionSendMessageRole): SendMessageToolWording {
-  switch (role.kind) {
-    case "plain":
-      return {
-        description: "Send a message to another live pi session.",
-        promptSnippet: "Send a message to another live pi session",
-        promptGuidelines: ["Use session_reachable to list live sessions and find the target."],
-      };
-    case "wakeCapable":
-      return {
-        description: "Send a message to another live pi session or a subagent.",
-        promptSnippet: "Send a message to another pi session or a subagent",
-        promptGuidelines: ["Use session_reachable to discover live sessions and owned subagents."],
-      };
-    case "subagent":
-      return {
-        description: "Send a message to another subagent.",
-        promptSnippet: "Send a message to another subagent",
-        promptGuidelines: [
-          "Use session_reachable to discover reachable subagents.",
-          "Report to your parent with submit_task_report; it cannot be reached with session_send_message.",
-        ],
-      };
-  }
 }
 
 interface SendMessageRendererState {
@@ -113,21 +89,14 @@ export function createSessionSendMessageTool(
   service: SendMessageService,
   options: SessionSendMessageToolOptions,
 ): ToolDefinition {
-  const { description, promptSnippet, promptGuidelines } = getSendMessageWording(options.role);
+  const { description, promptSnippet, promptGuidelines } = options.wording;
 
   return defineTool({
-    name: "session_send_message",
+    name: options.name,
     label: "Send Message to Session",
     description,
     promptSnippet,
-    promptGuidelines: [
-      ...promptGuidelines,
-      ...(options.hostedSessions
-        ? [
-            "session_reachable also lists dormant hosted sessions; sending a message wakes them automatically.",
-          ]
-        : []),
-    ],
+    promptGuidelines,
     parameters: SEND_MESSAGE_PARAMS,
     renderCall(args, theme, context) {
       const state = context.state as SendMessageRendererState;
@@ -137,12 +106,13 @@ export function createSessionSendMessageTool(
         buildSendMessagePresentation(
           buildSendingMessageView(args, options.getCachedRelationTo(args?.session)),
           theme,
+          options.name,
         ),
         context.expanded,
       );
       return component;
     },
-    renderResult(result, options, theme, context) {
+    renderResult(result, renderOptions, theme, context) {
       if (context.isError) {
         const output = getFirstText(result);
         return new Text(output ? `\n${theme.fg("error", output)}` : "", 0, 0);
@@ -155,29 +125,36 @@ export function createSessionSendMessageTool(
       }
 
       state.callComponent.update(
-        buildSendMessagePresentation(buildDeliveredMessageView(context.args, details), theme),
-        options.expanded,
+        buildSendMessagePresentation(
+          buildDeliveredMessageView(context.args, details),
+          theme,
+          options.name,
+        ),
+        renderOptions.expanded,
       );
       return new Text("", 0, 0);
     },
-    async execute(toolCallId, params: SendMessageParams, _signal, _onUpdate, _ctx) {
-      const target = parseSessionTarget(params.session, "session_send_message");
+    async execute(toolCallId, params: SendMessageParams, _signal, _onUpdate, ctx) {
+      const target = parseSessionTarget(params.session, options.name);
       if (target === options.getParentSessionId?.()) {
         throw new Error("The parent session cannot be messaged. Use submit_task_report.");
       }
 
       const body = params.message.trim();
       if (!body) {
-        throw new Error("session_send_message requires a non-empty message.");
+        throw new Error(`${options.name} requires a non-empty message.`);
       }
 
       try {
-        const result = await service.sendMessage({
-          target,
-          body,
-          requestResponse: params.requestResponse,
-          sourceToolCallId: toolCallId,
-        });
+        const result = await service.sendMessage(
+          {
+            target,
+            body,
+            requestResponse: params.requestResponse,
+            sourceToolCallId: toolCallId,
+          },
+          ctx,
+        );
         if (!result.delivered) {
           throw new Error(result.error ?? "Message was not delivered.");
         }
@@ -203,28 +180,14 @@ export function createSessionSendMessageTool(
   });
 }
 
-function getCancelPromptGuidelines(role: SessionCancelRole): string[] {
-  switch (role.kind) {
-    case "plain":
-      return ["Only cancel a user session when the user directs it."];
-    case "subagent":
-      return [
-        "Only cancel a user session when the user directs it.",
-        "Never cancel your parent session; it is waiting on your report.",
-      ];
-  }
-}
-
 export function createSessionCancelTool(
   service: CancelSessionService,
   options: SessionCancelToolOptions,
 ): ToolDefinition {
   return defineTool<typeof CANCEL_SESSION_PARAMS, CancelSessionToolDetails>({
-    name: "session_cancel",
+    name: options.name,
     label: "Cancel a running session",
-    description: "Cancel another running pi session",
-    promptSnippet: "Cancel another running pi session",
-    promptGuidelines: getCancelPromptGuidelines(options.role),
+    ...options.wording,
     parameters: CANCEL_SESSION_PARAMS,
     renderResult(result, options, theme, context) {
       const output = getFirstText(result);
@@ -244,14 +207,17 @@ export function createSessionCancelTool(
       }
       return new Text(text, 0, 0);
     },
-    async execute(_toolCallId, params: CancelSessionParams) {
-      const target = parseSessionTarget(params.session, "session_cancel");
+    async execute(_toolCallId, params: CancelSessionParams, _signal, _onUpdate, ctx) {
+      const target = parseSessionTarget(params.session, options.name);
       if (target === options.getParentSessionId?.()) {
         throw new Error("The parent session cannot be cancelled. It is waiting on your report.");
       }
 
-      const result = await service.cancelSession(target);
+      const result = await service.cancelSession(target, ctx);
       if (result.kind === "managed") {
+        if (!isConfirmedManagedCancellation(result.state)) {
+          throw new Error(buildUnknownCancellationError(result.target));
+        }
         const details: CancelSessionToolDetails = {
           kind: "managed",
           accepted: true,
@@ -260,16 +226,8 @@ export function createSessionCancelTool(
           ...(result.cancelId === undefined ? {} : { cancelId: result.cancelId }),
           ...(result.relation === undefined ? {} : { relation: result.relation }),
         };
-        if (!isConfirmedManagedCancellation(result.state)) {
-          throw new Error(buildUnknownCancellationError(result.target));
-        }
         return {
-          content: [
-            {
-              type: "text" as const,
-              text: buildCancelSessionModelText(details),
-            },
-          ],
+          content: [{ type: "text" as const, text: buildCancelSessionModelText(details) }],
           details,
         };
       }

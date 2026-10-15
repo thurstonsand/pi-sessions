@@ -20,6 +20,23 @@ const theme = {
 };
 
 describe("handoff board", () => {
+  it("shows only subagents when peers belong to a host", () => {
+    const state = snapshot(
+      [subagent("worker", "Owned worker", "busy")],
+      [userSession("user", "Peer receipt", "deferred", "2026-03-25T12:10:00.000Z")],
+    );
+    const board = createBoard({ ...state, showUserSessions: false });
+    expect(board.render(86).join("\n")).toContain("Owned worker");
+    board.handleInput("\t");
+    const hosted = board.render(86).join("\n");
+    expect(hosted).toContain("Owned worker");
+    expect(hosted).not.toContain("User sessions");
+    expect(hosted).not.toContain("Peer receipt");
+    const standalone = createBoard(state);
+    standalone.handleInput("\t");
+    expect(standalone.render(86).join("\n")).toContain("Peer receipt");
+  });
+
   it("renders the quiet aligned grid and keeps wide titles within the component width", () => {
     const board = createBoard(
       snapshot([
@@ -752,6 +769,7 @@ describe("user sessions", () => {
     const result = await loadHandoffBoardSnapshot(
       [toolReceipt("user", "2026-03-25T12:10:00.000Z", "left")],
       {
+        showUserSessions: () => true,
         listLiveSessions: async () => [],
         readSessionEntries: (path) => {
           expect(path).toBe("/tmp/user.jsonl");
@@ -826,6 +844,7 @@ function snapshot(
     userSessions,
     liveSessionIds: new Set(),
     hasLiveSessionEvidence: true,
+    showUserSessions: true,
   };
 }
 

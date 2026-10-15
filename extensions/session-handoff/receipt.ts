@@ -35,7 +35,7 @@ export function parseHandoffLaunchReceiptEntry(
   if (
     entry.type === "message" &&
     entry.message.role === "toolResult" &&
-    entry.message.toolName === "session_handoff"
+    (entry.message.toolName === "session_handoff" || entry.message.toolName === "subagent_launch")
   ) {
     return safeParseTypeBoxValue(HANDOFF_LAUNCH_RECEIPT_SCHEMA, entry.message.details);
   }

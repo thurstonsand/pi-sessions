@@ -277,7 +277,7 @@ describe("session handoff extension", () => {
     ]);
   });
 
-  it("offers only the registered host when deferred handoffs are disabled", async () => {
+  it("does not register peer handoff when a host claims peers", async () => {
     mockLoadSettings.mockReturnValue({
       ...mockLoadSettings(),
       handoff: {
@@ -289,34 +289,20 @@ describe("session handoff extension", () => {
     const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
     const pi = createPiApi(handlers, new Map(), vi.fn());
 
-    installHandoffAndWire(
-      installHandoff,
-      pi,
-      [],
-      [{ name: "swb", launch: vi.fn().mockResolvedValue({ success: true }) }],
-    );
+    installHandoffAndWire(installHandoff, pi, [], [{ name: "swb", peers: true }]);
     await handlers.get("session_start")?.(
       {},
       createSessionStartContext({ sessionId: "x" }) as never,
     );
 
-    const definition = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0] as {
-      promptSnippet: string;
-    };
-    expect(launchValues(definition)).toEqual(["swb"]);
-    expect(definition.promptSnippet).toBe("Hand off context to another Pi session");
-    expect(promptGuidelines(definition)[0]).toBe(
-      "Use session_handoff host launches only when the user requests one.",
-    );
-    expect(JSON.stringify(definition)).not.toMatch(/subagent|deferred/);
+    expect(pi.registerTool).not.toHaveBeenCalled();
   });
 
-  it("offers an injected subagent target and defaults its response request to true", async () => {
+  it("offers an injected subagent target and passes its response request through", async () => {
     const launch = vi.fn().mockResolvedValue({ success: true, backend: "tmux" });
     const target = {
       value: "subagent" as const,
       description: "Detached subagent launch.",
-      requestResponseDefault: true,
       bootstrapMode: "automatic" as const,
       describeSubagentChild: (input: {
         childSessionId: string;
@@ -341,12 +327,14 @@ describe("session handoff extension", () => {
       goal: "Investigate it",
       title: "Investigate",
       launch: "subagent",
+      requestResponse: true,
     });
 
     const definition = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
-    expect(launchValues(definition)).toContain("subagent");
+    expect(definition.name).toBe("subagent_launch");
+    expect(definition.parameters.properties).not.toHaveProperty("launch");
     expect(promptGuidelines(definition)).toContain(
-      'Use session_handoff with launch: "subagent" for a concrete, bounded task that can proceed independently while useful work continues in the current session.',
+      "Use subagent_launch for a concrete, bounded task that can proceed independently while useful work continues in the current session.",
     );
     expect(launch).toHaveBeenCalledWith(expect.objectContaining({ requestResponse: true }));
     const preparation = mockPrepareHandoffLaunch.mock.calls.at(-1)?.[0] as {
@@ -633,8 +621,8 @@ function installHandoffAndWire(
         available: modelRegistry.getAvailable(),
       }) as never,
     getLaunchTargets: () => additionalTargets,
-    getHosts: () => hosts,
-    board: {},
+    claimsPeers: () => hosts.length > 0,
+    board: { showUserSessions: () => hosts.length === 0 },
   });
   if (lifecycle.onSessionStart) {
     pi.on("session_start", lifecycle.onSessionStart as never);
@@ -654,6 +642,8 @@ function createPiApi(
     registerEntryRenderer: vi.fn(),
     setSessionName: vi.fn(),
     getThinkingLevel: vi.fn(),
+    getActiveTools: vi.fn(() => [] as string[]),
+    setActiveTools: vi.fn(),
     registerCommand,
     registerTool: vi.fn(),
     registerShortcut: vi.fn(

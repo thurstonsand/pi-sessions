@@ -18,7 +18,7 @@ export function buildHandoffToolPresentation(
 
   return {
     header: [
-      theme.fg("accent", "session_handoff"),
+      theme.fg("accent", model.toolName ?? "session_handoff"),
       theme.fg("dim", `[${model.launch ?? PENDING}]`),
       theme.bold(model.title ?? PENDING),
     ].join(" "),

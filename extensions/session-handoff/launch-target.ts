@@ -1,8 +1,7 @@
 import type { SessionManager } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
-import type { Host } from "../hosts/contract.ts";
 import { formatError } from "../shared/errors.ts";
-import type { ClipboardStatus } from "./launch/backend.ts";
+import type { ClipboardStatus, LaunchBackend } from "./launch/backend.ts";
 import type { HandoffSubagent } from "./metadata.ts";
 import type { PreparedHandoff } from "./spawn.ts";
 
@@ -58,7 +57,6 @@ export type HandoffLaunchTargetOutcome =
 export interface HandoffLaunchTarget {
   value: HandoffLaunchValue;
   description?: string | undefined;
-  requestResponseDefault: boolean;
   bootstrapMode: "review" | "automatic";
   /** Unattended children skip the startup trust prompt; watched ones let the user answer it. */
   approveProjectTrust: boolean;
@@ -75,17 +73,14 @@ export interface HandoffLaunchTarget {
 
 export function createBackendLaunchTarget(
   value: string,
-  host: Host,
+  host: LaunchBackend,
   description?: string | undefined,
-  external = false,
 ): HandoffLaunchTarget {
   return {
     value,
     ...(description ? { description } : {}),
-    requestResponseDefault: false,
-    bootstrapMode: external ? "automatic" : "review",
-    approveProjectTrust: external,
-    useDefaultSessionDir: external,
+    bootstrapMode: "review",
+    approveProjectTrust: false,
     prepareChild() {},
     async launch(input) {
       try {

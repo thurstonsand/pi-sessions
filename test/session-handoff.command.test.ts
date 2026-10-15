@@ -18,7 +18,9 @@ describe("/handoff", () => {
 
     await command.handler("", ctx);
 
-    expect(mockOpenHandoffBoard).toHaveBeenCalledWith(ctx, {});
+    expect(mockOpenHandoffBoard).toHaveBeenCalledWith(ctx, {
+      showUserSessions: expect.any(Function),
+    });
   });
 
   it("rejects launch arguments", async () => {
@@ -71,7 +73,8 @@ async function installCommand(): Promise<{
     } as never,
     index: { path: "/tmp/index.sqlite" },
     getModelRuntime: vi.fn(),
-    board: {},
+    claimsPeers: () => false,
+    board: { showUserSessions: () => true },
   });
 
   if (!command) {

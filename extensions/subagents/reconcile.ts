@@ -8,7 +8,12 @@ import {
   type TmuxExecutor,
   tmuxSessionName,
 } from "../shared/tmux.ts";
-import { classifySubagent, type SubagentEvidence, type SubagentState } from "./classify.ts";
+import {
+  classifySubagent,
+  isRunningSubagentState,
+  type SubagentEvidence,
+  type SubagentState,
+} from "./classify.ts";
 import {
   type ChildSubagentLifecycle,
   collectParentLedger,
@@ -220,8 +225,11 @@ export class SubagentReconciler {
         continue;
       }
 
+      // A running child writes its report to its own transcript before sending it live; recovering it in
+      // between would deliver it as recovered. Once the child stops, recovery is the report's only path.
+      const reports = isRunningSubagentState(child.state) ? [] : child.reports;
       let reportLedger: ParentSubagentLedger | undefined;
-      for (const report of child.reports) {
+      for (const report of reports) {
         if (this.hasSentReport(report.reportId)) {
           continue;
         }

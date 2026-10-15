@@ -28,7 +28,7 @@ export interface HandoffToolParams {
   title: string;
   launch: HandoffLaunchValue;
   cwd?: string | undefined;
-  requestResponse?: boolean | undefined;
+  requestResponse: boolean;
   provider?: string | undefined;
   model?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
@@ -84,7 +84,7 @@ export async function executeSessionHandoffTool(
 
   resolveHandoffSource(ctx.sessionManager, sourceLeafId);
 
-  const requestResponse = params.requestResponse ?? target.requestResponseDefault;
+  const requestResponse = params.requestResponse;
   const provider = params.provider?.trim();
   const modelId = params.model?.trim();
   if (Boolean(provider) !== Boolean(modelId)) {

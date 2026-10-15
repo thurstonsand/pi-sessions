@@ -18,7 +18,7 @@ export class MessageRouter {
 
   constructor(
     private readonly messaging: WakeMessaging,
-    private readonly wakers: readonly SessionWaker[],
+    private readonly getWaker: () => SessionWaker | undefined,
     private readonly getEpoch: () => number,
     private readonly readyTimeoutMs = 30_000,
   ) {}
@@ -32,13 +32,8 @@ export class MessageRouter {
       if (!isTargetDeparture(result)) return result;
       failedLiveSend = result;
     }
-    let owner: SessionWaker | undefined;
-    for (const waker of this.wakers) {
-      if (await waker.owns(request.target)) {
-        owner = waker;
-        break;
-      }
-    }
+    const waker = this.getWaker();
+    const owner = waker && (await waker.owns(request.target)) ? waker : undefined;
     this.requireCurrent(epoch);
     if (!owner) return failedLiveSend ?? this.messaging.sendMessage(request);
 

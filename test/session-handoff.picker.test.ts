@@ -562,7 +562,13 @@ describe("session picker mouse", () => {
     expect(picker.handleMouse(mouse("drag", 7, 4))).toBeUndefined();
     expect(picker.handleMouse(mouse("click", 5, 4))).toMatchObject({ handled: true, focus: true });
     picker.handleInput("X");
-    expect(stripAnsi(picker.render(120)[4] ?? "")).toContain("seXlector");
+    expect(
+      stripAnsi(
+        (picker.render(120)[4] ?? "")
+          .replaceAll("\u001b_pi:fc\u0007", "")
+          .replaceAll("\u001b_pi:/fc\u0007", ""),
+      ),
+    ).toContain("seXlector");
   });
 
   it("runs advertised legend actions without making separators clickable", () => {

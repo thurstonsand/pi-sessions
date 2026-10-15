@@ -231,6 +231,9 @@ function applyTailSync(
   sessionOrigin?: SessionOrigin,
 ): boolean {
   return db.transaction((): boolean => {
+    // A lineage entry can arrive after the initial header sync. Re-read the header to
+    // preserve its precedence and rebuild lineage through the normal full-sync path.
+    if (tail.scan.lineage) return false;
     // Another process may have advanced the index between our baseline read
     // and this transaction; the tail deltas would then double-count.
     const current = getSessionRowByPath(db, baseline.sessionPath);

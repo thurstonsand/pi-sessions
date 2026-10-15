@@ -5,6 +5,7 @@ import type { SendMessageViewModel } from "./send-message-view-model.ts";
 export function buildSendMessagePresentation(
   model: SendMessageViewModel,
   theme: RenderTheme,
+  toolName = "session_send_message",
 ): ExpandableContentPresentation {
   const target =
     model.status === "delivered"
@@ -18,7 +19,7 @@ export function buildSendMessagePresentation(
   const action = model.status === "delivered" ? "delivered to" : "to";
 
   return {
-    header: `${theme.fg("toolTitle", theme.bold("session_send_message"))} ${theme.fg(
+    header: `${theme.fg("toolTitle", theme.bold(toolName))} ${theme.fg(
       "muted",
       `${action} ${target}${metadataHint}`,
     )}`,

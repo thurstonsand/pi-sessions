@@ -21,7 +21,7 @@ export function buildHandoffLaunchSchema(targets: readonly HandoffLaunchTarget[]
 }
 
 const SUBAGENT_GUIDELINES = [
-  'Use session_handoff with launch: "subagent" for a concrete, bounded task that can proceed independently while useful work continues in the current session.',
+  "Use subagent_launch for a concrete, bounded task that can proceed independently while useful work continues in the current session.",
   "Do not launch a subagent for work that is trivial, duplicates work already underway, requires frequent coordination, or is tightly coupled to the current session's immediate next step.",
   "Tell every subagent explicitly whether it may modify files or should only investigate and report.",
   "Give concurrent subagents disjoint responsibilities and non-overlapping write scopes.",
@@ -73,14 +73,6 @@ function describeUserFacingLaunchKinds(targets: readonly HandoffLaunchTarget[]):
   const isDirection = (value: string) => LAUNCH_DIRECTIONS.some((direction) => direction === value);
   const kinds = [
     targets.some((target) => isDirection(target.value)) ? "directional" : undefined,
-    targets.some(
-      (target) =>
-        target.value !== SUBAGENT_LAUNCH &&
-        target.value !== DEFERRED_LAUNCH &&
-        !isDirection(target.value),
-    )
-      ? "host"
-      : undefined,
     targets.some((target) => target.value === DEFERRED_LAUNCH) ? "deferred" : undefined,
   ];
   return kinds.filter((kind) => kind !== undefined).join(" or ");

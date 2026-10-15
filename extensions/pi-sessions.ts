@@ -9,18 +9,15 @@ import { installAutoTitle } from "./session-auto-title/install.ts";
 import { installHandoff } from "./session-handoff/install.ts";
 import { installHooks } from "./session-hooks/install.ts";
 import { installIndex } from "./session-index/install.ts";
+import { createPeerDirectory, createSubagentDirectory } from "./session-messaging/directory.ts";
 import { installMessaging } from "./session-messaging/install.ts";
-import { MessageRouter, type SessionWaker } from "./session-messaging/message-router.ts";
-import { createSessionReachableTool } from "./session-messaging/pi/reachable-tool.ts";
-import {
-  createSessionCancelTool,
-  createSessionSendMessageTool,
-} from "./session-messaging/pi/tools.ts";
+import { MessageRouter } from "./session-messaging/message-router.ts";
+import { installDirectoryTools } from "./session-messaging/pi/install.ts";
 import { installSearch } from "./session-search/install.ts";
 import type { SessionLifecycle } from "./shared/composition.ts";
 import { createSessionModelRuntime, type ModelRuntimeProvider } from "./shared/model-runtime.ts";
 import { loadSettings, readCompactionSettings } from "./shared/settings.ts";
-import { installSubagents } from "./subagents/install.ts";
+import { installSubagents, type SubagentsHandle } from "./subagents/install.ts";
 
 /**
  * The single advertised entrypoint. It loads settings once, constructs each feature in
@@ -57,65 +54,42 @@ export default function piSessions(pi: ExtensionAPI): void {
   if (messaging) {
     lifecycles.push(messaging);
   }
-  const wakers: SessionWaker[] = [hosts];
-  const messageRouter = messaging
-    ? new MessageRouter(messaging, wakers, () => sessionEpoch)
+  const messageRouter: MessageRouter | undefined = messaging
+    ? new MessageRouter(
+        messaging,
+        () => subagents?.waker,
+        () => sessionEpoch,
+      )
     : undefined;
-  const subagents =
+  const subagents: SubagentsHandle | undefined =
     settings.features.subagents && messaging && messageRouter
       ? installSubagents(pi, {
           settings,
           messaging,
           readCompactionSettings,
           sendMessage: (request) => messageRouter.sendMessage(request),
-          hasHostedSessions: () => hosts.getHosts().some((host) => Boolean(host.wake)),
         })
       : undefined;
   if (subagents) {
-    wakers.unshift(subagents.waker);
     lifecycles.push(subagents);
   }
-  const registerMessagingTools = (): void => {
-    if (!messaging || !messageRouter) return;
-    const isSubagent = subagents?.getParentSessionId() !== undefined;
-    const hostedSessions = hosts.getHosts().some((host) => Boolean(host.wake));
-    pi.registerTool(
-      createSessionSendMessageTool(messageRouter, {
-        role: isSubagent
-          ? { kind: "subagent" }
-          : subagents
-            ? { kind: "wakeCapable" }
-            : { kind: "plain" },
-        hostedSessions,
-        getCachedRelationTo: messaging.getCachedRelationTo,
-        ...(subagents ? { getParentSessionId: () => subagents.getParentSessionId() } : {}),
-      }),
-    );
-    pi.registerTool(
-      createSessionCancelTool(subagents ?? messaging, {
-        role: isSubagent ? { kind: "subagent" } : { kind: "plain" },
-        ...(subagents ? { getParentSessionId: () => subagents.getParentSessionId() } : {}),
-      }),
-    );
-    pi.registerTool(
-      createSessionReachableTool({
-        indexPath: index.path,
-        hostedSessions,
-        listSessions: () => messaging.listSessions(),
-        listHostedSessions: () => hosts.listSessions(),
-        getRelationTo: messaging.getCachedRelationTo,
-        ...(subagents
-          ? {
-              listSubagents: async (scope) => (await subagents.roster.resolve(scope)).entries,
-              getParentSessionId: () => subagents.getParentSessionId(),
-            }
+  const directoryTools = messaging
+    ? installDirectoryTools(pi, {
+        peers: createPeerDirectory(messaging, {
+          indexPath: index.path,
+          listSessions: () => messaging.listSessions(),
+          getRelationTo: messaging.getCachedRelationTo,
+          getParentSessionId: () => subagents?.getParentSessionId(),
+        }),
+        ...(subagents && messageRouter
+          ? { subagents: createSubagentDirectory(subagents, messageRouter, messaging, index.path) }
           : {}),
-      }),
-    );
-  };
-  registerMessagingTools();
+        claimsPeers: () => hosts.claimsPeers(),
+      })
+    : undefined;
   if (settings.features.handoff) {
     const board = {
+      showUserSessions: () => !hosts.claimsPeers(),
       roster: subagents?.roster,
       cancelSubagent: subagents
         ? (sessionId: string) => subagents.cancelSession(sessionId)
@@ -128,7 +102,7 @@ export default function piSessions(pi: ExtensionAPI): void {
         settings,
         index,
         getModelRuntime,
-        getHosts: () => hosts.getHosts(),
+        claimsPeers: () => hosts.claimsPeers(),
         ...(subagents ? { getLaunchTargets: () => subagents.getLaunchTargets() } : {}),
         board,
       }),
@@ -167,7 +141,7 @@ export default function piSessions(pi: ExtensionAPI): void {
     for (const lifecycle of lifecycles) {
       await lifecycle.onSessionStart?.(event, ctx);
     }
-    registerMessagingTools();
+    directoryTools?.refresh();
     for (const lifecycle of lifecycles) {
       lifecycle.onSessionReady?.(ctx);
     }

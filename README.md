@@ -68,8 +68,9 @@ Open the frontend implementation task in a session to the right.
 | ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------- |
 | Session Search     | `session_search` pi tool                                               | Search through old sessions                             |
 | Session Ask        | `session_ask` pi tool                                                  | Ask questions about old sessions                        |
-| Session Handoff    | `session_handoff` pi tool, `/handoff` board                            | Start and manage focused child sessions                 |
-| Session Messaging  | `session_reachable`, `session_send_message`, `session_cancel` pi tools | Coordinate between live Pi sessions and own subagents   |
+| Session Handoff    | `session_handoff` pi tool, `/handoff` board                            | Start user-facing child sessions                        |
+| Session Messaging  | `session_reachable`, `session_send_message`, `session_cancel` pi tools | Coordinate between live user-facing Pi sessions          |
+| Subagents          | `subagent_list`, `subagent_send`, `subagent_cancel`, `subagent_launch`, `submit_task_report` | Delegate and manage background work |
 | Session Picker     | `Alt+O`                                                                | Reference old sessions in your prompt                   |
 | Session Index      | `/session-index` slash command                                         | Shows index status and rebuilds the local session index |
 | Session Auto Title | in background, `/title` slash command                                  | Give sessions titles                                    |
@@ -107,34 +108,44 @@ Use `kind: "user"` or `kind: "subagent"` to filter by session type across the wh
 
 ## Session Handoff
 
-The `session_handoff` tool lets the agent create a child session with a self-contained task. Ask for a direction when you want a visible split, ask for a deferred handoff when you only want the prepared session, or let the agent delegate suitable independent work to a background subagent.
+The `session_handoff` tool creates a user-facing child session with a self-contained task. Ask for a direction when you want a visible split, or a deferred handoff when you only want the prepared session. Use `subagent_launch` to delegate suitable independent work to a background subagent.
 
 Directional launches use tmux when the current terminal is inside tmux, or Ghostty on macOS. Deferred launches create the child without starting it and copy its resume command to the clipboard. A background subagent runs in a detached tmux window and reports back when finished; note that subagents are started with `--approve`, meaning pi will always start in the directory as trusted.
 
-When an external host registers, its name replaces all directional launch values, even inside tmux or Ghostty. Deferred and subagent launches remain available. External-host children start automatically without draft review; their resume commands also carry `--approve`.
+When a host claims peers, pi-sessions leaves all user-facing coordination and launches to it. Subagent tools remain available; external-host launch targets are not part of pi-sessions.
 
-Run `/handoff` to open the **Handoffs** board. The Subagents and User sessions tabs show status, age, launch details, and the actions currently available: stop, copy an observation command, or copy a resume command.
+Run `/handoff` to open the **Handoffs** board. The Subagents and User sessions tabs show status, age, launch details, and the actions currently available: stop, copy an observation command, or copy a resume command. With a peer-claiming host, only Subagents are shown.
+
+Both launch tools take `goal`, `title` (at most 64 characters), and `requestResponse`, with optional `cwd`, `provider`, `model`, and `thinkingLevel` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). `session_handoff` additionally requires `launch` (`left`, `right`, `up`, `down` when a split backend is available, or `deferred` when enabled). `subagent_launch` has no `launch` parameter. Provider and model must be supplied together.
 
 ## Session Messaging
 
-Agents can coordinate with live Pi sessions and their own subagents:
+Standalone agents can coordinate with live user-facing Pi sessions:
 
-- `session_reachable` lists the sessions this session can send messages to
-- `session_send_message` sends a message to a live session or own subagent
-- `session_cancel` aborts another live session's current turn
+- `session_reachable({})` lists live user sessions only; there is no scope parameter
+- `session_send_message({ session, message, requestResponse })` sends a message to a live user session
+- `session_cancel({ session })` aborts another live user session's current turn
 
-Incoming messages start the recipient agent when idle and steer it when already running. Messaging a dormant owned subagent or a dormant session listed by a wake-capable host resumes it automatically. Hosted sessions appear in `session_reachable` with a `host` field and a broker-derived `live`, `starting`, or `dormant` state. Other inactive sessions cannot receive messages, but you can still use `session_search` and `session_ask` with them.
+Subagent coordination is a separate addressable directory:
 
-## Host extension API (v1)
+- `subagent_list({ scope? })` lists the ledger/roster with `branch` (default) or `tree` scope
+- `subagent_send({ session, message, requestResponse })` sends to a live subagent (including siblings) or a dormant owned worker, waking owned workers automatically
+- `subagent_cancel({ session })` stops a subagent, recording owned cancellation intent before teardown
+- `subagent_launch` creates a delegated background worker (parameters above)
+- `submit_task_report({ status, summary, details?, references?, nextSteps? })` reports to the parent; available only in a subagent session
 
-A host controls where user-facing handoff children run. Built-in hosts launch tmux splits, Ghostty splits, or deferred resume commands. External extensions register over `pi.events`; neither extension imports the other.
+Pass bare session UUIDs, not `@session:` tokens. A subagent cannot message or cancel its parent; it reports through `submit_task_report`. Incoming messages start an idle recipient and steer a running one. Other dormant sessions cannot receive messages, but remain searchable with `session_search` and `session_ask`. Cancellation results describe delivery and, when available, the resulting worker state; they do not expose transport/managed subsystem tags.
+
+## Host extension API
+
+A host claims ownership of peer coordination, rather than supplying launch, listing, or wake callbacks. External extensions register over `pi.events`; neither extension imports the other.
 
 Install a listener during extension initialization, **not** in your `session_start` handler:
 
 ```ts
-pi.events.on("pi-sessions:hosts:v1", (request) => {
+pi.events.on("pi-sessions:hosts", (request) => {
   const { register } = request as HostRegistrationRequest;
-  register({ name: "swb", launch, listSessions, wake });
+  register({ name: "swb", peers: true });
 });
 ```
 
@@ -147,37 +158,30 @@ interface HostRegistrationRequest {
 
 interface Host {
   name: string;
-  launch(input: HostLaunchInput): Promise<HostLaunchResult>;
-  listSessions?(): Promise<HostSession[]>;
-  wake?(sessionId: string): Promise<void>;
-}
-
-interface HostLaunchInput {
-  sessionId: string;
-  sessionFile: string;
-  cwd: string;
-  title: string;
-  model: string;
-  resumeCommand: string;
-}
-
-type HostLaunchResult =
-  | { success: true; clipboardStatus?: "copied" | "failed" }
-  | { success: false; error: string };
-
-interface HostSession {
-  sessionId: string;
-  cwd: string;
-  title: string;
+  peers: true;
 }
 ```
 
-- **Registration:** pi-sessions emits `pi-sessions:hosts:v1` at each `session_start`, including reloads and session switches. Call `register` synchronously, before returning or awaiting anything. Registration freezes when `emit` returns; late calls throw. Names must match `[a-z][a-z0-9-]*`, be unique, and cannot be `left`, `right`, `up`, `down`, `deferred`, `subagent`, `tmux`, or `ghostty`. Registration and callback results are validated with TypeBox. Multiple external hosts are offered in registration order; any external host suppresses all split targets. Without one, precedence remains tmux, then Ghostty, then deferred. Subagent availability still depends on tmux installation and delegation depth.
-- **Launch:** the child file, lineage, title, and automatic bootstrap are durable before `launch` runs. External-host children always use Pi's default session directory for `cwd`, even when the parent uses a custom directory. Start interactive Pi in that cwd with `--session-id`, `--approve`, and `--model` using the supplied `model` (including its thinking suffix, such as `provider/model:high`), or execute `resumeCommand`. Preserve the same Pi agent directory and load pi-sessions in the child. Do not inject a second initial prompt. Return `{ success: true }` after starting the process; return `{ success: false, error }` or throw on failure. The tool surfaces the surviving child's resume command on failure. `clipboardStatus` is used by the deferred host; external hosts normally omit it.
-- **Discovery:** `listSessions()` returns all open user-facing sessions this host can wake, whether running or dormant. Exclude closed sessions and subagents. It is called on demand by `session_reachable` and dormant-message routing, not polled in the background. Return unique session IDs; competing host ownership is an error. Hosts without both `listSessions` and `wake` do not contribute dormant reachability. `wake` without `listSessions` is invalid.
-- **Wake:** `wake(sessionId)` starts or resumes an owned session and resolves with no value; throw on failure. It must be idempotent across callers because different Pi processes can wake the same target concurrently. Within one sender, concurrent wakes are coalesced. After it resolves, pi-sessions waits **30 seconds** for broker registration before delivering. It retries wake/delivery once if the target disconnects before acceptance, but does not restart a host session on registration timeout. The broker alone supplies liveness; do not wait for broker readiness inside `wake`. Host callbacks have no imposed timeout: bound your own I/O. Built-in split launch commands use a 15-second timeout; subagent stale-window recovery retains two 30-second registration waits.
+- **Registration:** pi-sessions emits `pi-sessions:hosts` at every `session_start`, including reloads and switches. Register synchronously before returning or awaiting anything. Registration freezes when `emit` returns; late calls throw. Names must match `[a-z][a-z0-9-]*`, be unique, and cannot be `left`, `right`, `up`, `down`, `deferred`, `subagent`, `tmux`, or `ghostty`. TypeBox validates exactly `{ name, peers: true }`; additional properties are rejected.
+- **Ownership:** any registered claim suppresses pi-sessions' `session_reachable`, `session_send_message`, `session_cancel`, and `session_handoff`. Peer tools are never registered at extension load, so a host may register its own tools at load without conflicts. Discovery runs before late registration. Pi currently has no tool-unregistration API: definitions retained from a prior standalone session are deactivated with `setActiveTools` and execution-guarded; reload rebuilds registrations. A new standalone session reactivates pi-sessions' tools.
+- **Subagents:** `subagent_list`, `subagent_send`, `subagent_cancel`, `subagent_launch`, and `submit_task_report` remain pi-sessions-owned under a host. Availability still follows feature settings, tmux installation, delegation depth, and whether the caller is a subagent. The host supplies no waker; owned-worker recovery retains its two 30-second broker-registration waits.
 
-Subagents are not hosts. They retain parent-owned tmux windows, automatic approval, their own ledger, and their own wake/recovery policy. `/handoff` remains a receipt board; it accepts external-host launch receipts but does not provide a separate launch picker or wake action.
+## Durable lineage entry
+
+Any extension may append this custom entry to a child session:
+
+```ts
+{
+  type: "custom",
+  customType: "pi-sessions.lineage",
+  data: {
+    parentSessionId: "parent-session-uuid",
+    parentSessionFile: "/absolute/path/to/parent.jsonl", // optional
+  },
+}
+```
+
+Using Pi's extension API, call `pi.appendEntry("pi-sessions.lineage", { parentSessionId, parentSessionFile? })` in the child (Pi supplies the entry id, timestamp, and tree link). The index uses the first TypeBox-valid lineage entry only when the session header has no `parentSession`; the header takes precedence. The parent id works even without an accessible parent file. This durable relation survives leaving a host; the SQLite index is only its rebuildable cache.
 
 ## Session picker
 
@@ -213,7 +217,7 @@ If you want to override the shortcut, put this in your `~/.pi/agent/settings.jso
 
 `roster` limits which models a handoff may launch a child session on. Defaults to pi's own `enabledModels` scoping, then to all configured models. May optionally include a thinking level; listing a model more than once adds to the levels it allows.
 
-`deferred.enable` (default `true`) offers the `deferred` launch. Turn it off, along with `sessions.subagents.enable`, to leave only host and split launches.
+`deferred.enable` (default `true`) offers the `deferred` peer launch. Turn it off to leave only split launches. Hosts own their own launch policy.
 
 `deferred.copyToClipboard` (default `true`) controls whether deferred handoffs copy the resume command to the clipboard. When off, the resume command is only shown in the tool call.
 

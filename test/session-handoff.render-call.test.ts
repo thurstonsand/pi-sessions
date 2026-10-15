@@ -41,7 +41,7 @@ function render(
   width = 120,
 ): string {
   const component = new HandoffToolComponent(theme);
-  component.update(buildHandoffToolView(renderArgs, result), expanded, "copied");
+  component.update(buildHandoffToolView(renderArgs, result, "session_handoff"), expanded, "copied");
   return component.render(width).join("\n");
 }
 

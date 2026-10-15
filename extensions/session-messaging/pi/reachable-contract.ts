@@ -9,9 +9,9 @@ const SCOPE_SCHEMA = Type.Union([
 /** Registered when subagents are active; the roster is what makes branch/tree answerable. */
 export const SESSION_REACHABLE_PARAMS = Type.Object({
   scope: Type.Optional(
-    Type.Union([Type.Literal("user"), Type.Literal("branch"), Type.Literal("tree")], {
+    Type.Union([Type.Literal("branch"), Type.Literal("tree")], {
       description:
-        'Which sessions to list: "user" for live user-facing sessions, "branch" for subagents launched from the active conversation branch, "tree" for subagents launched anywhere in this session\'s conversation tree. Defaults to "user".',
+        '"branch" lists subagents from the active conversation branch; "tree" lists subagents anywhere in this session\'s conversation tree. Defaults to "branch".',
     }),
   ),
 });
@@ -26,8 +26,7 @@ const REACHABLE_USER_SESSION_SCHEMA = Type.Object({
   cwd: Type.Optional(Type.String()),
   modifiedAt: Type.Optional(Type.String()),
   relation: Type.Optional(Type.String()),
-  host: Type.Optional(Type.String()),
-  state: Type.Union([Type.Literal("live"), Type.Literal("starting"), Type.Literal("dormant")]),
+  state: Type.Union([Type.Literal("live"), Type.Literal("starting")]),
 });
 
 const REACHABLE_SUBAGENT_SCHEMA = Type.Object({

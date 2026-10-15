@@ -69,7 +69,8 @@ describe("cancel-session presentation", () => {
 
   it("renders the title collapsed and full session id expanded", () => {
     const tool = createSessionCancelTool({ cancelSession: vi.fn() } as never, {
-      role: { kind: "plain" },
+      name: "subagent_cancel",
+      wording: { description: "Cancel", promptSnippet: "Cancel", promptGuidelines: [] },
     }) as {
       renderResult(
         result: unknown,

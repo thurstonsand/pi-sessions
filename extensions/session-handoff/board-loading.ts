@@ -5,6 +5,7 @@ import { HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE } from "./metadata.ts";
 import { parseHandoffLaunchReceiptEntry } from "./receipt.ts";
 
 export interface HandoffBoardServices {
+  showUserSessions: () => boolean;
   roster?: SubagentRoster | undefined;
   cancelSubagent?: ((sessionId: string) => Promise<unknown>) | undefined;
   listLiveSessions?: (() => Promise<string[]>) | undefined;
@@ -15,7 +16,8 @@ export async function loadHandoffBoardSnapshot(
   entries: readonly SessionEntry[],
   services: HandoffBoardServices,
 ): Promise<HandoffBoardSnapshot> {
-  const userSessions = collectUserSessions(entries);
+  const showUserSessions = services.showUserSessions();
+  const userSessions = showUserSessions ? collectUserSessions(entries) : [];
   const [branchRoster, liveSessionIds, hydratedUserSessions] = await Promise.all([
     services.roster?.resolve("branch") ?? Promise.resolve({ entries: [], total: 0 }),
     services.listLiveSessions?.() ?? Promise.resolve([]),
@@ -29,6 +31,7 @@ export async function loadHandoffBoardSnapshot(
     ),
   ]);
   return {
+    showUserSessions,
     subagents: branchRoster.entries,
     userSessions: hydratedUserSessions,
     liveSessionIds: new Set(liveSessionIds),

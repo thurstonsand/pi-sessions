@@ -25,15 +25,20 @@ describe("handoff-tool view model", () => {
 
   it("normalizes progressive arguments without presentation concerns", () => {
     expect(
-      buildHandoffToolView({
-        launch: " deferred ",
-        title: " Review rendering ",
-        goal: " Inspect the renderer. ",
-        provider: " openai ",
-        model: " gpt-5.4 ",
-        thinkingLevel: " high ",
-      }),
+      buildHandoffToolView(
+        {
+          launch: " deferred ",
+          title: " Review rendering ",
+          goal: " Inspect the renderer. ",
+          provider: " openai ",
+          model: " gpt-5.4 ",
+          thinkingLevel: " high ",
+        },
+        undefined,
+        "session_handoff",
+      ),
     ).toEqual({
+      toolName: "session_handoff",
       launch: "deferred",
       title: "Review rendering",
       goal: "Inspect the renderer.",
@@ -56,7 +61,8 @@ describe("handoff-tool view model", () => {
       thinkingLevel: "high" as const,
     };
 
-    expect(buildHandoffToolView({}, result)).toEqual({
+    expect(buildHandoffToolView({}, result, "session_handoff")).toEqual({
+      toolName: "session_handoff",
       launch: "deferred",
       title: "Review rendering",
       provider: "openai",

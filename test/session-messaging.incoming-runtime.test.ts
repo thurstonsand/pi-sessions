@@ -127,7 +127,10 @@ test("session_cancel reports accepted live cancellation", async () => {
     target: { sessionId: "target-session", sessionName: "Target" },
     relation: "sibling" as const,
   }));
-  const tool = createSessionCancelTool({ cancelSession } as never, { role: { kind: "plain" } });
+  const tool = createSessionCancelTool({ cancelSession } as never, {
+    name: "session_cancel",
+    wording: { description: "Cancel", promptSnippet: "Cancel", promptGuidelines: [] },
+  });
 
   const result = await tool.execute(
     "tool-1",
@@ -137,7 +140,7 @@ test("session_cancel reports accepted live cancellation", async () => {
     {} as never,
   );
 
-  expect(cancelSession).toHaveBeenCalledWith("target-session");
+  expect(cancelSession).toHaveBeenCalledWith("target-session", {});
   expect(result).toMatchObject({
     content: [
       {
@@ -165,7 +168,10 @@ test("session_cancel reports managed teardown honestly", async () => {
         state: "stopping",
       })),
     },
-    { role: { kind: "plain" } },
+    {
+      name: "subagent_cancel",
+      wording: { description: "Cancel", promptSnippet: "Cancel", promptGuidelines: [] },
+    },
   );
 
   const result = await tool.execute(
@@ -202,7 +208,10 @@ test("session_cancel rejects an unknown managed state", async () => {
         state: "unknown",
       })),
     },
-    { role: { kind: "plain" } },
+    {
+      name: "subagent_cancel",
+      wording: { description: "Cancel", promptSnippet: "Cancel", promptGuidelines: [] },
+    },
   );
 
   await expect(
@@ -221,7 +230,10 @@ test("session_cancel rejects dead targets", async () => {
         error: "No live session found for id: dead-session",
       })),
     } as never,
-    { role: { kind: "plain" } },
+    {
+      name: "session_cancel",
+      wording: { description: "Cancel", promptSnippet: "Cancel", promptGuidelines: [] },
+    },
   );
 
   await expect(

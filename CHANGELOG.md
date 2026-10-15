@@ -2,6 +2,12 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.18.1] - 2026-10-15
+
+### Changed
+
+- `sessions.autoTitle.tokenBudget` now defaults to 512 instead of 64, so models that reason before answering have room to produce a title without raising the setting by hand.
+
 ## [0.18.0] - 2026-10-14
 
 ### Fixed

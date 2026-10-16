@@ -48,6 +48,26 @@ describe("resolveAuthenticatedModel", () => {
     expect(result.ok).toBe(false);
   });
 
+  it("names the candidates when authenticated providers share a model, without CLI flags", () => {
+    const metered = model("metered", "gpt-5.4");
+    const result = resolveAuthenticatedModel({
+      modelRuntime: createFakeModelRuntime({ available: [...AVAILABLE, metered] }) as never,
+      modelPattern: "gpt-5.4",
+    });
+    expect(result).toEqual({
+      ok: false,
+      error:
+        'Model "gpt-5.4" is ambiguous across providers: metered/gpt-5.4, openai/gpt-5.4. Use provider/model.',
+      warning: undefined,
+    });
+  });
+
+  it("resolves a shared model id to the only authenticated provider", () => {
+    const unauthenticated = model("metered", "gpt-5.4");
+    const result = resolve("gpt-5.4", { all: [...AVAILABLE, unauthenticated] });
+    expect(result).toMatchObject({ ok: true, model: AVAILABLE[0] });
+  });
+
   it("rejects models that only exist in getAll()", () => {
     const unauthenticated = model("google", "gemini-3.1-pro");
     const result = resolve("google/gemini-3.1-pro", { all: [...AVAILABLE, unauthenticated] });

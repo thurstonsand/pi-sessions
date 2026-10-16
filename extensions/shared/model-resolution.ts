@@ -29,43 +29,73 @@ export function resolveAuthenticatedModel(options: {
   modelPattern: string;
   thinkingLevel?: ThinkingLevel | undefined;
 }): AuthenticatedModelResolution {
-  const resolved = resolveCliModel({
-    cliModel: options.modelPattern,
-    ...(options.thinkingLevel ? { cliThinking: options.thinkingLevel } : {}),
-    modelRuntime: options.modelRuntime,
+  const resolved = resolvePattern(options);
+  const available = options.modelRuntime.getAvailableSnapshot();
+  if (resolved.model) {
+    const model = findAvailable(available, resolved.model);
+    if (!model) {
+      return {
+        ok: false,
+        error: `Model "${resolved.model.provider}/${resolved.model.id}" is not an available authenticated model.`,
+        warning: resolved.warning,
+      };
+    }
+    return {
+      ok: true,
+      model,
+      thinkingLevel: options.thinkingLevel ?? resolved.thinkingLevel,
+      warning: resolved.warning,
+    };
+  }
+
+  // Pi words its failures for the CLI (--provider, --list-models), with no structured reason.
+  // Resolving within each authenticated provider tells an ambiguous pattern from an unknown one.
+  const candidates = [...new Set(available.map((model) => model.provider))].flatMap((provider) => {
+    const within = resolvePattern({ ...options, provider });
+    const model = within.model && findAvailable(available, within.model);
+    return model ? [{ model, thinkingLevel: options.thinkingLevel ?? within.thinkingLevel }] : [];
   });
-
-  if (resolved.error || !resolved.model) {
+  const [only] = candidates;
+  if (only && candidates.length === 1) {
+    return { ok: true, ...only, warning: undefined };
+  }
+  if (candidates.length > 1) {
+    const matches = candidates
+      .map(({ model }) => `${model.provider}/${model.id}`)
+      .sort((a, b) => a.localeCompare(b))
+      .join(", ");
     return {
       ok: false,
-      error: stripCliGuidance(resolved.error) ?? `Unknown model "${options.modelPattern}".`,
-      warning: resolved.warning,
+      error: `Model "${options.modelPattern}" is ambiguous across providers: ${matches}. Use provider/model.`,
+      warning: undefined,
     };
   }
-
-  const available = options.modelRuntime
-    .getAvailableSnapshot()
-    .find((model) => modelsAreEqual(model, resolved.model));
-  if (!available) {
-    return {
-      ok: false,
-      error: `Model "${resolved.model.provider}/${resolved.model.id}" is not an available authenticated model.`,
-      warning: resolved.warning,
-    };
-  }
-
   return {
-    ok: true,
-    model: available,
-    thinkingLevel: options.thinkingLevel ?? resolved.thinkingLevel,
+    ok: false,
+    error: `Model "${options.modelPattern}" not found.`,
     warning: resolved.warning,
   };
 }
 
-// resolveCliModel errors reference --list-models, which does not exist in extension surfaces.
-function stripCliGuidance(error: string | undefined): string | undefined {
-  const stripped = error?.replace(/(?:^|\s+)[^.!?\n]*--list-models[^.!?\n]*(?:[.!?]|$)/, "").trim();
-  return stripped || undefined;
+function resolvePattern(options: {
+  modelRuntime: ModelRuntime;
+  modelPattern: string;
+  thinkingLevel?: ThinkingLevel | undefined;
+  provider?: string;
+}) {
+  return resolveCliModel({
+    cliModel: options.modelPattern,
+    ...(options.provider ? { cliProvider: options.provider } : {}),
+    ...(options.thinkingLevel ? { cliThinking: options.thinkingLevel } : {}),
+    modelRuntime: options.modelRuntime,
+  });
+}
+
+function findAvailable(
+  available: readonly Model<Api>[],
+  model: Model<Api>,
+): Model<Api> | undefined {
+  return available.find((candidate) => modelsAreEqual(candidate, model));
 }
 
 export function formatAvailableModelList(models: readonly Model<Api>[]): string {

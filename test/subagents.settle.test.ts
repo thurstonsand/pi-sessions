@@ -9,12 +9,8 @@ import { SubagentReconciler } from "../extensions/subagents/reconcile.ts";
 import { createSettledChildLifecycle } from "../extensions/subagents/settle.ts";
 
 describe("settled child recovery", () => {
-  it.each([
-    { delivery: "triggered report turn", idleAtRecovery: true },
-    { delivery: "append-only report during compaction", idleAtRecovery: false },
-  ])(
-    "settles after a $delivery finishes before its original reconciliation",
-    async ({ idleAtRecovery }) => {
+  it("settles after a triggered report turn finishes before its original reconciliation", async () => {
+    {
       let finishCleanup: (() => void) | undefined;
       let orphanExists = true;
       const branch: SessionEntry[] = [
@@ -35,32 +31,14 @@ describe("settled child recovery", () => {
         sessionId: "aaaaaaaa-1234-1234-1234-123456789abc",
         epoch: 1,
         getBranch: () => branch,
-        isIdle: () => idleAtRecovery,
+        isIdle: () => true,
         hasPendingMessages: () => false,
         shutdown: vi.fn(),
         reportError: vi.fn(),
       };
       const pi = {
         appendEntry: vi.fn(),
-        sendMessage: vi.fn(
-          (message: {
-            customType: string;
-            content: string;
-            display: boolean;
-            details: unknown;
-          }) => {
-            if (!idleAtRecovery) {
-              // Pi's non-streaming steer path persists without emitting extension message_end.
-              branch.push({
-                type: "custom_message",
-                id: "recovered",
-                parentId: "launch",
-                timestamp: "2026-03-25T00:00:00.000Z",
-                ...message,
-              });
-            }
-          },
-        ),
+        sendMessage: vi.fn(),
         exec: vi.fn(async (_command: string, args: string[]) => {
           if (args[0] === "list-windows") {
             return {
@@ -81,7 +59,7 @@ describe("settled child recovery", () => {
       };
       const reconciler = new SubagentReconciler({
         executor: pi,
-        messaging: { listSessions: async () => [] },
+        messaging: { listSessions: async () => [], deliverTurnMessage: pi.sendMessage },
         getParent: () => parent,
         isCurrent: (epoch) => epoch === 1,
         openSession: () => ({
@@ -107,16 +85,11 @@ describe("settled child recovery", () => {
 
       const original = reconciler.reconcile();
       await vi.waitFor(() => expect(finishCleanup).toBeDefined());
-      expect(pi.sendMessage).toHaveBeenCalledExactlyOnceWith(
-        expect.anything(),
-        idleAtRecovery ? { triggerTurn: true } : { deliverAs: "steer" },
-      );
-      expect(reconciler.hasPendingRecoveredReports()).toBe(idleAtRecovery);
+      expect(pi.sendMessage).toHaveBeenCalledExactlyOnceWith(expect.anything());
+      expect(reconciler.hasPendingRecoveredReports()).toBe(true);
 
       lifecycle.cancel();
-      if (idleAtRecovery) {
-        reconciler.noteReportDelivered(report.reportId);
-      }
+      reconciler.noteReportDelivered(report.reportId);
       parent.isIdle = () => true;
       branch.push(
         customEntry("own-report", SUBAGENT_REPORT_CUSTOM_TYPE, {
@@ -137,8 +110,8 @@ describe("settled child recovery", () => {
         SUBAGENT_CLOSED_CUSTOM_TYPE,
         expect.anything(),
       );
-    },
-  );
+    }
+  });
 });
 
 function customEntry(id: string, customType: string, data: unknown): SessionEntry {

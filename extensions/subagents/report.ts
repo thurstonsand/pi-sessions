@@ -30,7 +30,6 @@ export interface IncomingSubagentReport {
   receipt: SubagentReportReceived | undefined;
   message: SubagentReportMessage;
   content: string;
-  delivery: { triggerTurn: true } | { deliverAs: "steer" };
 }
 
 export function createSubmitTaskReportTool(
@@ -131,7 +130,6 @@ export function buildIncomingSubagentReport(
     receipt,
     message,
     content: formatReportForModel(launch.title, message),
-    delivery: session.isIdle() ? { triggerTurn: true } : { deliverAs: "steer" },
   };
 }
 

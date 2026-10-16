@@ -135,15 +135,12 @@ export function installSubagents(
     if (incoming.receipt) {
       pi.appendEntry(SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, incoming.receipt);
     }
-    pi.sendMessage(
-      {
-        customType: SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
-        content: incoming.content,
-        display: true,
-        details: incoming.message,
-      },
-      incoming.delivery,
-    );
+    deps.messaging.deliverTurnMessage({
+      customType: SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
+      content: incoming.content,
+      display: true,
+      details: incoming.message,
+    });
     reconciler.noteReportSent(envelope.reportId);
   });
 
@@ -276,7 +273,8 @@ export function installSubagents(
         getBranch: () => sessionManager.getBranch(),
         getTree: () => sessionManager.getTree(),
         isIdle: ctx.isIdle,
-        hasPendingMessages: ctx.hasPendingMessages,
+        // A message held for a compaction to finish still owes the session a turn.
+        hasPendingMessages: () => ctx.hasPendingMessages() || deps.messaging.hasHeldTurnMessages(),
         shutdown: ctx.shutdown,
         epoch,
         launchState: { sessionId, depth: identity?.depth ?? 0, epoch },

@@ -95,16 +95,15 @@ describe("subagent installation", () => {
     let receive: ((envelope: unknown) => void) | undefined;
     const { pi } = createPi({ tmuxInstalled: true });
     pi.appendEntry.mockImplementation(() => order.push("receipt"));
-    pi.sendMessage.mockImplementation(() => order.push("message"));
+    const messaging = createMessagingFake((handler) => {
+      receive = handler;
+    }, listSessions);
+    vi.mocked(messaging.deliverTurnMessage).mockImplementation(() => {
+      order.push("message");
+    });
     const handle = installSubagents(
       pi as never,
-      createDeps(
-        2,
-        (handler) => {
-          receive = handler;
-        },
-        listSessions,
-      ),
+      createDeps(2, undefined, listSessions, undefined, messaging),
     );
     await handle.onSessionStart?.(
       { type: "session_start", reason: "startup" },
@@ -695,11 +694,20 @@ describe("subagent installation", () => {
         display: boolean;
         details: unknown;
       }> = [];
-      pi.sendMessage.mockImplementation((message) => deferred.push(message));
+      const messaging = createMessagingFake(
+        undefined,
+        vi.fn(async () => []),
+      );
+      vi.mocked(messaging.deliverTurnMessage).mockImplementation((message) => {
+        deferred.push(message);
+      });
       pi.appendEntry.mockImplementation((customType, data) => {
         entries.push({ type: "custom", id: `entry-${entries.length}`, customType, data });
       });
-      const handle = installSubagents(pi as never, createDeps(2));
+      const handle = installSubagents(
+        pi as never,
+        createDeps(2, undefined, undefined, undefined, messaging),
+      );
       const ctx = createContext(childId, entries);
       await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
       await handlers.get("agent_start")?.({}, ctx);
@@ -749,12 +757,12 @@ describe("subagent installation", () => {
       // Pi 0.87 leaves both checks unchanged until all settled handlers return.
       expect(ctx.isIdle()).toBe(true);
       expect(ctx.hasPendingMessages()).toBe(false);
-      expect(pi.sendMessage).toHaveBeenCalledTimes(reportCount);
+      expect(pi.sendMessage).not.toHaveBeenCalled();
+      expect(messaging.deliverTurnMessage).toHaveBeenCalledTimes(reportCount);
       for (let index = 0; index < reportCount; index += 1) {
-        expect(pi.sendMessage).toHaveBeenNthCalledWith(
+        expect(messaging.deliverTurnMessage).toHaveBeenNthCalledWith(
           index + 1,
           expect.objectContaining({ customType: SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE }),
-          { triggerTurn: true },
         );
       }
       expect(pi.appendEntry).not.toHaveBeenCalledWith(
@@ -794,7 +802,7 @@ describe("subagent installation", () => {
       }
 
       expect(ctx.shutdown).toHaveBeenCalledOnce();
-      expect(pi.sendMessage).toHaveBeenCalledTimes(reportCount);
+      expect(messaging.deliverTurnMessage).toHaveBeenCalledTimes(reportCount);
       expect(deferred).toEqual([]);
       expect(vi.getTimerCount()).toBe(0);
     });
@@ -853,6 +861,30 @@ describe("subagent installation", () => {
       reason: "no_report_after_reminder",
     });
     expect(ctx.shutdown).toHaveBeenCalledOnce();
+  });
+
+  it("neither reminds nor closes a child while a message waits out a compaction", async () => {
+    const { pi, handlers } = createPi({ tmuxInstalled: true, attachedResponses: [false] });
+    const messaging = createMessagingFake(
+      undefined,
+      vi.fn(async () => []),
+    );
+    vi.mocked(messaging.hasHeldTurnMessages).mockReturnValue(true);
+    const handle = installSubagents(
+      pi as never,
+      createDeps(2, undefined, undefined, undefined, messaging),
+    );
+    const ctx = createContext(childId, childEntries(1, true));
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
+
+    await handlers.get("agent_settled")?.({}, ctx);
+
+    expect(pi.sendMessage).not.toHaveBeenCalled();
+    expect(pi.appendEntry).not.toHaveBeenCalledWith(
+      "pi-sessions.subagent_closed",
+      expect.anything(),
+    );
+    expect(ctx.shutdown).not.toHaveBeenCalled();
   });
 
   it("reports reconciliation failures without throwing from hooks or poll timers", async () => {
@@ -929,6 +961,8 @@ function createMessagingFake(
     onIncomingSubagentReport: vi.fn((handler) => captureIncoming?.(handler as never)),
     onIncomingMessage: vi.fn(),
     onIncomingCancel: vi.fn(),
+    deliverTurnMessage: vi.fn(),
+    hasHeldTurnMessages: vi.fn(() => false),
     sendSubagentReport: vi.fn(
       async (): Promise<SendSubagentReportResult> => ({
         delivered: false,

@@ -36,8 +36,8 @@ describe("subagent reconciliation", () => {
 
   it("does not enqueue a recovered report twice before Pi persists it", async () => {
     const fixture = createFixture([launchEntry()], [reportEntry()]);
-    fixture.deliver.mockImplementation((message, options) => {
-      fixture.sent.push({ message, ...(options ? { options } : {}) });
+    fixture.deliver.mockImplementation((message) => {
+      fixture.sent.push({ message });
     });
     await fixture.reconciler.reconcile();
     await fixture.reconciler.reconcile();
@@ -62,27 +62,6 @@ describe("subagent reconciliation", () => {
 
     await fixture.reconciler.reconcile();
 
-    expect(fixture.reconciler.hasPendingRecoveredReports()).toBe(false);
-    expect(fixture.sent).toHaveLength(1);
-  });
-
-  it("observes append-only steering without an extension delivery event", async () => {
-    const fixture = createFixture(
-      [launchEntry()],
-      [reportEntry()],
-      false,
-      async () => [],
-      false,
-      true,
-      false,
-    );
-
-    await fixture.reconciler.reconcile();
-
-    expect(fixture.sent[0]).toMatchObject({ options: { deliverAs: "steer" } });
-    expect(fixture.reconciler.hasPendingRecoveredReports()).toBe(false);
-    fixture.branch.splice(0, fixture.branch.length, launchEntry());
-    await fixture.reconciler.reconcile();
     expect(fixture.reconciler.hasPendingRecoveredReports()).toBe(false);
     expect(fixture.sent).toHaveLength(1);
   });
@@ -194,7 +173,6 @@ describe("subagent reconciliation", () => {
             provenance: "recovered",
           }),
         }),
-        options: { triggerTurn: true },
       }),
     ]);
   });
@@ -220,7 +198,7 @@ describe("subagent reconciliation", () => {
     await fixture.reconciler.reconcile();
 
     expect(fixture.appended).toEqual([]);
-    expect(fixture.sent[0]).toMatchObject({ options: { deliverAs: "steer" } });
+    expect(fixture.sent).toHaveLength(1);
   });
 
   it("restores only a durably suspended child when restoration is requested", async () => {
@@ -475,7 +453,6 @@ function createFixture(
   const appended: Array<{ customType: string; data: unknown }> = [];
   const sent: Array<{
     message: { customType: string; content: string; display: boolean; details: unknown };
-    options?: { triggerTurn: true } | { deliverAs: "steer" };
   }> = [];
   const branch = [...parentEntries];
   const executor = {
@@ -484,11 +461,8 @@ function createFixture(
       branch.push(customEntry(`append-${branch.length}`, customType, data));
     }),
     sendMessage: vi.fn(
-      (
-        message: { customType: string; content: string; display: boolean; details: unknown },
-        options?: { triggerTurn: true } | { deliverAs: "steer" },
-      ) => {
-        sent.push({ message, ...(options ? { options } : {}) });
+      (message: { customType: string; content: string; display: boolean; details: unknown }) => {
+        sent.push({ message });
         branch.push({
           type: "custom_message",
           id: `message-${branch.length}`,
@@ -540,7 +514,7 @@ function createFixture(
   const parent = { sessionId: parentId, epoch: 1, getBranch: () => branch, isIdle: () => idle };
   const reconciler = new SubagentReconciler({
     executor: executor as never,
-    messaging: { listSessions: vi.fn(listSessions) },
+    messaging: { listSessions: vi.fn(listSessions), deliverTurnMessage: executor.sendMessage },
     getParent: () => parent,
     isCurrent: (epoch) => epoch === 1,
     openSession: () => ({ getBranch: () => childEntries }),

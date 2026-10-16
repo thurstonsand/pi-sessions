@@ -27,6 +27,8 @@ function createMessagingHandle(
     onIncomingMessage: vi.fn(),
     onIncomingCancel: vi.fn(),
     onIncomingSubagentReport: vi.fn(),
+    deliverTurnMessage: vi.fn(),
+    hasHeldTurnMessages: vi.fn(() => false),
   };
 }
 
@@ -159,7 +161,6 @@ References
 Next steps
 
 - Review the diff.`,
-      delivery: { triggerTurn: true },
     });
     expect(incoming?.content.split("\n", 1)[0]).toBe(
       `Subagent report from "Implement phase" (session: ${childId}, status: done)`,
@@ -188,7 +189,6 @@ Next steps
     expect(incoming).toMatchObject({
       receipt: undefined,
       message: { reportId: "report-1", summary: "Retry after receipt." },
-      delivery: { deliverAs: "steer" },
     });
   });
 

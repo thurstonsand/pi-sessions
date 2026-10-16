@@ -8,6 +8,7 @@ import {
   type TmuxExecutor,
   tmuxSessionName,
 } from "../shared/tmux.ts";
+import type { TurnMessage } from "../shared/turn-delivery.ts";
 import {
   classifySubagent,
   isRunningSubagentState,
@@ -34,7 +35,6 @@ export interface ReconcileParentSession {
   sessionId: string;
   epoch: number;
   getBranch(): readonly SessionEntry[];
-  isIdle(): boolean;
 }
 
 export interface ReconcileSessionManager {
@@ -43,14 +43,12 @@ export interface ReconcileSessionManager {
 
 export interface ReconcileMessaging {
   listSessions(): Promise<string[]>;
+  deliverTurnMessage(message: TurnMessage): void;
 }
 
 export interface ReconcileActions extends TmuxExecutor {
   appendEntry(customType: string, data: unknown): void;
-  sendMessage(
-    message: { customType: string; content: string; display: boolean; details: unknown },
-    options?: { triggerTurn: true } | { deliverAs: "steer" },
-  ): void;
+  sendMessage(message: TurnMessage): void;
 }
 
 export interface ReconcileDependencies {
@@ -376,34 +374,19 @@ export class SubagentReconciler {
       provenance: "recovered",
     };
     this.requireCurrent(parent);
-    const delivery = parent.isIdle()
-      ? { triggerTurn: true as const }
-      : { deliverAs: "steer" as const };
     this.pendingRecoveredReportIds.add(report.reportId);
     try {
-      this.deps.executor.sendMessage(
-        {
-          customType: SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
-          content: formatReportForModel(launch.title, message),
-          display: true,
-          details: message,
-        },
-        delivery,
-      );
+      this.deps.messaging.deliverTurnMessage({
+        customType: SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
+        content: formatReportForModel(launch.title, message),
+        display: true,
+        details: message,
+      });
     } catch (error) {
       this.pendingRecoveredReportIds.delete(report.reportId);
       throw error;
     }
     this.noteReportSent(report.reportId);
-    // Non-streaming steering appends directly, without an extension message_end event.
-    if (
-      "deliverAs" in delivery &&
-      collectParentLedger(parent.getBranch(), parent.sessionId).deliveredReportIds.has(
-        report.reportId,
-      )
-    ) {
-      this.noteReportDelivered(report.reportId);
-    }
   }
 
   private sendDisownedMessage(parent: ReconcileParentSession): void {

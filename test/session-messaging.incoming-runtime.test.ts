@@ -37,7 +37,7 @@ function receivedMessage() {
 test("delivery is refused while a handoff bootstrap is still pending", () => {
   const appendEntry = vi.fn();
   const sendMessage = vi.fn();
-  const runtime = new IncomingSessionMessageRuntime({ appendEntry, sendMessage } as never);
+  const runtime = new IncomingSessionMessageRuntime({ appendEntry } as never, sendMessage);
   runtime.bindContext({
     sessionManager: { getBranch: () => [pendingBootstrapEntry()] },
   } as never);
@@ -50,7 +50,7 @@ test("delivery is refused while a handoff bootstrap is still pending", () => {
 test("delivery proceeds once the kickoff has consumed the bootstrap", () => {
   const appendEntry = vi.fn();
   const sendMessage = vi.fn();
-  const runtime = new IncomingSessionMessageRuntime({ appendEntry, sendMessage } as never);
+  const runtime = new IncomingSessionMessageRuntime({ appendEntry } as never, sendMessage);
   const kickoff = {
     type: "custom_message",
     id: "kickoff-1",
@@ -81,7 +81,7 @@ test("delivery before the session is ready records the receipt and injects it on
     entries.push({ type: "custom", customType, data });
   });
   const sendMessage = vi.fn();
-  const runtime = new IncomingSessionMessageRuntime({ appendEntry, sendMessage } as never);
+  const runtime = new IncomingSessionMessageRuntime({ appendEntry } as never, sendMessage);
   runtime.bindContext({
     isIdle: () => true,
     sessionManager: { getBranch: () => [], getEntries: () => entries },
@@ -102,17 +102,12 @@ test("delivery before the session is ready records the receipt and injects it on
 
   runtime.open();
   expect(sendMessage).toHaveBeenCalledOnce();
-  expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ details: received }), {
-    triggerTurn: true,
-  });
+  expect(sendMessage).toHaveBeenCalledWith(expect.objectContaining({ details: received }));
 });
 
 test("incoming cancellation aborts the target runtime before acceptance", () => {
   const abort = vi.fn();
-  const runtime = new IncomingSessionMessageRuntime({
-    appendEntry: vi.fn(),
-    sendMessage: vi.fn(),
-  } as never);
+  const runtime = new IncomingSessionMessageRuntime({ appendEntry: vi.fn() } as never, vi.fn());
   runtime.bindContext({ abort } as never);
 
   runtime.cancel();
@@ -244,10 +239,7 @@ test("session_cancel rejects dead targets", async () => {
 });
 
 test("incoming cancellation is rejected until the target runtime is bound", () => {
-  const runtime = new IncomingSessionMessageRuntime({
-    appendEntry: vi.fn(),
-    sendMessage: vi.fn(),
-  } as never);
+  const runtime = new IncomingSessionMessageRuntime({ appendEntry: vi.fn() } as never, vi.fn());
 
   expect(() => runtime.cancel()).toThrow("Target session is not ready.");
 });

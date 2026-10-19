@@ -142,7 +142,9 @@ class RpcSession {
 
   async stop(): Promise<void> {
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;
-    this.send({ type: "prompt", message: "/smoke-quit" });
+    // Ending stdin shuts Pi's RPC mode down directly. A command calling ctx.shutdown() can be
+    // deferred while agent_settled hooks run, after which RPC mode never checks the request.
+    this.child.stdin.end();
     try {
       await waitFor("Pi shutdown", () => (this.child.exitCode !== null ? true : undefined), 5_000);
     } finally {

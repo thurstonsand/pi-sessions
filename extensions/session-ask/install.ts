@@ -143,7 +143,7 @@ export function installAsk(
         details: progressDetails,
       });
 
-      const modelRuntime = await deps.getModelRuntime(ctx.modelRegistry);
+      const modelRuntime = deps.getModelRuntime(ctx.modelRegistry);
       const agentResult = await runSessionAskAgent({
         ctx,
         modelRuntime,

@@ -99,7 +99,7 @@ describe("session handoff bootstrap", () => {
       id: "gpt-5.6-terra",
     };
     const modelRuntime = createFakeModelRuntime({ available: [extractionModel as never] });
-    const getModelRuntime = vi.fn().mockResolvedValue(modelRuntime);
+    const getModelRuntime = vi.fn().mockReturnValue(modelRuntime);
     const handoffSettings = {
       pickerShortcut: "alt+o" as const,
       roster: [],

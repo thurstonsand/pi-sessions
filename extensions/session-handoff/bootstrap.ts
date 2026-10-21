@@ -99,7 +99,7 @@ async function startChildGeneratedHandoff(
   // review again; explicit user decisions consume it.
   try {
     const sourceSessionManager = SessionManager.open(bootstrap.parentSessionFile);
-    const modelRuntime = await getModelRuntime(ctx.modelRegistry);
+    const modelRuntime = getModelRuntime(ctx.modelRegistry);
     const generatedDraft = await runHandoffTaskWithLoader(
       ctx,
       "Generating handoff draft...",

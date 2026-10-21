@@ -1,93 +1,28 @@
-import { type ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { createSessionModelRuntime } from "../extensions/shared/model-runtime.ts";
+import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import {
+  type ExtensionContext,
+  ModelRegistry,
+  ModelRuntime,
+} from "@earendil-works/pi-coding-agent";
+import { describe, expect, expectTypeOf, it } from "vitest";
+import { getSessionModelRuntime } from "../extensions/shared/model-runtime.ts";
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
+describe("getSessionModelRuntime", () => {
+  // Fails when a Pi upgrade renames the private field the workaround reads.
+  it("returns the runtime behind Pi's ModelRegistry facade", async () => {
+    const runtime = await ModelRuntime.create({
+      credentials: new InMemoryCredentialStore(),
+      modelsPath: null,
+      refreshOnCreate: false,
+    });
 
-describe("createSessionModelRuntime", () => {
-  it("mirrors the registered provider stream used by pi-claude-bridge", async () => {
-    const streamSimple = vi.fn();
-    const providerConfig = {
-      apiKey: "claude-agent-sdk",
-      models: [{ provider: "anthropic", id: "claude-sonnet" }],
-      streamSimple,
-    };
-    const modelRegistry = {
-      getRegisteredProviderIds: () => ["anthropic"],
-      getRegisteredNativeProvider: () => undefined,
-      getRegisteredProviderConfig: () => providerConfig,
-    } as unknown as ModelRegistry;
-    const registerProvider = vi.fn();
-    const refresh = vi.fn().mockResolvedValue({ aborted: false, errors: new Map() });
-    const modelRuntime = {
-      registerProvider,
-      registerNativeProvider: vi.fn(),
-      refresh,
-    } as unknown as ModelRuntime;
-    vi.spyOn(ModelRuntime, "create").mockResolvedValue(modelRuntime);
-
-    const created = await createSessionModelRuntime(modelRegistry);
-
-    expect(created).toBe(modelRuntime);
-    expect(ModelRuntime.create).toHaveBeenCalledWith({ allowModelNetwork: false });
-    expect(registerProvider).toHaveBeenCalledOnce();
-    expect(registerProvider).toHaveBeenCalledWith("anthropic", providerConfig);
-    expect(registerProvider.mock.calls[0]?.[1].streamSimple).toBe(streamSimple);
-    expect(refresh).toHaveBeenCalledOnce();
-    expect(refresh).toHaveBeenCalledWith({ allowNetwork: false });
+    expect(getSessionModelRuntime(new ModelRegistry(runtime))).toBe(runtime);
   });
 
-  it("mirrors the current registrations on each call", async () => {
-    const registeredConfigs = new Map([["anthropic", { apiKey: "first" }]]);
-    const modelRegistry = {
-      getRegisteredProviderIds: () => [...registeredConfigs.keys()],
-      getRegisteredNativeProvider: () => undefined,
-      getRegisteredProviderConfig: (providerId: string) => registeredConfigs.get(providerId),
-    } as unknown as ModelRegistry;
-    const registerProvider = vi.fn();
-    const modelRuntime = {
-      registerProvider,
-      registerNativeProvider: vi.fn(),
-      refresh: vi.fn().mockResolvedValue({ aborted: false, errors: new Map() }),
-    } as unknown as ModelRuntime;
-    vi.spyOn(ModelRuntime, "create").mockResolvedValue(modelRuntime);
-
-    await createSessionModelRuntime(modelRegistry);
-    const replacement = { apiKey: "second" };
-    registeredConfigs.set("anthropic", replacement);
-    await createSessionModelRuntime(modelRegistry);
-
-    expect(registerProvider).toHaveBeenCalledTimes(2);
-    expect(registerProvider).toHaveBeenLastCalledWith("anthropic", replacement);
-  });
-
-  // pi-claude-bridge registers a native Provider, which the facade reports in
-  // getRegisteredProviderIds but never in getRegisteredProviderConfig.
-  it("mirrors natively registered providers", async () => {
-    const nativeProvider = { id: "anthropic-agent-sdk", stream: vi.fn() };
-    const modelRegistry = {
-      getRegisteredProviderIds: () => ["anthropic-agent-sdk", "legacy"],
-      getRegisteredNativeProvider: (providerId: string) =>
-        providerId === "anthropic-agent-sdk" ? nativeProvider : undefined,
-      getRegisteredProviderConfig: (providerId: string) =>
-        providerId === "legacy" ? { apiKey: "legacy" } : undefined,
-    } as unknown as ModelRegistry;
-    const registerProvider = vi.fn();
-    const registerNativeProvider = vi.fn();
-    const modelRuntime = {
-      registerProvider,
-      registerNativeProvider,
-      refresh: vi.fn().mockResolvedValue({ aborted: false, errors: new Map() }),
-    } as unknown as ModelRuntime;
-    vi.spyOn(ModelRuntime, "create").mockResolvedValue(modelRuntime);
-
-    await createSessionModelRuntime(modelRegistry);
-
-    expect(registerNativeProvider).toHaveBeenCalledOnce();
-    expect(registerNativeProvider).toHaveBeenCalledWith(nativeProvider);
-    expect(registerProvider).toHaveBeenCalledOnce();
-    expect(registerProvider).toHaveBeenCalledWith("legacy", { apiKey: "legacy" });
+  // Fails typecheck once Pi exposes the runtime (earendil-works/pi#8791). Switch callers to the
+  // public API and delete shared/model-runtime.ts.
+  it("tracks that extensions still lack a public model runtime", () => {
+    expectTypeOf<ExtensionContext>().not.toHaveProperty("modelRuntime");
+    expectTypeOf<ModelRegistry>().not.toHaveProperty("runtime");
   });
 });

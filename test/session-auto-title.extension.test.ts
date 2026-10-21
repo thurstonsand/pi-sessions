@@ -389,7 +389,7 @@ function createRuntime(ctx: {
 function buildDeps() {
   return {
     settings: loadSettingsMock() as SessionSettings,
-    getModelRuntime: async (modelRegistry: {
+    getModelRuntime: (modelRegistry: {
       getAll(): Array<{ provider: string; id: string }>;
       getAvailable(): Array<{ provider: string; id: string }>;
     }) =>

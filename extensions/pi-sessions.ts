@@ -1,8 +1,4 @@
-import {
-  type ExtensionAPI,
-  type ModelRuntime,
-  SessionManager,
-} from "@earendil-works/pi-coding-agent";
+import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import { HostRegistry } from "./hosts/registry.ts";
 import { installAsk } from "./session-ask/install.ts";
 import { installAutoTitle } from "./session-auto-title/install.ts";
@@ -15,7 +11,7 @@ import { MessageRouter } from "./session-messaging/message-router.ts";
 import { installDirectoryTools } from "./session-messaging/pi/install.ts";
 import { installSearch } from "./session-search/install.ts";
 import type { SessionLifecycle } from "./shared/composition.ts";
-import { createSessionModelRuntime, type ModelRuntimeProvider } from "./shared/model-runtime.ts";
+import { getSessionModelRuntime } from "./shared/model-runtime.ts";
 import { loadSettings, readCompactionSettings } from "./shared/settings.ts";
 import { installSubagents, type SubagentsHandle } from "./subagents/install.ts";
 
@@ -30,20 +26,6 @@ export default function piSessions(pi: ExtensionAPI): void {
   const settings = loadSettings();
   let sessionEpoch = 0;
   const hosts = new HostRegistry();
-
-  // The mirrored ModelRuntime is expensive to build and only changes across session
-  // boundaries, so cache it per epoch (the root's own invalidation signal) instead of
-  // rebuilding it on every auto-title, /title, session_ask, and handoff draft.
-  let cachedModelRuntime: { epoch: number; runtime: Promise<ModelRuntime> } | undefined;
-  const getModelRuntime: ModelRuntimeProvider = (modelRegistry) => {
-    if (cachedModelRuntime?.epoch !== sessionEpoch) {
-      cachedModelRuntime = {
-        epoch: sessionEpoch,
-        runtime: createSessionModelRuntime(modelRegistry),
-      };
-    }
-    return cachedModelRuntime.runtime;
-  };
 
   const index = installIndex(pi, { settings });
   const messaging = settings.features.messaging
@@ -101,7 +83,7 @@ export default function piSessions(pi: ExtensionAPI): void {
       installHandoff(pi, {
         settings,
         index,
-        getModelRuntime,
+        getModelRuntime: getSessionModelRuntime,
         claimsPeers: () => hosts.claimsPeers(),
         ...(subagents ? { getLaunchTargets: () => subagents.getLaunchTargets() } : {}),
         board,
@@ -115,7 +97,7 @@ export default function piSessions(pi: ExtensionAPI): void {
     installAsk(pi, {
       settings,
       index,
-      getModelRuntime,
+      getModelRuntime: getSessionModelRuntime,
       ...(subagents
         ? { shouldMessageSubagent: (sessionId) => subagents.shouldMessageSubagent(sessionId) }
         : {}),
@@ -125,7 +107,7 @@ export default function piSessions(pi: ExtensionAPI): void {
     lifecycles.push(
       installAutoTitle(pi, {
         settings,
-        getModelRuntime,
+        getModelRuntime: getSessionModelRuntime,
         getSessionEpoch: () => sessionEpoch,
       }),
     );

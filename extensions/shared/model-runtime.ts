@@ -1,40 +1,19 @@
-import type { Api, Model } from "@earendil-works/pi-ai";
 import { type ModelRegistry, ModelRuntime } from "@earendil-works/pi-coding-agent";
 
-export type ModelRuntimeProvider = (modelRegistry: ModelRegistry) => Promise<ModelRuntime>;
+export type ModelRuntimeProvider = (modelRegistry: ModelRegistry) => ModelRuntime;
 
-// Workaround for a missing extension API: resolveCliModel and createAgentSession want a
-// ModelRuntime, but ExtensionContext only exposes the ModelRegistry compatibility facade,
-// which keeps its runtime private. Until pi exposes the runtime to extensions, build a
-// fresh one per use and mirror the registered providers (e.g. pi-claude-bridge) so their
-// live stream closures carry over by reference. Extensions register either a native
-// Provider or a legacy provider config, and the facade exposes each through its own
-// accessor while listing both id sets together.
-export async function createSessionModelRuntime(
-  modelRegistry: ModelRegistry,
-): Promise<ModelRuntime> {
-  const modelRuntime = await ModelRuntime.create({ allowModelNetwork: false });
-
-  for (const providerId of modelRegistry.getRegisteredProviderIds()) {
-    const native = modelRegistry.getRegisteredNativeProvider(providerId);
-    if (native) {
-      modelRuntime.registerNativeProvider(native);
-      continue;
-    }
-    const config = modelRegistry.getRegisteredProviderConfig(providerId);
-    if (config) {
-      modelRuntime.registerProvider(providerId, config);
-    }
+// Workaround for earendil-works/pi#8791: resolveCliModel and createAgentSession want the
+// session's ModelRuntime, but ExtensionContext only exposes the ModelRegistry facade, which
+// keeps its runtime in a private field. Building a fresh runtime and mirroring providers into
+// it races Pi's own availability refreshes (earendil-works/pi#8810) and can report no
+// available models, so read the session's runtime instead. test/shared.model-runtime.test.ts
+// fails when Pi renames the field or exposes the runtime publicly; then delete this module.
+export function getSessionModelRuntime(modelRegistry: ModelRegistry): ModelRuntime {
+  const runtime: unknown = Reflect.get(modelRegistry, "runtime");
+  if (!(runtime instanceof ModelRuntime)) {
+    throw new Error(
+      "pi-sessions cannot reach Pi's model runtime: ModelRegistry no longer keeps it in `runtime`.",
+    );
   }
-
-  await modelRuntime.refresh({ allowNetwork: false });
-  return modelRuntime;
-}
-
-// A model reference carried on the session context is stale relative to the mirrored runtime
-// (it was resolved against the facade's private runtime, not this one). Re-resolve it against
-// the runtime's snapshot so downstream calls use the mirror's live provider config, falling
-// back to the original reference when the runtime has not seen it.
-export function freshenModel(runtime: ModelRuntime, model: Model<Api>): Model<Api> {
-  return runtime.getModel(model.provider, model.id) ?? model;
+  return runtime;
 }

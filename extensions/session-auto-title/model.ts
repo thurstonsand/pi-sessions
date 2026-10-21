@@ -3,7 +3,6 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { type ExactModelReference, findModelByReference } from "../shared/model.ts";
 import { resolveAuthenticatedModel } from "../shared/model-resolution.ts";
-import { freshenModel } from "../shared/model-runtime.ts";
 
 const DEFAULT_AUTO_TITLE_FALLBACK_MODELS: readonly ExactModelReference[] = [
   { provider: "openai-codex", modelId: "gpt-5.6-luna" },
@@ -55,7 +54,7 @@ export function resolveAutoTitleModel(
   }
 
   return {
-    model: freshenModel(modelRuntime, currentModel),
+    model: currentModel,
     source: "current",
   };
 }

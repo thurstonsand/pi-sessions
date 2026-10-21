@@ -66,7 +66,7 @@ export function installAutoTitle(
           await titleWorkInFlight;
         }
 
-        const modelRuntime = await getModelRuntime(ctx.modelRegistry);
+        const modelRuntime = getModelRuntime(ctx.modelRegistry);
         const resolution = resolveAutoTitleModel(modelRuntime, ctx.model, settings.autoTitle.model);
         return handleTitleInvocation(
           pi,
@@ -97,7 +97,7 @@ export function installAutoTitle(
       return;
     }
 
-    const modelRuntime = await getModelRuntime(ctx.modelRegistry);
+    const modelRuntime = getModelRuntime(ctx.modelRegistry);
     const resolution = resolveAutoTitleModel(modelRuntime, ctx.model, settings.autoTitle.model);
     titleWorkInFlight = runRetitlePlan({
       pi,

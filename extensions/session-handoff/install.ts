@@ -176,7 +176,7 @@ export function installHandoff(
         const { agent, ...rest } = params;
         if (agent !== undefined && typeof agent !== "string")
           throw new Error("agent must name an agent profile.");
-        const modelRuntime = await deps.getModelRuntime(ctx.modelRegistry);
+        const modelRuntime = deps.getModelRuntime(ctx.modelRegistry);
         return executeSessionHandoffTool(
           pi,
           { ...rest, launch, ...(agent === undefined ? {} : { agent }) },

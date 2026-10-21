@@ -9,7 +9,6 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { resolveAuthenticatedModel } from "../shared/model-resolution.ts";
-import { freshenModel } from "../shared/model-runtime.ts";
 import {
   type SessionLineageRow,
   searchSessionChunks,
@@ -139,10 +138,7 @@ export async function runSessionAskAgent(params: {
         modelPattern: params.askSettings.model,
       })
     : undefined;
-  const currentModel = params.ctx.model
-    ? freshenModel(params.modelRuntime, params.ctx.model)
-    : undefined;
-  const model = (configured?.ok ? configured.model : undefined) ?? currentModel;
+  const model = (configured?.ok ? configured.model : undefined) ?? params.ctx.model;
   if (!model) {
     throw new Error("No active model is available for session_ask.");
   }

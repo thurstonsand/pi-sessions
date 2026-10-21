@@ -789,7 +789,7 @@ function installHandoffAndWire(
   const lifecycle = installHandoff(pi as never, {
     settings: settings as never,
     index: { path: settings.index.path },
-    getModelRuntime: async (modelRegistry) =>
+    getModelRuntime: (modelRegistry) =>
       createFakeModelRuntime({
         all: modelRegistry.getAll(),
         available: modelRegistry.getAvailable(),

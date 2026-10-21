@@ -582,7 +582,7 @@ function registerSessionAskTool(shouldMessageSubagent?: (sessionId: string) => P
     {
       settings,
       index: { path: settings.index.path },
-      getModelRuntime: async () => ({}) as never,
+      getModelRuntime: () => ({}) as never,
       ...(shouldMessageSubagent ? { shouldMessageSubagent } : {}),
     },
   );

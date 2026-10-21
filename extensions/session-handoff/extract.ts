@@ -23,7 +23,6 @@ import {
   serializeConversation,
 } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
-import { freshenModel } from "../shared/model-runtime.ts";
 import { getDefaultHandoffRunsDir, type HandoffSettings } from "../shared/settings.ts";
 import { parseTypeBoxValue } from "../shared/typebox.ts";
 import { resolveModelPattern } from "./model.ts";
@@ -118,7 +117,7 @@ export async function generateHandoffDraftFromSessionManager({
     if (!ctx.model) {
       throw new Error("No model is available for handoff.");
     }
-    model = freshenModel(modelRuntime, ctx.model);
+    model = ctx.model;
   }
   const thinkingLevel =
     modelOverride?.thinkingLevel ?? settings.thinkingLevel ?? destinationThinkingLevel;

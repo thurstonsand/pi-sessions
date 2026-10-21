@@ -4,13 +4,14 @@
     "config:recommended",
     "customManagers:biomeVersions",
     ":configMigration",
-    "security:minimumReleaseAgeNpm",
     "abandonments:recommended",
     ":enableVulnerabilityAlertsWithAdditionalLabel(security)"
   ],
   "dependencyDashboard": true,
   "timezone": "America/New_York",
   "labels": ["dependencies"],
+  "minimumReleaseAge": "3 days",
+  "internalChecksFilter": "strict",
   "lockFileMaintenance": {
     "enabled": true,
     "schedule": ["at any time"]

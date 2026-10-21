@@ -9,7 +9,7 @@ import { createSessionHookController } from "../shared/session-index/sync.ts";
 
 export function installHooks(
   pi: ExtensionAPI,
-  deps: { index: IndexHandle; turnSync: boolean },
+  deps: { index: IndexHandle; turnSync: boolean; getSessionEpoch: () => number },
 ): SessionLifecycle {
   const controller = createSessionHookController({ indexPath: deps.index.path });
 
@@ -28,12 +28,19 @@ export function installHooks(
   return {
     async onSessionStart(event, ctx) {
       const { reason, previousSessionFile } = event;
+      const epoch = deps.getSessionEpoch();
       const sessionFile = ctx.sessionManager.getSessionFile();
+      // Recovery can outlive this session; once its epoch ends, ctx is stale and the
+      // controller belongs to whichever session came next.
       void requestIndexRecovery(deps.index.path, true)
-        .then(() => controller.handleSessionStart(ctx.sessionManager.getSessionFile()))
-        .catch((error: unknown) =>
-          ctx.ui.notify(`Session index sync failed: ${String(error)}`, "error"),
-        );
+        .then(() => {
+          if (deps.getSessionEpoch() === epoch) return controller.handleSessionStart(sessionFile);
+        })
+        .catch((error: unknown) => {
+          const message = `Session index sync failed: ${String(error)}`;
+          if (deps.getSessionEpoch() === epoch) ctx.ui.notify(message, "error");
+          else console.error(message);
+        });
 
       switch (reason) {
         case "new":

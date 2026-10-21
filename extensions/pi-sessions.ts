@@ -112,7 +112,14 @@ export default function piSessions(pi: ExtensionAPI): void {
       }),
     );
   }
-  lifecycles.push(index, installHooks(pi, { index, turnSync: settings.features.hooks }));
+  lifecycles.push(
+    index,
+    installHooks(pi, {
+      index,
+      turnSync: settings.features.hooks,
+      getSessionEpoch: () => sessionEpoch,
+    }),
+  );
   // Messaging leads every session_start so the broker connection is registered before any
   // other feature hook runs. A side effect is that messaging's first relation snapshot can
   // predate hooks' index sync for this session; getCachedRelationTo self-heals on miss, so

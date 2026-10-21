@@ -9,7 +9,9 @@ import {
 import {
   disableOlderIndexClient,
   getIndexRecoveryMessage,
+  IndexClientDisabledError,
   isIndexClientDisabled,
+  reportIndexClientDisabled,
   requestIndexRecovery,
   waitForIndexRebuild,
 } from "./recovery.ts";
@@ -22,6 +24,8 @@ export interface WithSessionIndexOptions {
   mode: SessionIndexOpenMode;
   required: boolean;
   timeoutMs?: number | undefined;
+  /** Recovery delivers the /reload warning itself, outside its failure accounting. */
+  notifyDisabled?: false;
 }
 
 export interface ValidSessionIndex {
@@ -117,7 +121,14 @@ function handleUnavailableIndex(
   options: WithSessionIndexOptions,
   cause?: unknown,
 ): undefined {
-  if (!isIndexClientDisabled(indexPath)) void requestIndexRecovery(indexPath);
+  if (isIndexClientDisabled(indexPath)) {
+    if (options.notifyDisabled !== false) reportIndexClientDisabled(indexPath);
+    if (options.required) throw new IndexClientDisabledError();
+    return undefined;
+  }
+  void requestIndexRecovery(indexPath).catch((error: unknown) => {
+    console.error("Background session index task failed:", error);
+  });
   if (!options.required) {
     return undefined;
   }

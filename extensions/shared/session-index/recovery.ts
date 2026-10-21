@@ -53,11 +53,14 @@ const disabled = new Set<string>();
 export function observeIndexRecovery(
   indexPath: string,
   notify: (message: string | undefined) => void,
-): void {
-  notices.set(indexPath, notify);
+): () => void {
   const message = getIndexRecoveryMessage(indexPath);
   notify(message);
+  notices.set(indexPath, notify);
   if (message) shown.set(indexPath, message);
+  return () => {
+    if (notices.get(indexPath) === notify) notices.delete(indexPath);
+  };
 }
 
 function report(indexPath: string, message: string): void {
@@ -68,8 +71,17 @@ function report(indexPath: string, message: string): void {
   else console.error(message);
 }
 
+export class IndexClientDisabledError extends Error {
+  constructor() {
+    super(INDEX_UPDATED_WARNING);
+  }
+}
+
 export function disableOlderIndexClient(indexPath: string): void {
   disabled.add(indexPath);
+}
+
+export function reportIndexClientDisabled(indexPath: string): void {
   report(indexPath, INDEX_UPDATED_WARNING);
 }
 
@@ -147,25 +159,63 @@ export function requestIndexRecovery(
   const sessionsDir = join(getAgentDir(), "sessions");
   const task = yieldToEventLoop()
     .then(() => recover(indexPath, sessionsDir, false, reconcile))
-    .catch((error: unknown) => {
-      report(indexPath, `Session indexing failed: ${String(error)}`);
-      return undefined;
-    })
-    .finally(() => running.delete(indexPath));
+    .finally(() => running.delete(indexPath))
+    // Separate handlers: an observer that throws must not be reported as an indexing failure.
+    .then(
+      (result) => {
+        publishRecovery(indexPath, result);
+        return result;
+      },
+      (error: unknown) => {
+        reportRecoveryFailure(indexPath, error);
+        return undefined;
+      },
+    );
   running.set(indexPath, task);
   return task;
 }
 
 export async function rebuildSessionIndex(options: { indexPath: string }): Promise<ReindexResult> {
-  await running.get(options.indexPath);
-  const result = await recover(options.indexPath, join(getAgentDir(), "sessions"), true, true);
+  const { indexPath } = options;
+  await running.get(indexPath);
+  let result: ReindexResult | undefined;
+  try {
+    result = await recover(indexPath, join(getAgentDir(), "sessions"), true, true);
+  } catch (error) {
+    reportRecoveryFailure(indexPath, error);
+    throw error;
+  }
+  publishRecovery(indexPath, result);
   if (!result)
     throw new Error(
-      getIndexRecoveryMessage(options.indexPath) ?? "Session index is busy; try again shortly.",
+      getIndexRecoveryMessage(indexPath) ?? "Session index is busy; try again shortly.",
     );
   return result;
 }
 
+function publishRecovery(indexPath: string, result: ReindexResult | undefined): void {
+  const message = getIndexRecoveryMessage(indexPath);
+  if (message) {
+    report(indexPath, message);
+  } else {
+    shown.delete(indexPath);
+    notices.get(indexPath)?.(undefined);
+  }
+  if (result?.skipped.length)
+    report(
+      indexPath,
+      `Session index skipped ${result.skipped.length} unreadable transcript(s): ${result.skipped.join(", ")}`,
+    );
+}
+
+function reportRecoveryFailure(indexPath: string, error: unknown): void {
+  report(
+    indexPath,
+    getIndexRecoveryMessage(indexPath) ?? `Session indexing failed: ${String(error)}`,
+  );
+}
+
+// Index work and durable failure records only; observers are notified by the callers above.
 async function recover(
   indexPath: string,
   sessionsDir: string,
@@ -181,27 +231,16 @@ async function recover(
       disableOlderIndexClient(indexPath);
       return undefined;
     }
-    if (!manual && failure && Date.now() < failure.nextAllowedAt) {
-      report(indexPath, getIndexRecoveryMessage(indexPath) ?? failure.error);
-      return undefined;
-    }
-    if (state === "current" && !manual && !reconcileRequested) {
-      if (!failure) notices.get(indexPath)?.(undefined);
-      return undefined;
-    }
+    if (!manual && failure && Date.now() < failure.nextAllowedAt) return undefined;
+    if (state === "current" && !manual && !reconcileRequested) return undefined;
     if ((manual || state !== "current") && !(await rebuild(indexPath, sessionsDir, manual)))
       return undefined;
     const result = await reconcile(indexPath, sessionsDir);
     rmSync(`${indexPath}.failure.json`, { force: true });
-    shown.delete(indexPath);
-    notices.get(indexPath)?.(undefined);
-    if (result.skipped.length)
-      report(
-        indexPath,
-        `Session index skipped ${result.skipped.length} unreadable transcript(s): ${result.skipped.join(", ")}`,
-      );
     return result;
   } catch (error) {
+    // A newer client published mid-recovery: stop, but leave the shared backoff to it.
+    if (error instanceof IndexClientDisabledError) return undefined;
     const attempts = (readIndexRecoveryFailure(indexPath)?.attempts ?? 0) + 1;
     const failure: IndexRecoveryFailure = {
       attempts,
@@ -212,9 +251,7 @@ async function recover(
     const record = `${indexPath}.failure.json`;
     writeFileSync(`${record}.tmp`, JSON.stringify(failure));
     renameSync(`${record}.tmp`, record);
-    report(indexPath, getIndexRecoveryMessage(indexPath) ?? failure.error);
-    if (manual) throw error;
-    return undefined;
+    throw error;
   }
 }
 
@@ -261,7 +298,6 @@ async function rebuild(indexPath: string, sessionsDir: string, manual: boolean):
   const failure = readIndexRecoveryFailure(indexPath);
   if (!manual && failure && Date.now() < failure.nextAllowedAt) {
     release();
-    report(indexPath, getIndexRecoveryMessage(indexPath) ?? failure.error);
     return false;
   }
   removeOrphanedTemps(indexPath);
@@ -328,25 +364,31 @@ async function rebuild(indexPath: string, sessionsDir: string, manual: boolean):
 // there was no valid index, and skipped transcripts are reported from here.
 async function reconcile(indexPath: string, sessionsDir: string): Promise<ReindexResult> {
   const skipped = await walk(sessionsDir, (file) =>
-    withSessionIndex(indexPath, { mode: "write", required: true }, ({ db }) =>
-      syncSessionFileWithDb(db, file, "reconcile"),
+    withSessionIndex(
+      indexPath,
+      { mode: "write", required: true, notifyDisabled: false },
+      ({ db }) => syncSessionFileWithDb(db, file, "reconcile"),
     ),
   );
-  return withSessionIndex(indexPath, { mode: "write", required: true }, ({ db }) => {
-    db.transaction(() => setMetadata(db, "reconciled_at", new Date().toISOString()));
-    const count = (table: string) =>
-      parseTypeBoxValue(
-        ROW_COUNT_SCHEMA,
-        db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get(),
-        "Invalid index count",
-      ).count;
-    return {
-      sessionCount: count("sessions"),
-      chunkCount: count("session_text_chunks"),
-      indexPath,
-      skipped,
-    };
-  });
+  return withSessionIndex(
+    indexPath,
+    { mode: "write", required: true, notifyDisabled: false },
+    ({ db }) => {
+      db.transaction(() => setMetadata(db, "reconciled_at", new Date().toISOString()));
+      const count = (table: string) =>
+        parseTypeBoxValue(
+          ROW_COUNT_SCHEMA,
+          db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get(),
+          "Invalid index count",
+        ).count;
+      return {
+        sessionCount: count("sessions"),
+        chunkCount: count("session_text_chunks"),
+        indexPath,
+        skipped,
+      };
+    },
+  );
 }
 
 async function walk(sessionsDir: string, sync: (file: string) => boolean): Promise<string[]> {

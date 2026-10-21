@@ -19,6 +19,7 @@ export function installIndex(
 ): IndexHandle & SessionLifecycle {
   const indexPath = deps.settings.index.path;
   let lastNotice: string | undefined;
+  let stopObserving: (() => void) | undefined;
 
   pi.registerCommand("session-index", {
     description: "Open the session index control panel",
@@ -72,13 +73,17 @@ export function installIndex(
   return {
     path: indexPath,
     onSessionStart(_event, ctx) {
-      observeIndexRecovery(indexPath, (message) => {
+      stopObserving = observeIndexRecovery(indexPath, (message) => {
         ctx.ui.setStatus("session-index", message);
         if (message && message !== lastNotice && !message.includes("in progress")) {
           ctx.ui.notify(message, "error");
         }
         lastNotice = message;
       });
+    },
+    onSessionShutdown() {
+      stopObserving?.();
+      stopObserving = undefined;
     },
   };
 }

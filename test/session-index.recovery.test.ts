@@ -8,7 +8,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { afterEach, expect, it, vi } from "vitest";
+import piSessions from "../extensions/pi-sessions.ts";
 import {
   getMetadata,
   INDEX_SCHEMA_VERSION,
@@ -19,13 +21,15 @@ import {
 } from "../extensions/shared/session-index/index.ts";
 import {
   acquireIndexLock,
+  INDEX_UPDATED_WARNING,
+  isIndexClientDisabled,
   observeIndexRecovery,
   readIndexRecoveryFailure,
   rebuildSessionIndex,
   requestIndexRecovery,
 } from "../extensions/shared/session-index/recovery.ts";
 import { createSessionHookController } from "../extensions/shared/session-index/sync.ts";
-import { createTestFilesystem } from "./test-helpers.ts";
+import { createFakeExtensionApi, createTestFilesystem } from "./test-helpers.ts";
 
 const fs = createTestFilesystem("pi-index-recovery-");
 afterEach(() => {
@@ -351,4 +355,83 @@ it("never shows a reader the index without writes acknowledged during a rebuild"
   await rebuilding;
   expect(acknowledged.length).toBeGreaterThan(files.length);
   expect([...missing]).toEqual([]);
+});
+
+it("stops without a failure record when a newer client publishes mid-reconcile", async () => {
+  const { indexPath } = fixture();
+  await rebuildSessionIndex({ indexPath });
+  const observerError = new Error("observer failed");
+  observeIndexRecovery(indexPath, (message) => {
+    if (message === INDEX_UPDATED_WARNING) throw observerError;
+  });
+  const recovery = expect(requestIndexRecovery(indexPath, true)).rejects.toBe(observerError);
+  // One turn lets recovery start and suspend in its transcript walk.
+  await yieldToEventLoop();
+  withSessionIndex(indexPath, { mode: "write", required: true }, ({ db }) =>
+    setMetadata(db, "schema_version", String(INDEX_SCHEMA_VERSION + 1)),
+  );
+  await recovery;
+  expect(isIndexClientDisabled(indexPath)).toBe(true);
+  expect(readIndexRecoveryFailure(indexPath)).toBeUndefined();
+});
+
+it("finishes startup recovery after session shutdown without touching the expired session", async () => {
+  const { root, file } = fixture();
+  writeFileSync(
+    path.join(root, "settings.json"),
+    JSON.stringify({
+      sessions: Object.fromEntries(
+        ["messaging", "subagents", "handoff", "search", "ask", "autoTitle"].map((feature) => [
+          feature,
+          { enable: false },
+        ]),
+      ),
+    }),
+  );
+  const indexPath = path.join(root, "pi-sessions", "index.sqlite");
+  const release = acquireIndexLock(indexPath);
+  if (!release) throw new Error("Index lock unavailable");
+  const pi = createFakeExtensionApi();
+  piSessions(pi);
+  const handler = (event: string) => {
+    const call = vi.mocked(pi.on).mock.calls.find(([name]) => name === event);
+    if (!call) throw new Error(`No ${event} handler`);
+    return call[1] as unknown as (event: object, ctx: never) => Promise<void>;
+  };
+  const ui = { setStatus: vi.fn(), notify: vi.fn() };
+  const sessionManager = { getSessionFile: () => file };
+  let expired = false;
+  const expiredAccess: string[] = [];
+  const live = <T>(name: string, value: T): T => {
+    if (expired) {
+      expiredAccess.push(name);
+      throw new Error("This extension ctx is stale");
+    }
+    return value;
+  };
+  const ctx = {
+    get ui() {
+      return live("ui", ui);
+    },
+    get sessionManager() {
+      return live("sessionManager", sessionManager);
+    },
+  };
+
+  await handler("session_start")({ type: "session_start", reason: "startup" }, ctx as never);
+  const recovery = requestIndexRecovery(indexPath, true);
+  await handler("session_shutdown")({ type: "session_shutdown", reason: "reload" }, ctx as never);
+  expired = true;
+  const uiCalls = ui.setStatus.mock.calls.length + ui.notify.mock.calls.length;
+  release();
+  await recovery;
+  await yieldToEventLoop();
+
+  expect(search(indexPath).map((session) => session.sessionId)).toEqual(["prior"]);
+  expect(readIndexRecoveryFailure(indexPath)).toBeUndefined();
+  expect(expiredAccess).toEqual([]);
+  expect(ui.setStatus.mock.calls.length + ui.notify.mock.calls.length).toBe(uiCalls);
+  const db = openIndexDatabase(indexPath, { create: false, mode: "read" });
+  expect(getMetadata(db, "hook_last_event")).toBe("reconcile");
+  db.close();
 });

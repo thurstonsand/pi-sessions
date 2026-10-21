@@ -43,89 +43,36 @@ export function withSessionIndex<T>(
   options: WithSessionIndexOptions,
   read: (index: ValidSessionIndex) => T,
 ): T | undefined {
-  const opened = openValidatedSessionIndexInternal(indexPath, options);
-  if (!opened) {
-    return undefined;
-  }
-
-  try {
-    return read(opened);
-  } finally {
-    opened.db.close();
-  }
-}
-
-export function openValidatedSessionIndex(
-  indexPath: string,
-  options: WithSessionIndexOptions & { required: true },
-): ValidSessionIndex;
-export function openValidatedSessionIndex(
-  indexPath: string,
-  options: WithSessionIndexOptions & { required: false },
-): ValidSessionIndex | undefined;
-export function openValidatedSessionIndex(
-  indexPath: string,
-  options: WithSessionIndexOptions,
-): ValidSessionIndex | undefined {
-  return openValidatedSessionIndexInternal(indexPath, options);
-}
-
-function openValidatedSessionIndexInternal(
-  indexPath: string,
-  options: WithSessionIndexOptions,
-): ValidSessionIndex | undefined {
-  if (isIndexClientDisabled(indexPath)) return handleUnavailableIndex(indexPath, options);
-  if (!existsSync(indexPath)) {
+  if (isIndexClientDisabled(indexPath) || !existsSync(indexPath))
     return handleUnavailableIndex(indexPath, options);
-  }
 
   let db: SessionIndexDatabase | undefined;
   let release: (() => void) | undefined;
+  let status: SessionIndexStatus;
   try {
-    if (options.mode === "write") {
-      release = acquireIndexLock(indexPath);
-      if (!release) return handleUnavailableIndex(indexPath, options);
-    }
-    db = openIndexDatabase(indexPath, {
-      create: false,
-      mode: "read",
-      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
-    });
-    const version = Number(getMetadata(db, "schema_version"));
-    if (version !== INDEX_SCHEMA_VERSION) {
-      const invalidDb = db;
-      db = undefined;
-      invalidDb.close();
-      release?.();
-      release = undefined;
-      if (version > INDEX_SCHEMA_VERSION) disableOlderIndexClient(indexPath);
-      return handleUnavailableIndex(indexPath, options);
-    }
-    const status = getIndexStatusFromDb(indexPath, db);
-    if (options.mode === "write") {
-      db.close();
-      db = undefined;
+    try {
+      if (options.mode === "write") {
+        release = acquireIndexLock(indexPath);
+        if (!release) return handleUnavailableIndex(indexPath, options);
+      }
       db = openIndexDatabase(indexPath, {
         create: false,
-        mode: "write",
+        mode: options.mode,
         timeoutMs: options.timeoutMs,
       });
-      const close = db.close;
-      const unlock = release;
-      db.close = () => {
-        try {
-          close();
-        } finally {
-          unlock?.();
-        }
-      };
-      release = undefined;
+      const version = Number(getMetadata(db, "schema_version"));
+      if (version !== INDEX_SCHEMA_VERSION) {
+        if (version > INDEX_SCHEMA_VERSION) disableOlderIndexClient(indexPath);
+        return handleUnavailableIndex(indexPath, options);
+      }
+      status = getIndexStatusFromDb(indexPath, db);
+    } catch (error) {
+      return handleUnavailableIndex(indexPath, options, error);
     }
-    return { db, status };
-  } catch (error) {
+    return read({ db, status });
+  } finally {
     db?.close();
     release?.();
-    return handleUnavailableIndex(indexPath, options, error);
   }
 }
 

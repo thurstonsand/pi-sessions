@@ -90,6 +90,14 @@ export function openSqlite(
   return withStatementCache(db);
 }
 
+export function isSqliteBusy(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (("code" in error && error.code === "SQLITE_BUSY") ||
+      ("errcode" in error && error.errcode === 5))
+  );
+}
+
 // Neither driver memoizes prepare(), and the write paths prepare the same
 // statements once per row. SQLite re-prepares cached statements transparently
 // when the schema changes, so reusing them across DDL is safe.

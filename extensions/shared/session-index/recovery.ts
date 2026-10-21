@@ -14,6 +14,7 @@ import {
   openIndexDatabase,
   setMetadata,
 } from "./schema.ts";
+import { isSqliteBusy } from "./sqlite.ts";
 import { syncSessionFileWithDb } from "./sync.ts";
 
 export const INDEX_UPDATED_WARNING = "pi-sessions was updated; /reload to use it";
@@ -114,14 +115,6 @@ export function acquireIndexLock(indexPath: string): (() => void) | undefined {
   }
 }
 
-function isSqliteBusy(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    (("code" in error && error.code === "SQLITE_BUSY") ||
-      ("errcode" in error && error.errcode === 5))
-  );
-}
-
 export function requestIndexRecovery(
   indexPath: string,
   reconcile = false,
@@ -154,7 +147,7 @@ async function recover(
   indexPath: string,
   sessionsDir: string,
   manual: boolean,
-  reconcile: boolean,
+  reconcileRequested: boolean,
 ): Promise<ReindexResult | undefined> {
   if (disabled.has(indexPath)) return undefined;
   let release = acquireIndexLock(indexPath);
@@ -164,8 +157,6 @@ async function recover(
     release = acquireIndexLock(indexPath);
   }
   if (!release) return undefined;
-  let db: SessionIndexDatabase | undefined;
-  const temp = `${indexPath}.${randomUUID()}.tmp`;
   try {
     const failure = readIndexRecoveryFailure(indexPath);
     let version: number | undefined;
@@ -192,59 +183,21 @@ async function recover(
       report(indexPath, getIndexRecoveryMessage(indexPath) ?? failure.error);
       return undefined;
     }
-    const rebuild = manual || corrupt || version !== INDEX_SCHEMA_VERSION;
-    if (!rebuild && !reconcile) {
+    const stale = manual || corrupt || version !== INDEX_SCHEMA_VERSION;
+    if (!stale && !reconcileRequested) {
       if (!failure) notices.get(indexPath)?.(undefined);
       return undefined;
     }
-    db = openIndexDatabase(rebuild ? temp : indexPath, { create: rebuild });
-    if (rebuild) initializeSchema(db);
-    const skipped: string[] = [];
-    for (const file of listSessionFiles(sessionsDir)) {
-      if (!syncSessionFileWithDb(db, file, "reconcile")) skipped.push(file);
-      await yieldToEventLoop();
-    }
-    const indexedDb = db;
-    const count = (table: string) =>
-      parseTypeBoxValue(
-        ROW_COUNT_SCHEMA,
-        indexedDb.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get(),
-        "Invalid index count",
-      ).count;
-    const result = {
-      sessionCount: count("sessions"),
-      chunkCount: count("session_text_chunks"),
-      indexPath,
-      skipped,
-    };
-    db.transaction(() => {
-      setMetadata(indexedDb, rebuild ? "indexed_at" : "reconciled_at", new Date().toISOString());
-      if (rebuild) setMetadata(indexedDb, "build", BUILD);
-    });
-    db.close();
-    db = undefined;
-    if (rebuild) {
-      if (corrupt) {
-        const backup = `${indexPath}.bad-${Date.now()}-${randomUUID()}`;
-        for (const suffix of ["", "-wal", "-shm", "-journal"]) {
-          if (existsSync(`${indexPath}${suffix}`))
-            renameSync(`${indexPath}${suffix}`, `${backup}${suffix}`);
-        }
-      } else if (existsSync(indexPath)) {
-        // Upgrade legacy WAL indexes before swapping: SQLite checkpoints and
-        // refuses the mode change while another connection still needs its WAL.
-        const previous = openIndexDatabase(indexPath, { create: false });
-        previous.close();
-      }
-      renameSync(temp, indexPath);
-    }
+    const result = stale
+      ? await rebuild(indexPath, sessionsDir, corrupt)
+      : await reconcile(indexPath, sessionsDir);
     rmSync(`${indexPath}.failure.json`, { force: true });
     shown.delete(indexPath);
     notices.get(indexPath)?.(undefined);
-    if (skipped.length)
+    if (result.skipped.length)
       report(
         indexPath,
-        `Session index skipped ${skipped.length} unreadable transcript(s): ${skipped.join(", ")}`,
+        `Session index skipped ${result.skipped.length} unreadable transcript(s): ${result.skipped.join(", ")}`,
       );
     return result;
   } catch (error) {
@@ -262,9 +215,79 @@ async function recover(
     if (manual) throw error;
     return undefined;
   } finally {
+    release();
+  }
+}
+
+async function rebuild(
+  indexPath: string,
+  sessionsDir: string,
+  corrupt: boolean,
+): Promise<ReindexResult> {
+  const temp = `${indexPath}.${randomUUID()}.tmp`;
+  let db: SessionIndexDatabase | undefined = openIndexDatabase(temp, { create: true });
+  try {
+    initializeSchema(db);
+    const result = await walk(db, indexPath, sessionsDir);
+    const built = db;
+    db.transaction(() => {
+      setMetadata(built, "indexed_at", new Date().toISOString());
+      setMetadata(built, "build", BUILD);
+    });
+    db.close();
+    db = undefined;
+    if (corrupt) {
+      const backup = `${indexPath}.bad-${Date.now()}-${randomUUID()}`;
+      for (const suffix of ["", "-wal", "-shm", "-journal"]) {
+        if (existsSync(`${indexPath}${suffix}`))
+          renameSync(`${indexPath}${suffix}`, `${backup}${suffix}`);
+      }
+    } else if (existsSync(indexPath)) {
+      // Upgrade legacy WAL indexes before swapping: SQLite checkpoints and
+      // refuses the mode change while another connection still needs its WAL.
+      const previous = openIndexDatabase(indexPath, { create: false });
+      previous.close();
+    }
+    renameSync(temp, indexPath);
+    return result;
+  } finally {
     db?.close();
     for (const suffix of ["", "-wal", "-shm", "-journal"])
       rmSync(`${temp}${suffix}`, { force: true });
-    release();
   }
+}
+
+async function reconcile(indexPath: string, sessionsDir: string): Promise<ReindexResult> {
+  const db = openIndexDatabase(indexPath, { create: false });
+  try {
+    const result = await walk(db, indexPath, sessionsDir);
+    db.transaction(() => setMetadata(db, "reconciled_at", new Date().toISOString()));
+    return result;
+  } finally {
+    db.close();
+  }
+}
+
+async function walk(
+  db: SessionIndexDatabase,
+  indexPath: string,
+  sessionsDir: string,
+): Promise<ReindexResult> {
+  const skipped: string[] = [];
+  for (const file of listSessionFiles(sessionsDir)) {
+    if (!syncSessionFileWithDb(db, file, "reconcile")) skipped.push(file);
+    await yieldToEventLoop();
+  }
+  const count = (table: string) =>
+    parseTypeBoxValue(
+      ROW_COUNT_SCHEMA,
+      db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get(),
+      "Invalid index count",
+    ).count;
+  return {
+    sessionCount: count("sessions"),
+    chunkCount: count("session_text_chunks"),
+    indexPath,
+    skipped,
+  };
 }

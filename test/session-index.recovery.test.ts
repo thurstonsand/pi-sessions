@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import {
   appendFileSync,
   existsSync,
@@ -205,7 +206,8 @@ it("persists failure backoff and lets a manual rebuild bypass it without destroy
   const db = openIndexDatabase(indexPath, { create: false, mode: "read" });
   expect(getMetadata(db, "schema_version")).toBe(String(INDEX_SCHEMA_VERSION));
   db.close();
-});
+  // Each of the five injected failures waits out the publish copy's 5 s busy_timeout.
+}, 40_000);
 
 it("lands hook writes while a rebuilder holds the rebuild lock", async () => {
   const { file, indexPath } = fixture();
@@ -221,6 +223,51 @@ it("lands hook writes while a rebuilder holds the rebuild lock", async () => {
   }
   expect(chunkCount(indexPath, "written under the rebuild lock")).toEqual({ count: 1 });
 });
+
+it("lands hook writes into a WAL index another connection holds open", async () => {
+  const { file, indexPath } = fixture();
+  await rebuildSessionIndex({ indexPath });
+  const legacy = openIndexDatabase(indexPath, { create: false });
+  try {
+    legacy.exec("PRAGMA journal_mode = WAL");
+    legacy.exec("BEGIN");
+    legacy.prepare("SELECT COUNT(*) FROM sessions").get();
+    appendTurn(file, "written beside a WAL reader");
+    expect(await createSessionHookController({ indexPath }).handleTurnEnd(file)).toBe(true);
+    legacy.exec("COMMIT");
+  } finally {
+    legacy.close();
+  }
+  expect(chunkCount(indexPath, "written beside a WAL reader")).toEqual({ count: 1 });
+});
+
+it("waits out another process's rebuild past busy_timeout, then lands the hook write", async () => {
+  const { file, indexPath } = fixture();
+  await rebuildSessionIndex({ indexPath });
+  const rebuilder = spawn(
+    process.execPath,
+    [
+      "-e",
+      `const { DatabaseSync } = require("node:sqlite");
+      const lock = new DatabaseSync(process.argv[1] + ".lock.sqlite");
+      lock.exec("BEGIN EXCLUSIVE");
+      const index = new DatabaseSync(process.argv[1]);
+      index.exec("BEGIN IMMEDIATE");
+      console.log("held");
+      setTimeout(() => { index.exec("ROLLBACK"); lock.close(); }, 6_000);`,
+      indexPath,
+    ],
+    { stdio: ["ignore", "pipe", "inherit"] },
+  );
+  const exited = new Promise((resolve) => rebuilder.on("exit", resolve));
+  await new Promise((resolve) => rebuilder.stdout.once("data", resolve));
+  appendTurn(file, "written after a foreign rebuild");
+  const started = Date.now();
+  expect(await createSessionHookController({ indexPath }).handleTurnEnd(file)).toBe(true);
+  expect(Date.now() - started).toBeGreaterThan(5_500);
+  await exited;
+  expect(chunkCount(indexPath, "written after a foreign rebuild")).toEqual({ count: 1 });
+}, 20_000);
 
 it("keeps connections opened before a rebuild writing into the live index", async () => {
   const { indexPath } = fixture();

@@ -11,6 +11,7 @@ import {
   getIndexRecoveryMessage,
   isIndexClientDisabled,
   requestIndexRecovery,
+  waitForIndexRebuild,
 } from "./recovery.ts";
 import { getMetadata, openIndexDatabase } from "./schema.ts";
 import { isSqliteBusy } from "./sqlite.ts";
@@ -43,12 +44,21 @@ export function withSessionIndex<T>(
   options: WithSessionIndexOptions,
   read: (index: ValidSessionIndex) => T,
 ): T | undefined {
-  const index = openValidatedSessionIndex(indexPath, options);
-  if (!index) return undefined;
+  const attempt = () => {
+    const index = openValidatedSessionIndex(indexPath, options);
+    if (!index) return undefined;
+    try {
+      return read(index);
+    } finally {
+      index.db.close();
+    }
+  };
   try {
-    return read(index);
-  } finally {
-    index.db.close();
+    return attempt();
+  } catch (error) {
+    if (options.mode !== "write" || !isSqliteBusy(error) || !waitForIndexRebuild(indexPath))
+      throw error;
+    return attempt();
   }
 }
 

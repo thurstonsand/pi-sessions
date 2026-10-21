@@ -51,7 +51,6 @@ export function openSqlite(
     create: boolean;
     readonly?: boolean | undefined;
     timeoutMs?: number | undefined;
-    journalMode?: "DELETE" | "WAL";
   },
 ): SqliteDatabase {
   const Database = loadDatabaseConstructor();
@@ -75,13 +74,9 @@ export function openSqlite(
     db.exec(`PRAGMA busy_timeout = ${options.timeoutMs ?? DEFAULT_BUSY_TIMEOUT_MS}`);
     db.exec("PRAGMA foreign_keys = ON");
 
-    if (!readonly) {
-      // journal_mode is the connection's first write-capable lock acquisition (and
-      // may run WAL recovery), and immediate transactions rely on busy_timeout to
-      // queue behind concurrent writers instead of failing.
-      db.exec(`PRAGMA journal_mode = ${options.journalMode ?? "WAL"}`);
-      db.exec("PRAGMA synchronous = NORMAL");
-    }
+    // The journal mode is left as the file has it: leaving WAL needs every other
+    // connection closed and fails at once instead of waiting on busy_timeout.
+    if (!readonly) db.exec("PRAGMA synchronous = NORMAL");
   } catch (error) {
     db.close();
     throw error;

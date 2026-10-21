@@ -42,6 +42,9 @@ export interface ReindexResult {
   skipped: string[];
 }
 const TEMP_SUFFIX = /^[0-9a-f-]{36}\.tmp(-journal|-wal|-shm)?$/;
+// SQLite's busy_timeout is a C int of milliseconds (about 24.8 days).
+const MAX_BUSY_TIMEOUT_MS = 2 ** 31 - 1;
+const heldLocks = new Set<string>();
 const running = new Map<string, Promise<ReindexResult | undefined>>();
 const notices = new Map<string, (message: string | undefined) => void>();
 const shown = new Map<string, string>();
@@ -102,19 +105,37 @@ export function getIndexRecoveryMessage(indexPath: string): string | undefined {
 
 // Serializes rebuilds only; ordinary writers rely on SQLite's own write lock.
 // SQLite owns the lock lifetime, including process death; never unlink its file.
-export function acquireIndexLock(indexPath: string): (() => void) | undefined {
+export function acquireIndexLock(indexPath: string, timeoutMs = 0): (() => void) | undefined {
   ensureIndexDir(dirname(indexPath));
   let lock: SessionIndexDatabase | undefined;
   try {
-    lock = openIndexDatabase(`${indexPath}.lock.sqlite`, { create: true, timeoutMs: 0 });
+    lock = openIndexDatabase(`${indexPath}.lock.sqlite`, { create: true, timeoutMs });
     lock.exec("BEGIN EXCLUSIVE");
     const held = lock;
-    return () => held.close();
+    heldLocks.add(indexPath);
+    return () => {
+      heldLocks.delete(indexPath);
+      held.close();
+    };
   } catch (error) {
     lock?.close();
     if (isSqliteBusy(error)) return undefined;
     throw error;
   }
+}
+
+// A rebuild is stop-the-world: a writer it blocks waits for it to finish, however
+// long that takes. Returns false when no other process is rebuilding, including
+// when this process holds the lock and waiting would deadlock its own rebuild.
+export function waitForIndexRebuild(indexPath: string): boolean {
+  if (heldLocks.has(indexPath)) return false;
+  const free = acquireIndexLock(indexPath);
+  if (free) {
+    free();
+    return false;
+  }
+  acquireIndexLock(indexPath, MAX_BUSY_TIMEOUT_MS)?.();
+  return true;
 }
 
 export function requestIndexRecovery(
@@ -283,6 +304,13 @@ async function rebuild(indexPath: string, sessionsDir: string, manual: boolean):
           for (const file of listSessionFiles(sessionsDir))
             syncSessionFileInTransaction(live, file, "reconcile");
         });
+        // Converts a legacy WAL index; any connection still open keeps it WAL until
+        // a later rebuild, which writers handle either way.
+        try {
+          live.exec("PRAGMA journal_mode = DELETE");
+        } catch (error) {
+          if (!isSqliteBusy(error)) throw error;
+        }
       } finally {
         live.close();
       }

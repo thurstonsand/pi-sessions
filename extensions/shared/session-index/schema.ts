@@ -23,12 +23,7 @@ export function openIndexDatabase(
 ): SessionIndexDatabase {
   const create = options?.create ?? true;
   const readonly = options?.mode === "read";
-  return openSqlite(dbPath, {
-    create,
-    readonly,
-    timeoutMs: options?.timeoutMs,
-    journalMode: "DELETE",
-  });
+  return openSqlite(dbPath, { create, readonly, timeoutMs: options?.timeoutMs });
 }
 
 export function initializeSchema(db: SessionIndexDatabase): void {

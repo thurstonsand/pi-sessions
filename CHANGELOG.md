@@ -2,6 +2,12 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.20.2] - 2026-10-21
+
+### Fixed
+
+- Reloading or starting a new session while the session index is still being built no longer crashes Pi or leaves a false "Session indexing failed" message with a retry delay. If a newer pi-sessions version takes over the index during that build, the older one now only asks you to `/reload`.
+
 ## [0.20.1] - 2026-10-21
 
 ### Fixed

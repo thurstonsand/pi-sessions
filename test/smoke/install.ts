@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import {
@@ -79,8 +79,10 @@ export default function install(pi: ExtensionAPI): void {
     await ctx.modelRegistry.refresh({ allowNetwork: false });
     if (!(await pi.setModel(model))) throw new Error("Smoke provider auth is unavailable.");
     const sessionId = ctx.sessionManager.getSessionId();
+    // The harness polls for this file and parses it once it exists, so it must appear whole.
+    const readyFile = join(getAgentDir(), `${sessionId}.ready.json`);
     writeFileSync(
-      join(getAgentDir(), `${sessionId}.ready.json`),
+      `${readyFile}.tmp`,
       JSON.stringify({
         sessionId,
         sessionFile: ctx.sessionManager.getSessionFile(),
@@ -92,6 +94,7 @@ export default function install(pi: ExtensionAPI): void {
         tools: pi.getAllTools().map((tool) => tool.name),
       }),
     );
+    renameSync(`${readyFile}.tmp`, readyFile);
   });
   pi.on("before_agent_start", (_event, ctx) => {
     writeFileSync(

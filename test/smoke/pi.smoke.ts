@@ -576,6 +576,7 @@ test.each(["fresh", "older", "newer", "failure"])(
       }
     }
     const original = existsSync(indexPath) ? readFileSync(indexPath) : undefined;
+    const originalInode = existsSync(indexPath) ? statSync(indexPath).ino : undefined;
     const publications: number[] = [];
     const watcher = watch(indexDir, (event, name) => {
       if (event === "rename" && name === "index.sqlite" && existsSync(indexPath))
@@ -647,8 +648,13 @@ test.each(["fresh", "older", "newer", "failure"])(
         const result = await parent.tool("session_reachable", {});
         expect(JSON.stringify(result.details)).toContain(ids[1]);
         expect(JSON.stringify(result.details)).toContain("Recovery peer 1");
-        expect(new Set(publications).size).toBe(1);
-        expect(publications).toHaveLength(1);
+        if (scenario === "fresh") {
+          expect(publications).toHaveLength(1);
+        } else {
+          // An older schema is rebuilt in place, so open connections keep the live file.
+          expect(publications).toEqual([]);
+          expect(statSync(indexPath).ino).toBe(originalInode);
+        }
       }
     } finally {
       blocker?.close();

@@ -39,7 +39,7 @@ Pi loads extension code directly from TypeScript source. Only the detached messa
 
 - Wrap multi-step writes in `db.transaction(fn)` which enforces immediate — a deferred read-then-write transaction fails with `SQLITE_BUSY` on the snapshot upgrade
 - SQLite is accessed via each runtime's built-in driver: `bun:sqlite` under bun, `node:sqlite` otherwise
-- Index callers use `withSessionIndex`: it validates schema read-only, starts recovery on a miss, and serializes writes with rebuilds. The index uses rollback journals so atomic file replacement cannot mix old WAL sidecars with a new database. Never unlink the companion `.lock.sqlite`; SQLite releases its lock when a process exits.
+- Index callers use `withSessionIndex`: it validates schema, starts recovery on a miss, and leaves write serialization to SQLite's own `BEGIN IMMEDIATE` lock. The companion `.lock.sqlite` serializes rebuilds only; a rebuild copies into a valid index in place, and renames a new file in only when the index is missing or corrupt, so open connections never point at a replaced inode. The index uses rollback journals so a renamed-in file cannot mix with old WAL sidecars. Never unlink the companion `.lock.sqlite`; SQLite releases its lock when a process exits.
 - use `.ts` extensions for repo-local imports
 - the broker runs under raw Node with no `node_modules` beside it; nothing in its import graph may import a package, TypeBox included
 - pi tracks `main` for git installs, so every commit must carry a `dist/` that matches its source; the pre-commit hook rejects a stale one

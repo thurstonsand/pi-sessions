@@ -6,6 +6,7 @@ import {
   ROW_COUNT_SCHEMA,
   type SessionIndexDatabase,
   type SessionIndexStatus,
+  TABLE_NAME_ROW_SCHEMA,
 } from "./common.ts";
 import { openSqlite } from "./sqlite.ts";
 
@@ -159,6 +160,46 @@ export function initializeSchema(db: SessionIndexDatabase): void {
   `);
 
   setMetadata(db, "schema_version", String(INDEX_SCHEMA_VERSION));
+}
+
+// A rebuild replaces a valid index's contents in place, never its file: a
+// connection left on a renamed-over inode finds the new file's journal by name
+// and plays it back into the wrong file.
+export function replaceIndexContents(
+  db: SessionIndexDatabase,
+  sourcePath: string,
+  catchUp: () => void,
+): void {
+  db.exec("PRAGMA foreign_keys = OFF");
+  // Rollback-journal mode takes the exclusive lock as soon as the cache spills;
+  // a large cache keeps readers out only for the COMMIT itself.
+  db.exec("PRAGMA cache_size = -262144");
+  db.prepare("ATTACH DATABASE ? AS source").run(sourcePath);
+  try {
+    db.transaction(() => {
+      for (const name of listMainObjects(db, "view")) db.exec(`DROP VIEW "${name}"`);
+      // Dropping the FTS table first takes its shadow tables with it.
+      for (const name of listMainObjects(db, "virtual")) db.exec(`DROP TABLE "${name}"`);
+      for (const name of listMainObjects(db, "table")) db.exec(`DROP TABLE "${name}"`);
+      initializeSchema(db);
+      db.exec("DELETE FROM main.metadata");
+      // The FTS index refills through the session_text_chunks insert trigger.
+      for (const name of listMainObjects(db, "table"))
+        db.exec(`INSERT INTO main."${name}" SELECT * FROM source."${name}"`);
+      catchUp();
+    });
+  } finally {
+    db.exec("DETACH DATABASE source");
+  }
+}
+
+function listMainObjects(db: SessionIndexDatabase, type: "view" | "virtual" | "table"): string[] {
+  return db
+    .prepare(
+      `SELECT name FROM pragma_table_list WHERE schema = 'main' AND type = ? AND name NOT LIKE 'sqlite_%'`,
+    )
+    .all(type)
+    .map((row) => parseTypeBoxValue(TABLE_NAME_ROW_SCHEMA, row, "Invalid table list row").name);
 }
 
 export function setMetadata(db: SessionIndexDatabase, key: string, value: string): void {

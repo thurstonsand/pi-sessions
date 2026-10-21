@@ -1,4 +1,4 @@
-import { readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -297,7 +297,7 @@ describe("rebuildSessionIndex", () => {
     expect(relations).toEqual([{ relatedSessionId: "indexed-child" }]);
   });
 
-  it("atomically replaces the index while existing readers retain their snapshot", async () => {
+  it("replaces a valid index in place, so connections opened before the rebuild see it", async () => {
     const root = testFs.createTempDir();
     const sessionsDir = path.join(root, "sessions");
     const nestedDir = path.join(sessionsDir, "--repo--");
@@ -332,9 +332,17 @@ describe("rebuildSessionIndex", () => {
         timestamp: "2026-03-22T00:00:00.000Z",
         cwd,
       },
+      {
+        type: "message",
+        id: "u1",
+        parentId: null,
+        timestamp: "2026-03-22T00:00:01.000Z",
+        message: { role: "user", content: "rebuilt zanzibar token" },
+      },
     ]);
 
     vi.stubEnv("PI_CODING_AGENT_DIR", root);
+    const inode = statSync(indexPath).ino;
 
     await rebuildSessionIndex({ indexPath });
 
@@ -343,9 +351,12 @@ describe("rebuildSessionIndex", () => {
       .all() as Array<{ sessionId: string }>;
     observer.close();
 
-    expect(observedIds).toEqual([{ sessionId: "stale-session" }]);
+    expect(observedIds).toEqual([{ sessionId: "live-session" }]);
+    expect(statSync(indexPath).ino).toBe(inode);
     const fresh = openIndexDatabase(indexPath, { create: false, mode: "read" });
-    expect(searchSessions(fresh, {}).map((session) => session.sessionId)).toEqual(["live-session"]);
+    expect(
+      searchSessions(fresh, { query: "zanzibar", limit: 10 }).map((hit) => hit.sessionId),
+    ).toEqual(["live-session"]);
     fresh.close();
   });
 });

@@ -1,21 +1,23 @@
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { setTimeout as delay, setImmediate as yieldToEventLoop } from "node:timers/promises";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
 import { listSessionFiles } from "../../session-search/extract.ts";
 import { parseTypeBoxValue } from "../typebox.ts";
+import { withSessionIndex } from "./access.ts";
 import { INDEX_SCHEMA_VERSION, ROW_COUNT_SCHEMA, type SessionIndexDatabase } from "./common.ts";
 import {
   ensureIndexDir,
   getMetadata,
   initializeSchema,
   openIndexDatabase,
+  replaceIndexContents,
   setMetadata,
 } from "./schema.ts";
 import { isSqliteBusy } from "./sqlite.ts";
-import { syncSessionFileWithDb } from "./sync.ts";
+import { syncSessionFileInTransaction, syncSessionFileWithDb } from "./sync.ts";
 
 export const INDEX_UPDATED_WARNING = "pi-sessions was updated; /reload to use it";
 const BUILD = `index-v${INDEX_SCHEMA_VERSION}:${createHash("sha256")
@@ -39,6 +41,7 @@ export interface ReindexResult {
   indexPath: string;
   skipped: string[];
 }
+const TEMP_SUFFIX = /^[0-9a-f-]{36}\.tmp(-journal|-wal|-shm)?$/;
 const running = new Map<string, Promise<ReindexResult | undefined>>();
 const notices = new Map<string, (message: string | undefined) => void>();
 const shown = new Map<string, string>();
@@ -97,8 +100,7 @@ export function getIndexRecoveryMessage(indexPath: string): string | undefined {
   return undefined;
 }
 
-// All index writers share this lock with recovery. Reads are short-lived and may
-// finish on the old inode after an atomic replacement (no WAL sidecars).
+// Serializes rebuilds only; ordinary writers rely on SQLite's own write lock.
 // SQLite owns the lock lifetime, including process death; never unlink its file.
 export function acquireIndexLock(indexPath: string): (() => void) | undefined {
   ensureIndexDir(dirname(indexPath));
@@ -150,47 +152,25 @@ async function recover(
   reconcileRequested: boolean,
 ): Promise<ReindexResult | undefined> {
   if (disabled.has(indexPath)) return undefined;
-  let release = acquireIndexLock(indexPath);
-  const deadline = Date.now() + 30_000;
-  while (!release && Date.now() < deadline) {
-    await delay(50);
-    release = acquireIndexLock(indexPath);
-  }
-  if (!release) return undefined;
   try {
     const failure = readIndexRecoveryFailure(indexPath);
-    let version: number | undefined;
-    let corrupt = false;
-    if (existsSync(indexPath)) {
-      try {
-        const probe = openIndexDatabase(indexPath, { create: false, mode: "read" });
-        try {
-          version = Number(getMetadata(probe, "schema_version"));
-          if (version > INDEX_SCHEMA_VERSION) {
-            disableOlderIndexClient(indexPath);
-            return undefined;
-          }
-          probe.prepare("SELECT COUNT(*) FROM sessions").get();
-        } finally {
-          probe.close();
-        }
-      } catch (error) {
-        if (isSqliteBusy(error)) throw error;
-        corrupt = true;
-      }
+    // Read-only, so a writer cannot stall it; rebuild re-probes authoritatively.
+    const state = probeIndex(indexPath, "read");
+    if (state === "newer") {
+      disableOlderIndexClient(indexPath);
+      return undefined;
     }
     if (!manual && failure && Date.now() < failure.nextAllowedAt) {
       report(indexPath, getIndexRecoveryMessage(indexPath) ?? failure.error);
       return undefined;
     }
-    const stale = manual || corrupt || version !== INDEX_SCHEMA_VERSION;
-    if (!stale && !reconcileRequested) {
+    if (state === "current" && !manual && !reconcileRequested) {
       if (!failure) notices.get(indexPath)?.(undefined);
       return undefined;
     }
-    const result = stale
-      ? await rebuild(indexPath, sessionsDir, corrupt)
-      : await reconcile(indexPath, sessionsDir);
+    if ((manual || state !== "current") && !(await rebuild(indexPath, sessionsDir, manual)))
+      return undefined;
+    const result = await reconcile(indexPath, sessionsDir);
     rmSync(`${indexPath}.failure.json`, { force: true });
     shown.delete(indexPath);
     notices.get(indexPath)?.(undefined);
@@ -214,80 +194,138 @@ async function recover(
     report(indexPath, getIndexRecoveryMessage(indexPath) ?? failure.error);
     if (manual) throw error;
     return undefined;
-  } finally {
-    release();
   }
 }
 
-async function rebuild(
+function probeIndex(
   indexPath: string,
-  sessionsDir: string,
-  corrupt: boolean,
-): Promise<ReindexResult> {
-  const temp = `${indexPath}.${randomUUID()}.tmp`;
-  let db: SessionIndexDatabase | undefined = openIndexDatabase(temp, { create: true });
+  mode: "read" | "write",
+): "missing" | "corrupt" | "older" | "current" | "newer" {
+  if (!existsSync(indexPath)) return "missing";
   try {
+    const probe = openIndexDatabase(indexPath, { create: false, mode });
+    try {
+      const version = Number(getMetadata(probe, "schema_version"));
+      if (version > INDEX_SCHEMA_VERSION) return "newer";
+      probe.prepare("SELECT COUNT(*) FROM sessions").get();
+      return version === INDEX_SCHEMA_VERSION ? "current" : "older";
+    } finally {
+      probe.close();
+    }
+  } catch (error) {
+    if (isSqliteBusy(error)) throw error;
+    return "corrupt";
+  }
+}
+
+// Only the lock holder builds temps, so any found under the lock are left by a crash.
+function removeOrphanedTemps(indexPath: string): void {
+  const prefix = `${basename(indexPath)}.`;
+  for (const name of readdirSync(dirname(indexPath))) {
+    if (name.startsWith(prefix) && TEMP_SUFFIX.test(name.slice(prefix.length)))
+      rmSync(join(dirname(indexPath), name), { force: true });
+  }
+}
+
+// Returns false when another rebuilder kept the lock, failed while this one waited for it,
+// or found the index newer.
+async function rebuild(indexPath: string, sessionsDir: string, manual: boolean): Promise<boolean> {
+  let release = acquireIndexLock(indexPath);
+  const deadline = Date.now() + 30_000;
+  while (!release && Date.now() < deadline) {
+    await delay(50);
+    release = acquireIndexLock(indexPath);
+  }
+  if (!release) return false;
+  const failure = readIndexRecoveryFailure(indexPath);
+  if (!manual && failure && Date.now() < failure.nextAllowedAt) {
+    release();
+    report(indexPath, getIndexRecoveryMessage(indexPath) ?? failure.error);
+    return false;
+  }
+  removeOrphanedTemps(indexPath);
+  const temp = `${indexPath}.${randomUUID()}.tmp`;
+  let db: SessionIndexDatabase | undefined;
+  try {
+    // Read-write, so a crashed writer's hot journal is rolled back rather than
+    // failing a read-only open and looking like corruption.
+    const state = probeIndex(indexPath, "write");
+    if (state === "newer") {
+      disableOlderIndexClient(indexPath);
+      return false;
+    }
+    if (state === "current" && !manual) return true;
+    db = openIndexDatabase(temp, { create: true });
     initializeSchema(db);
-    const result = await walk(db, indexPath, sessionsDir);
     const built = db;
+    await walk(sessionsDir, (file) => syncSessionFileWithDb(built, file, "reconcile"));
     db.transaction(() => {
       setMetadata(built, "indexed_at", new Date().toISOString());
       setMetadata(built, "build", BUILD);
     });
     db.close();
     db = undefined;
-    if (corrupt) {
+    if (state === "corrupt") {
       const backup = `${indexPath}.bad-${Date.now()}-${randomUUID()}`;
       for (const suffix of ["", "-wal", "-shm", "-journal"]) {
         if (existsSync(`${indexPath}${suffix}`))
           renameSync(`${indexPath}${suffix}`, `${backup}${suffix}`);
       }
-    } else if (existsSync(indexPath)) {
-      // Upgrade legacy WAL indexes before swapping: SQLite checkpoints and
-      // refuses the mode change while another connection still needs its WAL.
-      const previous = openIndexDatabase(indexPath, { create: false });
-      previous.close();
+      renameSync(temp, indexPath);
+    } else if (state === "missing") {
+      renameSync(temp, indexPath);
+    } else {
+      const live = openIndexDatabase(indexPath, { create: false });
+      try {
+        // Writes committed while the temp was built are re-read inside the copy's
+        // transaction, so no reader ever sees the index lose them.
+        replaceIndexContents(live, temp, () => {
+          for (const file of listSessionFiles(sessionsDir))
+            syncSessionFileInTransaction(live, file, "reconcile");
+        });
+      } finally {
+        live.close();
+      }
     }
-    renameSync(temp, indexPath);
-    return result;
+    return true;
   } finally {
     db?.close();
     for (const suffix of ["", "-wal", "-shm", "-journal"])
       rmSync(`${temp}${suffix}`, { force: true });
+    release();
   }
 }
 
+// Also runs after every rebuild: a renamed-in index missed writes that failed while
+// there was no valid index, and skipped transcripts are reported from here.
 async function reconcile(indexPath: string, sessionsDir: string): Promise<ReindexResult> {
-  const db = openIndexDatabase(indexPath, { create: false });
-  try {
-    const result = await walk(db, indexPath, sessionsDir);
+  const skipped = await walk(sessionsDir, (file) =>
+    withSessionIndex(indexPath, { mode: "write", required: true }, ({ db }) =>
+      syncSessionFileWithDb(db, file, "reconcile"),
+    ),
+  );
+  return withSessionIndex(indexPath, { mode: "write", required: true }, ({ db }) => {
     db.transaction(() => setMetadata(db, "reconciled_at", new Date().toISOString()));
-    return result;
-  } finally {
-    db.close();
-  }
+    const count = (table: string) =>
+      parseTypeBoxValue(
+        ROW_COUNT_SCHEMA,
+        db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get(),
+        "Invalid index count",
+      ).count;
+    return {
+      sessionCount: count("sessions"),
+      chunkCount: count("session_text_chunks"),
+      indexPath,
+      skipped,
+    };
+  });
 }
 
-async function walk(
-  db: SessionIndexDatabase,
-  indexPath: string,
-  sessionsDir: string,
-): Promise<ReindexResult> {
+async function walk(sessionsDir: string, sync: (file: string) => boolean): Promise<string[]> {
   const skipped: string[] = [];
   for (const file of listSessionFiles(sessionsDir)) {
-    if (!syncSessionFileWithDb(db, file, "reconcile")) skipped.push(file);
+    if (!sync(file)) skipped.push(file);
     await yieldToEventLoop();
   }
-  const count = (table: string) =>
-    parseTypeBoxValue(
-      ROW_COUNT_SCHEMA,
-      db.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get(),
-      "Invalid index count",
-    ).count;
-  return {
-    sessionCount: count("sessions"),
-    chunkCount: count("session_text_chunks"),
-    indexPath,
-    skipped,
-  };
+  return skipped;
 }

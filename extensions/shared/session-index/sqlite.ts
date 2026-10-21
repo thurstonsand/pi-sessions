@@ -136,7 +136,11 @@ function withStatementCache(db: SqliteDriver): SqliteDatabase {
         db.exec("COMMIT");
         return result;
       } catch (error) {
-        db.exec("ROLLBACK");
+        // Some failures, such as an I/O error during COMMIT, make SQLite roll back
+        // on its own; the original error is the one that explains what happened.
+        try {
+          db.exec("ROLLBACK");
+        } catch {}
         throw error;
       } finally {
         inTransaction = false;

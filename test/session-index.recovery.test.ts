@@ -1,4 +1,11 @@
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import {
@@ -10,11 +17,13 @@ import {
   withSessionIndex,
 } from "../extensions/shared/session-index/index.ts";
 import {
+  acquireIndexLock,
   observeIndexRecovery,
   readIndexRecoveryFailure,
   rebuildSessionIndex,
   requestIndexRecovery,
 } from "../extensions/shared/session-index/recovery.ts";
+import { createSessionHookController } from "../extensions/shared/session-index/sync.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
 const fs = createTestFilesystem("pi-index-recovery-");
@@ -42,6 +51,25 @@ function fixture() {
     if (message) notices.push(message);
   });
   return { root, file, indexPath, notices };
+}
+
+function appendTurn(file: string, text: string) {
+  appendFileSync(
+    file,
+    `${JSON.stringify({
+      type: "message",
+      id: `turn-${text}`,
+      parentId: "prompt",
+      timestamp: "2026-10-09T00:00:02Z",
+      message: { role: "user", content: text },
+    })}\n`,
+  );
+}
+
+function chunkCount(indexPath: string, text: string) {
+  return withSessionIndex(indexPath, { mode: "read", required: true }, ({ db }) =>
+    db.prepare("SELECT COUNT(*) AS count FROM session_text_chunks WHERE text = ?").get(text),
+  );
 }
 
 function search(indexPath: string) {
@@ -78,7 +106,7 @@ it("recovers on demand, skips broken transcripts, and reconciles drift without r
   ).toEqual({ index_source: "unchanged" });
 });
 
-it("moves unreadable databases aside and only rebuilds older schemas", async () => {
+it("moves unreadable databases aside and rebuilds older schemas in place", async () => {
   const { root, indexPath } = fixture();
   writeFileSync(indexPath, "broken database");
   expect(() => search(indexPath)).toThrow("indexing");
@@ -92,10 +120,21 @@ it("moves unreadable databases aside and only rebuilds older schemas", async () 
   );
   const inode = statSync(indexPath).ino;
   await Promise.all([requestIndexRecovery(indexPath), requestIndexRecovery(indexPath)]);
-  expect(statSync(indexPath).ino).not.toBe(inode);
-  const rebuilt = statSync(indexPath).ino;
+  expect(statSync(indexPath).ino).toBe(inode);
+  expect(
+    withSessionIndex(
+      indexPath,
+      { mode: "read", required: true },
+      ({ status }) => status.schemaVersion,
+    ),
+  ).toBe(INDEX_SCHEMA_VERSION);
+  const indexedAt = () =>
+    withSessionIndex(indexPath, { mode: "read", required: true }, ({ db }) =>
+      getMetadata(db, "indexed_at"),
+    );
+  const rebuiltAt = indexedAt();
   await requestIndexRecovery(indexPath);
-  expect(statSync(indexPath).ino).toBe(rebuilt);
+  expect(indexedAt()).toBe(rebuiltAt);
   expect(search(indexPath)).toHaveLength(1);
 });
 
@@ -166,4 +205,103 @@ it("persists failure backoff and lets a manual rebuild bypass it without destroy
   const db = openIndexDatabase(indexPath, { create: false, mode: "read" });
   expect(getMetadata(db, "schema_version")).toBe(String(INDEX_SCHEMA_VERSION));
   db.close();
+});
+
+it("lands hook writes while a rebuilder holds the rebuild lock", async () => {
+  const { file, indexPath } = fixture();
+  await rebuildSessionIndex({ indexPath });
+  const controller = createSessionHookController({ indexPath });
+  appendTurn(file, "written under the rebuild lock");
+  const release = acquireIndexLock(indexPath);
+  expect(release).toBeDefined();
+  try {
+    expect(await controller.handleTurnEnd(file)).toBe(true);
+  } finally {
+    release?.();
+  }
+  expect(chunkCount(indexPath, "written under the rebuild lock")).toEqual({ count: 1 });
+});
+
+it("keeps connections opened before a rebuild writing into the live index", async () => {
+  const { indexPath } = fixture();
+  await rebuildSessionIndex({ indexPath });
+  const early = openIndexDatabase(indexPath, { create: false });
+  try {
+    await rebuildSessionIndex({ indexPath });
+    early.transaction(() => setMetadata(early, "early_writer", "landed"));
+  } finally {
+    early.close();
+  }
+  expect(existsSync(`${indexPath}-journal`)).toBe(false);
+  withSessionIndex(indexPath, { mode: "read", required: true }, ({ db }) => {
+    expect(getMetadata(db, "early_writer")).toBe("landed");
+    expect(db.prepare("PRAGMA integrity_check").get()).toEqual({ integrity_check: "ok" });
+  });
+});
+
+it("indexes a turn_end that interleaves with a reconcile exactly once", async () => {
+  const { root, file, indexPath } = fixture();
+  for (let i = 0; i < 20; i++)
+    fs.writeJsonlFile(path.join(root, "sessions", "project"), `extra-${i}.jsonl`, [
+      { type: "session", id: `extra-${i}`, timestamp: "2026-10-09T00:00:00Z", cwd: root },
+    ]);
+  await rebuildSessionIndex({ indexPath });
+  const controller = createSessionHookController({ indexPath });
+  appendTurn(file, "interleaved with reconcile");
+  const reconciling = requestIndexRecovery(indexPath, true);
+  for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+  const synced = controller.handleTurnEnd(file);
+  await expect(Promise.all([synced, reconciling])).resolves.toEqual([
+    true,
+    expect.objectContaining({ sessionCount: 21 }),
+  ]);
+  expect(chunkCount(indexPath, "interleaved with reconcile")).toEqual({ count: 1 });
+});
+
+it("never shows a reader the index without writes acknowledged during a rebuild", async () => {
+  const { root, file, indexPath } = fixture();
+  const files = [file];
+  for (let i = 0; i < 20; i++)
+    files.push(
+      fs.writeJsonlFile(path.join(root, "sessions", "project"), `extra-${i}.jsonl`, [
+        { type: "session", id: `extra-${i}`, timestamp: "2026-10-09T00:00:00Z", cwd: root },
+        {
+          type: "message",
+          id: "prompt",
+          parentId: null,
+          timestamp: "2026-10-09T00:00:01Z",
+          message: { role: "user", content: `extra prompt ${i}` },
+        },
+      ]),
+    );
+  await rebuildSessionIndex({ indexPath });
+  const controller = createSessionHookController({ indexPath });
+  let settled = false;
+  const rebuilding = rebuildSessionIndex({ indexPath }).finally(() => {
+    settled = true;
+  });
+  const acknowledged: string[] = [];
+  const missing = new Set<string>();
+  for (let tick = 0; !settled; tick++) {
+    await new Promise((resolve) => setImmediate(resolve));
+    // Check before writing: a hook's tail sync would otherwise re-read lost turns first.
+    withSessionIndex(indexPath, { mode: "read", required: true }, ({ db }) => {
+      const present = new Set(
+        db
+          .prepare("SELECT text FROM session_text_chunks WHERE text LIKE 'tick %'")
+          .all()
+          .map((row) => String((row as { text: string }).text)),
+      );
+      for (const text of acknowledged) if (!present.has(text)) missing.add(text);
+    });
+    for (const [i, target] of files.entries()) {
+      const text = `tick ${tick} file ${i}`;
+      appendTurn(target, text);
+      expect(await controller.handleTurnEnd(target)).toBe(true);
+      acknowledged.push(text);
+    }
+  }
+  await rebuilding;
+  expect(acknowledged.length).toBeGreaterThan(files.length);
+  expect([...missing]).toEqual([]);
 });

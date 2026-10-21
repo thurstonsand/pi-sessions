@@ -107,7 +107,20 @@ interface TailSyncBaseline extends SessionRow {
   indexedFileAnchor: string;
 }
 
+// One transaction from baseline read to write: a peer syncing the same transcript
+// either sees this sync's result or finishes before it starts.
 export function syncSessionFileWithDb(
+  db: SessionIndexDatabase,
+  sessionFile: string,
+  eventType: string,
+  sessionOrigin?: SessionOrigin,
+): boolean {
+  return db.transaction(() =>
+    syncSessionFileInTransaction(db, sessionFile, eventType, sessionOrigin),
+  );
+}
+
+export function syncSessionFileInTransaction(
   db: SessionIndexDatabase,
   sessionFile: string,
   eventType: string,
@@ -122,7 +135,7 @@ export function syncSessionFileWithDb(
   }
 
   if (baseline && isIndexCurrent(baseline, stat, sessionOrigin)) {
-    if (eventType !== "reconcile") db.transaction(() => writeHookSyncMetadata(db, eventType));
+    if (eventType !== "reconcile") writeHookSyncMetadata(db, eventType);
     return true;
   }
 
@@ -198,29 +211,27 @@ function applyFullSync(
   eventType: string,
   sessionOrigin?: SessionOrigin,
 ): void {
-  db.transaction(() => {
-    const existingSession = getSessionById(db, extracted.sessionId);
-    const sessionRow = mergeSessionLineage(extracted, existingSession, sessionOrigin);
-    clearSessionIndexedData(db, extracted.sessionId);
-    upsertSession(db, sessionRow, "hook");
-    if (shouldRefreshLineageRelations(existingSession, sessionRow)) {
-      refreshSessionLineageRelationsFor(db, [
-        extracted.sessionId,
-        existingSession?.parentSessionId,
-        sessionRow.parentSessionId,
-      ]);
-    }
+  const existingSession = getSessionById(db, extracted.sessionId);
+  const sessionRow = mergeSessionLineage(extracted, existingSession, sessionOrigin);
+  clearSessionIndexedData(db, extracted.sessionId);
+  upsertSession(db, sessionRow, "hook");
+  if (shouldRefreshLineageRelations(existingSession, sessionRow)) {
+    refreshSessionLineageRelationsFor(db, [
+      extracted.sessionId,
+      existingSession?.parentSessionId,
+      sessionRow.parentSessionId,
+    ]);
+  }
 
-    for (const chunk of extracted.chunks) {
-      insertTextChunk(db, { sessionId: extracted.sessionId, ...chunk });
-    }
+  for (const chunk of extracted.chunks) {
+    insertTextChunk(db, { sessionId: extracted.sessionId, ...chunk });
+  }
 
-    for (const fileTouch of extracted.fileTouches) {
-      insertSessionFileTouch(db, { sessionId: extracted.sessionId, ...fileTouch });
-    }
+  for (const fileTouch of extracted.fileTouches) {
+    insertSessionFileTouch(db, { sessionId: extracted.sessionId, ...fileTouch });
+  }
 
-    writeHookSyncMetadata(db, eventType);
-  });
+  writeHookSyncMetadata(db, eventType);
 }
 
 function applyTailSync(
@@ -230,61 +241,49 @@ function applyTailSync(
   eventType: string,
   sessionOrigin?: SessionOrigin,
 ): boolean {
-  return db.transaction((): boolean => {
-    // A lineage entry can arrive after the initial header sync. Re-read the header to
-    // preserve its precedence and rebuild lineage through the normal full-sync path.
-    if (tail.scan.lineage) return false;
-    // Another process may have advanced the index between our baseline read
-    // and this transaction; the tail deltas would then double-count.
-    const current = getSessionRowByPath(db, baseline.sessionPath);
-    if (
-      !current ||
-      current.sessionId !== baseline.sessionId ||
-      current.indexedFileSize !== baseline.indexedFileSize
-    ) {
-      return false;
-    }
+  // A lineage entry can arrive after the initial header sync. Re-read the header to
+  // preserve its precedence and rebuild lineage through the normal full-sync path.
+  if (tail.scan.lineage) return false;
 
-    const scan = tail.scan;
-    upsertSession(db, buildTailSessionRow(baseline, tail, sessionOrigin), "hook");
+  const scan = tail.scan;
+  upsertSession(db, buildTailSessionRow(baseline, tail, sessionOrigin), "hook");
 
-    if (scan.sessionName !== undefined && scan.sessionName !== baseline.sessionName) {
-      clearSessionChunksBySourceKind(db, baseline.sessionId, "session_name");
-      if (scan.sessionName && scan.sessionNameEntryId) {
-        insertTextChunk(db, {
-          sessionId: baseline.sessionId,
-          ...createSessionNameChunk(
-            scan.sessionName,
-            scan.sessionNameTs ?? baseline.startedAt,
-            scan.sessionNameEntryId,
-          ),
-        });
-      }
-    }
-
-    if (!baseline.handoffGoal && scan.handoffMetadata) {
-      const { entryId, ts, metadata } = scan.handoffMetadata;
+  if (scan.sessionName !== undefined && scan.sessionName !== baseline.sessionName) {
+    clearSessionChunksBySourceKind(db, baseline.sessionId, "session_name");
+    if (scan.sessionName && scan.sessionNameEntryId) {
       insertTextChunk(db, {
         sessionId: baseline.sessionId,
-        entryId,
-        entryType: "custom",
-        ts,
-        sourceKind: "handoff_goal",
-        text: metadata.goal,
+        ...createSessionNameChunk(
+          scan.sessionName,
+          scan.sessionNameTs ?? baseline.startedAt,
+          scan.sessionNameEntryId,
+        ),
       });
     }
+  }
 
-    for (const chunk of scan.chunks) {
-      insertTextChunk(db, { sessionId: baseline.sessionId, ...chunk });
-    }
+  if (!baseline.handoffGoal && scan.handoffMetadata) {
+    const { entryId, ts, metadata } = scan.handoffMetadata;
+    insertTextChunk(db, {
+      sessionId: baseline.sessionId,
+      entryId,
+      entryType: "custom",
+      ts,
+      sourceKind: "handoff_goal",
+      text: metadata.goal,
+    });
+  }
 
-    for (const fileTouch of scan.fileTouches) {
-      insertSessionFileTouch(db, { sessionId: baseline.sessionId, ...fileTouch });
-    }
+  for (const chunk of scan.chunks) {
+    insertTextChunk(db, { sessionId: baseline.sessionId, ...chunk });
+  }
 
-    writeHookSyncMetadata(db, eventType);
-    return true;
-  });
+  for (const fileTouch of scan.fileTouches) {
+    insertSessionFileTouch(db, { sessionId: baseline.sessionId, ...fileTouch });
+  }
+
+  writeHookSyncMetadata(db, eventType);
+  return true;
 }
 
 function buildTailSessionRow(

@@ -175,6 +175,9 @@ export const ROW_COUNT_SCHEMA = Type.Object({
 export const METADATA_ROW_SCHEMA = Type.Object({
   value: Type.String(),
 });
+export const TABLE_NAME_ROW_SCHEMA = Type.Object({
+  name: Type.String(),
+});
 
 export function parseRepoRoots(value: string): string[] {
   return safeParseTypeBoxJson(Type.Array(Type.String()), value) ?? [];

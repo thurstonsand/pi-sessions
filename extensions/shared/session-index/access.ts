@@ -7,13 +7,13 @@ import {
   type SessionIndexStatus,
 } from "./common.ts";
 import {
-  acquireIndexLock,
   disableOlderIndexClient,
   getIndexRecoveryMessage,
   isIndexClientDisabled,
   requestIndexRecovery,
 } from "./recovery.ts";
 import { getMetadata, openIndexDatabase } from "./schema.ts";
+import { isSqliteBusy } from "./sqlite.ts";
 
 export type SessionIndexOpenMode = "read" | "write";
 
@@ -43,37 +43,41 @@ export function withSessionIndex<T>(
   options: WithSessionIndexOptions,
   read: (index: ValidSessionIndex) => T,
 ): T | undefined {
+  const index = openValidatedSessionIndex(indexPath, options);
+  if (!index) return undefined;
+  try {
+    return read(index);
+  } finally {
+    index.db.close();
+  }
+}
+
+function openValidatedSessionIndex(
+  indexPath: string,
+  options: WithSessionIndexOptions,
+): ValidSessionIndex | undefined {
   if (isIndexClientDisabled(indexPath) || !existsSync(indexPath))
     return handleUnavailableIndex(indexPath, options);
 
   let db: SessionIndexDatabase | undefined;
-  let release: (() => void) | undefined;
-  let status: SessionIndexStatus;
+  let version: number;
   try {
-    try {
-      if (options.mode === "write") {
-        release = acquireIndexLock(indexPath);
-        if (!release) return handleUnavailableIndex(indexPath, options);
-      }
-      db = openIndexDatabase(indexPath, {
-        create: false,
-        mode: options.mode,
-        timeoutMs: options.timeoutMs,
-      });
-      const version = Number(getMetadata(db, "schema_version"));
-      if (version !== INDEX_SCHEMA_VERSION) {
-        if (version > INDEX_SCHEMA_VERSION) disableOlderIndexClient(indexPath);
-        return handleUnavailableIndex(indexPath, options);
-      }
-      status = getIndexStatusFromDb(indexPath, db);
-    } catch (error) {
-      return handleUnavailableIndex(indexPath, options, error);
-    }
-    return read({ db, status });
-  } finally {
+    db = openIndexDatabase(indexPath, {
+      create: false,
+      mode: options.mode,
+      timeoutMs: options.timeoutMs,
+    });
+    version = Number(getMetadata(db, "schema_version"));
+    if (version === INDEX_SCHEMA_VERSION)
+      return { db, status: getIndexStatusFromDb(indexPath, db) };
+  } catch (error) {
     db?.close();
-    release?.();
+    if (isSqliteBusy(error)) throw error;
+    return handleUnavailableIndex(indexPath, options, error);
   }
+  db.close();
+  if (version > INDEX_SCHEMA_VERSION) disableOlderIndexClient(indexPath);
+  return handleUnavailableIndex(indexPath, options);
 }
 
 export function getIndexStatusFromDb(dbPath: string, db: SessionIndexDatabase): SessionIndexStatus {

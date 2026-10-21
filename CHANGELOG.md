@@ -2,6 +2,15 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.20.1] - 2026-10-21
+
+### Fixed
+
+- A message or subagent report that arrives while a session is compacting now starts a turn once the compaction finishes, instead of sitting unanswered; a subagent is no longer reminded or closed around it.
+- An ambiguous model pattern in settings or an agent profile now names the matching providers and says to use `provider/model`, instead of pointing at Pi's `--provider` CLI flag.
+- Launches, `session_ask`, and auto-titles no longer intermittently fail with no available models at the start of a session.
+- The session index no longer drops turns while another session rebuilds or reconciles it, or after an older pi-sessions version switched it to WAL; a write blocked by a rebuild waits for it to finish. A rebuild now updates the existing index in place instead of replacing the file. 0.20.0 could also leave uncommitted rows in the index if a process was killed mid-write; that write is now rolled back.
+
 ## [0.20.0] - 2026-10-15
 
 ### Added

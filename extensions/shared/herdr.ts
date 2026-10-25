@@ -1,4 +1,5 @@
 import { connect } from "node:net";
+import { getShellConfig, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { type TSchema, Type } from "typebox";
 import { parseTypeBoxValue } from "./typebox.ts";
 
@@ -108,8 +109,11 @@ export async function resolveHerdrSession(
   if (env.HERDR_ENV !== "1" || !env.HERDR_SOCKET_PATH || !env.HERDR_PANE_ID) {
     return undefined;
   }
+  // On Windows the socket path is only Herdr's claim file; Herdr listens on the named pipe beside it.
+  const endpoint =
+    process.platform === "win32" ? `\\\\.\\pipe\\${env.HERDR_SOCKET_PATH}` : env.HERDR_SOCKET_PATH;
   const session = {
-    client: createHerdrSocketClient(env.HERDR_SOCKET_PATH),
+    client: createHerdrSocketClient(endpoint),
     paneId: env.HERDR_PANE_ID,
   };
   try {
@@ -170,6 +174,8 @@ async function createWorker(
 
   // The owner's pane can move between workspaces, so its launch-time HERDR_WORKSPACE_ID can be stale.
   const owner = await getPane(client, session.paneId);
+  // Herdr runs the argv as is. Pi's own shell for its bash tool is Git Bash on Windows.
+  const shell = getShellConfig(SettingsManager.create(options.cwd).getShellPath());
   const applied = parse(
     LAYOUT_APPLY_SCHEMA,
     await client.request("layout.apply", {
@@ -180,7 +186,7 @@ async function createWorker(
         type: "pane",
         label: options.name,
         cwd: options.cwd,
-        command: ["/bin/sh", "-c", options.command],
+        command: [shell.shell, ...shell.args, options.command],
       },
     }),
     "layout.apply",

@@ -110,7 +110,7 @@ Use `kind: "user"` or `kind: "subagent"` to filter by session type across the wh
 
 The `session_handoff` tool creates a user-facing child session with a self-contained task. Ask for a direction when you want a visible split, or a deferred handoff when you only want the prepared session. Use `subagent_launch` to delegate suitable independent work to a background subagent.
 
-Directional launches use Herdr when pi runs in a Herdr pane, then tmux when the current terminal is inside tmux, or Ghostty on macOS. Deferred launches create the child without starting it and copy its resume command to the clipboard. A background subagent runs in a detached tmux window, or in its own background tab in the parent's workspace when pi runs in a Herdr pane, and reports back when finished; note that subagents are started with `--approve`, meaning pi will always start in the directory as trusted.
+Directional launches use Herdr when pi runs in a Herdr pane, then tmux when the current terminal is inside tmux, or Ghostty on macOS. Deferred launches create the child without starting it and copy its resume command to the clipboard. A background subagent runs in a detached tmux window, or in its own background tab in the parent's workspace when pi runs in a Herdr pane (launched through the same bash as Pi's bash tool, which is Git Bash on Windows), and reports back when finished; note that subagents are started with `--approve`, meaning pi will always start in the directory as trusted.
 
 When a host claims peers, pi-sessions leaves all user-facing coordination and launches to it. Subagent tools remain available; external-host launch targets are not part of pi-sessions.
 

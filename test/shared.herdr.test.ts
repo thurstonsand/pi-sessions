@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,10 +87,31 @@ describe("Herdr workers", () => {
       focused: false,
       label: "Review parser",
       cwd: "/repo",
-      command: ["/bin/sh", "-c", "pi --session-id 'child' --approve"],
       tokens: { pi_owner_session_id: ownerId, pi_session_id: childId },
     });
     expect(herdr.panes.find((candidate) => candidate.pane_id === "w2:p1")?.focused).toBe(true);
+  });
+
+  it("launches a worker argv that runs the shell command", async () => {
+    const herdr = await startHerdr([pane("w1:p1", "w1", "w1:t1")]);
+    const cwd = mkdtempSync(join(tmpdir(), "pi-sessions-herdr-worker-"));
+    try {
+      await createHerdrWorker(await herdr.session("w1:p1"), {
+        ownerSessionId: ownerId,
+        name: "Child",
+        cwd,
+        command: "printf %s 'pi worker' > ran",
+        piSessionId: childId,
+      });
+
+      // Herdr spawns the argv directly, with no shell of its own around it.
+      const [program, ...args] = herdr.panes.at(-1)?.command ?? [];
+      const run = spawnSync(program ?? "", args, { cwd, encoding: "utf8" });
+      expect(run.error).toBeUndefined();
+      expect(readFileSync(join(cwd, "ran"), "utf8")).toBe("pi worker");
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it("keeps one pane per child when created twice", async () => {
@@ -327,7 +349,12 @@ async function startHerdr(
       );
     });
   });
-  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  // Herdr on Windows claims the socket path with a plain file and listens on the named pipe beside it.
+  if (process.platform === "win32") {
+    writeFileSync(socketPath, "");
+  }
+  const listenPath = process.platform === "win32" ? `\\\\.\\pipe\\${socketPath}` : socketPath;
+  await new Promise<void>((resolve) => server.listen(listenPath, resolve));
   servers.push({ server, dir });
 
   const env = (paneId: string) => ({

@@ -74,6 +74,7 @@ async function installCommand(): Promise<{
     index: { path: "/tmp/index.sqlite" },
     getModelRuntime: vi.fn(),
     claimsPeers: () => false,
+    getHerdr: () => undefined,
     board: { showUserSessions: () => true },
   });
 

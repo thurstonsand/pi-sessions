@@ -11,6 +11,7 @@ import { MessageRouter } from "./session-messaging/message-router.ts";
 import { installDirectoryTools } from "./session-messaging/pi/install.ts";
 import { installSearch } from "./session-search/install.ts";
 import type { SessionLifecycle } from "./shared/composition.ts";
+import { type HerdrSession, resolveHerdrSession } from "./shared/herdr.ts";
 import { getSessionModelRuntime } from "./shared/model-runtime.ts";
 import { loadSettings, readCompactionSettings } from "./shared/settings.ts";
 import { installSubagents, type SubagentsHandle } from "./subagents/install.ts";
@@ -26,6 +27,7 @@ export default function piSessions(pi: ExtensionAPI): void {
   const settings = loadSettings();
   let sessionEpoch = 0;
   const hosts = new HostRegistry();
+  let herdr: HerdrSession | undefined;
 
   const index = installIndex(pi, { settings });
   const messaging = settings.features.messaging
@@ -50,6 +52,7 @@ export default function piSessions(pi: ExtensionAPI): void {
           messaging,
           readCompactionSettings,
           sendMessage: (request) => messageRouter.sendMessage(request),
+          getHerdr: () => herdr,
         })
       : undefined;
   if (subagents) {
@@ -85,6 +88,7 @@ export default function piSessions(pi: ExtensionAPI): void {
         index,
         getModelRuntime: getSessionModelRuntime,
         claimsPeers: () => hosts.claimsPeers(),
+        getHerdr: () => herdr,
         ...(subagents ? { getLaunchTargets: () => subagents.getLaunchTargets() } : {}),
         board,
       }),
@@ -127,6 +131,8 @@ export default function piSessions(pi: ExtensionAPI): void {
   pi.on("session_start", async (event, ctx) => {
     sessionEpoch += 1;
     hosts.discover(pi.events);
+    // One answer per session start, so split handoffs and subagent workers agree on a backend.
+    herdr = await resolveHerdrSession();
     for (const lifecycle of lifecycles) {
       await lifecycle.onSessionStart?.(event, ctx);
     }

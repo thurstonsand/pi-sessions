@@ -110,7 +110,7 @@ Use `kind: "user"` or `kind: "subagent"` to filter by session type across the wh
 
 The `session_handoff` tool creates a user-facing child session with a self-contained task. Ask for a direction when you want a visible split, or a deferred handoff when you only want the prepared session. Use `subagent_launch` to delegate suitable independent work to a background subagent.
 
-Directional launches use tmux when the current terminal is inside tmux, or Ghostty on macOS. Deferred launches create the child without starting it and copy its resume command to the clipboard. A background subagent runs in a detached tmux window and reports back when finished; note that subagents are started with `--approve`, meaning pi will always start in the directory as trusted.
+Directional launches use Herdr when pi runs in a Herdr pane, then tmux when the current terminal is inside tmux, or Ghostty on macOS. Deferred launches create the child without starting it and copy its resume command to the clipboard. A background subagent runs in a detached tmux window, or in its own background tab in the parent's workspace when pi runs in a Herdr pane, and reports back when finished; note that subagents are started with `--approve`, meaning pi will always start in the directory as trusted.
 
 When a host claims peers, pi-sessions leaves all user-facing coordination and launches to it. Subagent tools remain available; external-host launch targets are not part of pi-sessions.
 
@@ -162,9 +162,9 @@ interface Host {
 }
 ```
 
-- **Registration:** pi-sessions emits `pi-sessions:hosts` at every `session_start`, including reloads and switches. Register synchronously before returning or awaiting anything. Registration freezes when `emit` returns; late calls throw. Names must match `[a-z][a-z0-9-]*`, be unique, and cannot be `left`, `right`, `up`, `down`, `deferred`, `subagent`, `tmux`, or `ghostty`. TypeBox validates exactly `{ name, peers: true }`; additional properties are rejected.
+- **Registration:** pi-sessions emits `pi-sessions:hosts` at every `session_start`, including reloads and switches. Register synchronously before returning or awaiting anything. Registration freezes when `emit` returns; late calls throw. Names must match `[a-z][a-z0-9-]*`, be unique, and cannot be `left`, `right`, `up`, `down`, `deferred`, `subagent`, `tmux`, `ghostty`, or `herdr`. TypeBox validates exactly `{ name, peers: true }`; additional properties are rejected.
 - **Ownership:** any registered claim suppresses pi-sessions' `session_reachable`, `session_send_message`, `session_cancel`, and `session_handoff`. Peer tools are never registered at extension load, so a host may register its own tools at load without conflicts. Discovery runs before late registration. Pi currently has no tool-unregistration API: definitions retained from a prior standalone session are deactivated with `setActiveTools` and execution-guarded; reload rebuilds registrations. A new standalone session reactivates pi-sessions' tools.
-- **Subagents:** `subagent_list`, `subagent_send`, `subagent_cancel`, `subagent_launch`, and `submit_task_report` remain pi-sessions-owned under a host. Availability still follows feature settings, tmux installation, delegation depth, and whether the caller is a subagent. The host supplies no waker; owned-worker recovery retains its two 30-second broker-registration waits.
+- **Subagents:** `subagent_list`, `subagent_send`, `subagent_cancel`, `subagent_launch`, and `submit_task_report` remain pi-sessions-owned under a host. Availability still follows feature settings, a Herdr pane or tmux installation, delegation depth, and whether the caller is a subagent. The host supplies no waker; owned-worker recovery retains its two 30-second broker-registration waits.
 
 ## Durable lineage entry
 

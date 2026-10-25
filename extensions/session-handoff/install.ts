@@ -3,6 +3,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Text } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import type { IndexHandle, SessionLifecycle } from "../shared/composition.ts";
+import type { HerdrSession } from "../shared/herdr.ts";
 import type { ModelRuntimeProvider } from "../shared/model-runtime.ts";
 import { isTuiMode } from "../shared/pi-mode.ts";
 import type { SessionSettings } from "../shared/settings.ts";
@@ -18,7 +19,7 @@ import { consumePendingHandoffBootstrap } from "./bootstrap.ts";
 import { renderHandoffBootstrapFailedEntry } from "./bootstrap-failed-renderer.ts";
 import { HANDOFF_KICKOFF_CUSTOM_TYPE, renderHandoffKickoffMessage } from "./kickoff.ts";
 import type { ClipboardStatus } from "./launch/backend.ts";
-import { resolveSplitLaunchBackend } from "./launch/resolution.ts";
+import { resolveSplitLaunchBackend, type SplitLaunchBackend } from "./launch/resolution.ts";
 import { createHandoffLaunchTargets } from "./launch-options.ts";
 import type { HandoffLaunchTarget } from "./launch-target.ts";
 import { HANDOFF_BOOTSTRAP_FAILED_CUSTOM_TYPE } from "./metadata.ts";
@@ -52,6 +53,7 @@ export function installHandoff(
     getModelRuntime: ModelRuntimeProvider;
     getLaunchTargets?: (() => readonly HandoffLaunchTarget[]) | undefined;
     claimsPeers: () => boolean;
+    getHerdr(): HerdrSession | undefined;
     board: HandoffBoardServices;
   },
 ): SessionLifecycle {
@@ -59,9 +61,7 @@ export function installHandoff(
   const indexPath = deps.index.path;
   let identifiedGhosttyTerminalId: string | undefined;
   const clipboardStatusBySessionId = new Map<string, ClipboardStatus>();
-  const splitBackend = resolveSplitLaunchBackend(pi, {
-    getTerminalId: () => identifiedGhosttyTerminalId,
-  });
+  let splitBackend: SplitLaunchBackend | undefined;
 
   pi.registerMessageRenderer(HANDOFF_KICKOFF_CUSTOM_TYPE, renderHandoffKickoffMessage);
   pi.registerEntryRenderer(HANDOFF_BOOTSTRAP_FAILED_CUSTOM_TYPE, renderHandoffBootstrapFailedEntry);
@@ -242,6 +242,10 @@ export function installHandoff(
 
   return {
     async onSessionStart(_event, ctx) {
+      splitBackend = resolveSplitLaunchBackend(pi, {
+        getTerminalId: () => identifiedGhosttyTerminalId,
+        herdr: deps.getHerdr(),
+      });
       const models = ctx.modelRegistry.getAvailable();
       const roster = resolveHandoffRoster({
         models,

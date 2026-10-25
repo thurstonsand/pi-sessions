@@ -58,5 +58,5 @@ Pi loads extension code directly from TypeScript source. Only the detached messa
 - **Lineage**: public custom-entry schema at `extensions/shared/lineage.ts`; extraction at `extensions/session-search/extract.ts`, incremental/full indexing at `extensions/shared/session-index/sync.ts`.
 - **Session reference picker**: `extensions/session-handoff/install.ts`; core logic at `extensions/session-handoff/picker.ts` and `extensions/session-handoff/query.ts`.
 - **Session auto-title**: `extensions/session-auto-title/install.ts`; core logic at `extensions/session-auto-title/`.
-- **Subagents**: `extensions/subagents/install.ts`; tmux launch and wake behavior, task reporting, recursive child lifecycle, classification, roster traversal, and lifecycle reconciliation at `extensions/subagents/`.
+- **Subagents**: `extensions/subagents/install.ts`; worker runtimes (tmux, Herdr) at `extensions/subagents/worker-runtime.ts` over `extensions/shared/tmux.ts` and `extensions/shared/herdr.ts`; launch and wake behavior, task reporting, recursive child lifecycle, classification, roster traversal, and lifecycle reconciliation at `extensions/subagents/`.
 - **Shared utilities**: no primary entrypoint; core logic at `extensions/shared/`.

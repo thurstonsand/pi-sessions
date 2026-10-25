@@ -1,4 +1,5 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { HerdrSession } from "../../shared/herdr.ts";
 import { isInsideTmux } from "../../shared/tmux.ts";
 import type { HandoffSplitDirection, LaunchBackend } from "./backend.ts";
 import {
@@ -6,6 +7,7 @@ import {
   getFocusedGhosttyTerminalId,
   isGhosttyHandoffAvailable,
 } from "./ghostty.ts";
+import { createHerdrSplitLaunchBackend } from "./herdr.ts";
 import { createTmuxSplitLaunchBackend } from "./tmux.ts";
 
 export interface SplitLaunchBackend {
@@ -18,10 +20,20 @@ export function resolveSplitLaunchBackend(
   pi: ExtensionAPI,
   options: {
     getTerminalId: () => string | undefined;
+    herdr: HerdrSession | undefined;
     env?: NodeJS.ProcessEnv | undefined;
   },
 ): SplitLaunchBackend | undefined {
   const env = options.env ?? process.env;
+  // Env alone cannot say whether tmux runs inside Herdr or the reverse. A tmux split from a Herdr
+  // pane would hand the child that pane's HERDR_* identity, so a live Herdr pane wins.
+  const herdr = options.herdr;
+  if (herdr) {
+    return {
+      name: "Herdr",
+      create: (direction) => createHerdrSplitLaunchBackend(herdr, direction),
+    };
+  }
   if (isInsideTmux(env)) {
     return {
       name: "tmux",

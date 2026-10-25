@@ -19,6 +19,6 @@
 - **Host**: An external extension claiming peer ownership synchronously through `pi-sessions:hosts` with `{ name, peers: true }`. A claim suppresses pi-sessions' peer tools, but not its subagent tools. Hosts do not provide pi-sessions launch/list/wake callbacks. Built-in split and deferred launches are backends, not registered hosts.
 - **Background handoff**: A handoff launched while the current session keeps running.
 - **Deferred handoff**: A handoff that creates the child session without launching it; the resume command is returned (and copied to the clipboard) for the user to run anywhere.
-- **Subagent**: A child session created by a handoff for one delegated background task. It is **busy** while a stamped tmux window exists and **dormant** when no process runs and only the session file remains.
+- **Subagent**: A child session created by a handoff for one delegated background task. It is **busy** while a stamped worker window exists (a tmux window, or a Herdr pane when the parent runs in Herdr) and **dormant** when no process runs and only the session file remains.
 - **Ledger**: Writer-scoped lifecycle entries in the parent's session file (launched, cancelled, suspended, closed, report-received). The desired set of running subagents is reconstructed by walking the active branch back from the current leaf.
 - **Auto-title**: A generated session name based on the session conversation, refreshed over time unless the user manually renames the session.

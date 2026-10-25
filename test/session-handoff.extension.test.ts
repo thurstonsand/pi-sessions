@@ -796,6 +796,7 @@ function installHandoffAndWire(
       }) as never,
     getLaunchTargets: () => additionalTargets,
     claimsPeers: () => hosts.length > 0,
+    getHerdr: () => undefined,
     board: { showUserSessions: () => hosts.length === 0 },
   });
   if (lifecycle.onSessionStart) {

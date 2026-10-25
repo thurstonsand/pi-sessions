@@ -13,12 +13,23 @@ describe("tmux handoff launch", () => {
     expect(
       resolveSplitLaunchBackend(createPiApi(), {
         getTerminalId: () => undefined,
+        herdr: undefined,
         env: {
           TMUX: "/tmp/tmux-501/default,1,0",
           TERM_PROGRAM: "ghostty",
         },
       })?.name,
     ).toBe("tmux");
+  });
+
+  it("yields to a live Herdr pane, whose identity a tmux split would leak", () => {
+    expect(
+      resolveSplitLaunchBackend(createPiApi(), {
+        getTerminalId: () => undefined,
+        herdr: { paneId: "w1:p1", client: { request: vi.fn() } },
+        env: { TMUX: "/tmp/tmux-501/default,1,0" },
+      })?.name,
+    ).toBe("Herdr");
   });
 
   it("uses Ghostty outside tmux when available", () => {
@@ -29,6 +40,7 @@ describe("tmux handoff launch", () => {
       expect(
         resolveSplitLaunchBackend(createPiApi(), {
           getTerminalId: () => undefined,
+          herdr: undefined,
           env: { TERM_PROGRAM: "ghostty" },
         })?.name,
       ).toBe("Ghostty");

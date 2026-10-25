@@ -11,6 +11,7 @@ const RESERVED_NAMES = new Set([
   "subagent",
   "tmux",
   "ghostty",
+  "herdr",
 ]);
 
 export class HostRegistry {

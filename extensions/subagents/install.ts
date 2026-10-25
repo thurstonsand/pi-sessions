@@ -11,6 +11,7 @@ import type {
 } from "../session-messaging/install.ts";
 import type { SessionWaker } from "../session-messaging/message-router.ts";
 import type { SessionLifecycle } from "../shared/composition.ts";
+import type { HerdrSession } from "../shared/herdr.ts";
 import type { CompactionThresholdSettings, SessionSettings } from "../shared/settings.ts";
 import { isTmuxInstalled } from "../shared/tmux.ts";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
@@ -41,7 +42,11 @@ import {
 } from "./settle.ts";
 import { shouldMessageSubagent } from "./should-message.ts";
 import { SubagentWaker } from "./wake.ts";
-import { createTmuxWorkerRuntime, type WorkerRuntime } from "./worker-runtime.ts";
+import {
+  createHerdrWorkerRuntime,
+  createTmuxWorkerRuntime,
+  type WorkerRuntime,
+} from "./worker-runtime.ts";
 
 const SUBAGENT_PROMPT_SECTION = "pi_sessions_subagent";
 const SUBAGENT_PROMPT = `You are working as a subagent on one task delegated by a parent session. The handoff defines your task. Work independently, stay within its scope, and do not duplicate work assigned to the parent or another subagent. Use the available tools to complete the task and validate your conclusions. Messages from the parent may refine the task or request a follow-up, but they do not replace your original task with unrelated work.`;
@@ -80,6 +85,7 @@ export function installSubagents(
     messaging: MessagingHandle;
     readCompactionSettings: (cwd: string) => CompactionThresholdSettings;
     sendMessage(request: SendMessageRequest): Promise<SendMessageResult>;
+    getHerdr(): HerdrSession | undefined;
   },
 ): SubagentsHandle {
   pi.registerMessageRenderer(SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE, renderSubagentReportMessage);
@@ -270,6 +276,7 @@ export function installSubagents(
       const sessionManager = ctx.sessionManager;
       const sessionStartBranch = sessionManager.getBranch();
       const identity = findSelfSubagentIdentity(sessionId, sessionStartBranch);
+      const herdr = deps.getHerdr();
       const parent: ParentSessionState = {
         sessionId,
         getSessionName: () => sessionManager.getSessionName(),
@@ -281,8 +288,8 @@ export function installSubagents(
         shutdown: ctx.shutdown,
         epoch,
         launchState: { sessionId, depth: identity?.depth ?? 0, epoch },
-        runtime: createTmuxWorkerRuntime(pi),
-        canLaunchWorkers: await isTmuxInstalled(pi, ctx.cwd),
+        runtime: herdr ? createHerdrWorkerRuntime(herdr) : createTmuxWorkerRuntime(pi),
+        canLaunchWorkers: herdr !== undefined || (await isTmuxInstalled(pi, ctx.cwd)),
         reportError: (error) => notifySubagentFailure(ctx.ui, error),
       };
       reconciler.beginSession();

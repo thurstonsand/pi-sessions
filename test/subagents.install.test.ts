@@ -89,6 +89,62 @@ describe("subagent installation", () => {
     expect(handle.getLaunchTargets()).toEqual([]);
   });
 
+  it("launches workers as Herdr panes when the session runs in Herdr, even without tmux", async () => {
+    const { pi } = createPi({ tmuxInstalled: false });
+    const ownerPane = { pane_id: "w1:p1", workspace_id: "w1", tab_id: "w1:t1", focused: true };
+    const request = vi.fn(async (method: string, _params: Record<string, unknown>) => {
+      switch (method) {
+        case "pane.list":
+          return { type: "pane_list", panes: [ownerPane] };
+        case "pane.get":
+          return { type: "pane_info", pane: ownerPane };
+        case "layout.apply":
+          return { type: "layout_apply", layout: { tab_id: "w1:t2", root: { pane_id: "w1:p2" } } };
+        default:
+          return { type: "ok" };
+      }
+    });
+    const herdr = { paneId: "w1:p1", client: { request } };
+    const handle = installSubagents(
+      pi as never,
+      {
+        ...(createDeps(2) as object),
+        getHerdr: () => herdr,
+      } as never,
+    );
+
+    await handle.onSessionStart?.(
+      { type: "session_start", reason: "startup" },
+      createContext(parentId, []) as never,
+    );
+    const [target] = handle.getLaunchTargets();
+
+    expect(target?.description).toContain("detached Herdr worker");
+    await expect(
+      target?.launch({
+        prepared: { sessionId: childId, sessionFile: "/tmp/child.jsonl", resumeCommand: "resume" },
+        parentSessionId: parentId,
+        title: "Inspect target",
+        goal: "Inspect it",
+        requestResponse: true,
+        model: "openai/gpt-5.4:high",
+        cwd: "/repo",
+      }),
+    ).resolves.toEqual({ success: true, backend: "Herdr" });
+    expect(request).toHaveBeenCalledWith(
+      "layout.apply",
+      expect.objectContaining({ workspace_id: "w1", focus: false }),
+    );
+    expect(request).toHaveBeenCalledWith(
+      "pane.report_metadata",
+      expect.objectContaining({
+        pane_id: "w1:p2",
+        tokens: { pi_owner_session_id: parentId, pi_session_id: childId },
+      }),
+    );
+    expect(pi.exec).not.toHaveBeenCalledWith("tmux", expect.anything(), expect.anything());
+  });
+
   it("persists an incoming report before making it model-visible", async () => {
     const order: string[] = [];
     const listSessions = vi.fn(async () => []);
@@ -950,6 +1006,7 @@ function createDeps(
     index: { path: "/tmp/index.sqlite" },
     messaging,
     sendMessage: messaging.sendMessage,
+    getHerdr: () => undefined,
   } as never;
 }
 

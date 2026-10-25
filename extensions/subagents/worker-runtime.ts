@@ -1,5 +1,12 @@
 import { shellQuote } from "../session-handoff/launch/shell.ts";
 import {
+  closeHerdrWorker,
+  closeHerdrWorkers,
+  createHerdrWorker,
+  type HerdrSession,
+  listHerdrWorkers,
+} from "../shared/herdr.ts";
+import {
   createTmuxWindow,
   hasAttachedTmuxClients,
   isInsideTmux,
@@ -60,5 +67,28 @@ export function createTmuxWorkerRuntime(
     stopAll: (ownerSessionId) => killTmuxSession(executor, tmuxSessionName(ownerSessionId)),
     isWatched: (ownerSessionId) =>
       hasAttachedTmuxClients(executor, tmuxSessionName(ownerSessionId)),
+  };
+}
+
+export function createHerdrWorkerRuntime(session: HerdrSession): WorkerRuntime {
+  return {
+    name: "Herdr",
+    async list(ownerSessionId) {
+      return (await listHerdrWorkers(session.client, ownerSessionId)).map((pane) => ({
+        piSessionId: pane.piSessionId,
+        observeCommand: `herdr tab focus ${shellQuote(pane.tabId)}`,
+      }));
+    },
+    async create(ownerSessionId, options) {
+      await createHerdrWorker(session, { ownerSessionId, ...options });
+    },
+    stop: (ownerSessionId, piSessionId) =>
+      closeHerdrWorker(session.client, ownerSessionId, piSessionId),
+    stopAll: (ownerSessionId) => closeHerdrWorkers(session.client, ownerSessionId),
+    async isWatched(ownerSessionId, piSessionId) {
+      return (await listHerdrWorkers(session.client, ownerSessionId)).some(
+        (pane) => pane.piSessionId === piSessionId && pane.focused,
+      );
+    },
   };
 }

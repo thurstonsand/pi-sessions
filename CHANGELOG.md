@@ -2,6 +2,12 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.21.1] - 2026-10-25
+
+### Fixed
+
+- On Windows, running Pi in a Herdr pane no longer fails at session start with `connect ENOTSOCK`: pi-sessions now reaches Herdr over its named pipe ([#49](https://github.com/thurstonsand/pi-sessions/issues/49)). Subagents in Herdr now launch through the same shell as Pi's bash tool (Git Bash on Windows, or your `shellPath`) instead of `/bin/sh`.
+
 ## [0.21.0] - 2026-10-25
 
 ### Added

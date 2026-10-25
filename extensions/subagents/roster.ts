@@ -4,7 +4,6 @@ import {
   type SessionTreeNode,
 } from "@earendil-works/pi-coding-agent";
 import { isSessionStarting } from "../session-handoff/metadata.ts";
-import { listTmuxWindows, type TmuxExecutor, tmuxSessionName } from "../shared/tmux.ts";
 import { classifySubagent, type SubagentState } from "./classify.ts";
 import {
   type ChildSubagentLifecycle,
@@ -14,6 +13,7 @@ import {
   type ParentSubagentLedger,
 } from "./ledger.ts";
 import type { ReconcileResult } from "./reconcile.ts";
+import type { WorkerRuntime } from "./worker-runtime.ts";
 
 export type SubagentRelationScope = "branch" | "tree";
 
@@ -33,7 +33,7 @@ export interface SubagentRosterEntry {
   state: SubagentState;
   onActiveBranch: boolean;
   managedLive: boolean;
-  tmuxWindowId?: string | undefined;
+  observeCommand?: string | undefined;
 }
 
 export interface SubagentRosterResult {
@@ -54,10 +54,11 @@ interface RosterSession {
 
 interface RosterParentSession extends RosterSession {
   epoch: number;
+  /** Descendants inherit their owner's environment, so their workers run here too. */
+  runtime: WorkerRuntime;
 }
 
 interface RosterDependencies {
-  executor: TmuxExecutor;
   messaging: { listSessions(): Promise<string[]> };
   getParent(): RosterParentSession | undefined;
   reconcile(): Promise<ReconcileResult>;
@@ -92,10 +93,7 @@ export class TranscriptSubagentRoster implements SubagentRoster {
     const windowsByOwner = new Map(
       await Promise.all(
         ownerSessionIds.map(async (ownerSessionId) => {
-          const windows = await listTmuxWindows(
-            this.deps.executor,
-            tmuxSessionName(ownerSessionId),
-          );
+          const windows = await parent.runtime.list(ownerSessionId);
           return [
             ownerSessionId,
             new Map(windows.map((window) => [window.piSessionId, window])),
@@ -140,7 +138,7 @@ export class TranscriptSubagentRoster implements SubagentRoster {
         state,
         onActiveBranch: child.onActiveBranch,
         managedLive: hasWindow || isBrokerLive,
-        ...(window ? { tmuxWindowId: window.windowId } : {}),
+        ...(window ? { observeCommand: window.observeCommand } : {}),
       };
     });
 

@@ -1,7 +1,5 @@
-import { tmuxSessionName } from "../shared/tmux.ts";
 import { isRunningSubagentState, type SubagentState } from "../subagents/classify.ts";
 import type { SubagentRosterEntry } from "../subagents/roster.ts";
-import { shellQuote } from "./launch/shell.ts";
 import type { HandoffLaunchReceipt } from "./receipt.ts";
 
 export type HandoffBoardTab = "subagents" | "user-sessions";
@@ -74,7 +72,6 @@ export function buildHandoffBoardView(
   snapshot: HandoffBoardSnapshot,
   tab: HandoffBoardTab,
   selectedIndex: number,
-  options: { insideTmux: boolean },
 ): HandoffBoardView {
   if (tab === "subagents") {
     const selected = snapshot.subagents[selectedIndex];
@@ -98,7 +95,7 @@ export function buildHandoffBoardView(
             { label: "Goal", value: selected.goal },
           ]
         : [],
-      ...(selected ? { action: buildSubagentAction(selected, options.insideTmux) } : {}),
+      ...(selected ? { action: buildSubagentAction(selected) } : {}),
     };
   }
 
@@ -165,16 +162,11 @@ function buildUserSessionAction(
   };
 }
 
-function buildSubagentAction(entry: SubagentRosterEntry, insideTmux: boolean): HandoffBoardAction {
+function buildSubagentAction(entry: SubagentRosterEntry): HandoffBoardAction {
   return {
     subagent: entry,
     canStop: isRunningSubagentState(entry.state),
-    ...(entry.tmuxWindowId ? { observeCommand: buildObserveCommand(entry, insideTmux) } : {}),
+    ...(entry.observeCommand ? { observeCommand: entry.observeCommand } : {}),
     ...(!entry.managedLive ? { resumeCommand: entry.resumeCommand } : {}),
   };
-}
-
-function buildObserveCommand(entry: SubagentRosterEntry, insideTmux: boolean): string {
-  const target = shellQuote(`${tmuxSessionName(entry.ownerSessionId)}:${entry.tmuxWindowId}`);
-  return insideTmux ? `tmux switch-client -t ${target}` : `tmux attach-session -t ${target}`;
 }

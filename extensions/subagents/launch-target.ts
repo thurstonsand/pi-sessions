@@ -1,8 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { type HandoffLaunchTarget, SUBAGENT_LAUNCH } from "../session-handoff/launch-target.ts";
 import { formatError } from "../shared/errors.ts";
-import { createTmuxWindow, tmuxSessionName } from "../shared/tmux.ts";
 import { SUBAGENT_LAUNCHED_CUSTOM_TYPE, type SubagentLaunched } from "./ledger.ts";
+import type { WorkerRuntime } from "./worker-runtime.ts";
 
 export interface SubagentLaunchState {
   sessionId: string;
@@ -13,12 +13,12 @@ export interface SubagentLaunchState {
 export function createSubagentLaunchTarget(
   pi: ExtensionAPI,
   state: SubagentLaunchState,
+  runtime: WorkerRuntime,
   isCurrent: (epoch: number) => boolean,
 ): HandoffLaunchTarget {
   return {
     value: SUBAGENT_LAUNCH,
-    description:
-      "'subagent' delegates one task to a detached tmux worker and requests a report by default.",
+    description: `'subagent' delegates one task to a detached ${runtime.name} worker and requests a report by default.`,
     bootstrapMode: "automatic",
     approveProjectTrust: true,
     requiredTools: ["submit_task_report"],
@@ -51,14 +51,13 @@ export function createSubagentLaunchTarget(
       pi.appendEntry(SUBAGENT_LAUNCHED_CUSTOM_TYPE, launched);
 
       try {
-        await createTmuxWindow(pi, {
-          tmuxSession: tmuxSessionName(state.sessionId),
+        await runtime.create(state.sessionId, {
           name: input.title,
           cwd: input.cwd,
           command: input.prepared.resumeCommand,
           piSessionId: input.prepared.sessionId,
         });
-        return { success: true, backend: "tmux" };
+        return { success: true, backend: runtime.name };
       } catch (error) {
         return { success: false, error: formatError(error) };
       }

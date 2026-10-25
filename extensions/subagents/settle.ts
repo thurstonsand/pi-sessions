@@ -1,7 +1,6 @@
 import type { ExtensionAPI, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { SUBAGENT_LAUNCH } from "../session-handoff/launch-target.ts";
 import { findCurrentHandoffBootstrap, type HandoffSubagent } from "../session-handoff/metadata.ts";
-import { hasAttachedTmuxClients, tmuxSessionName } from "../shared/tmux.ts";
 import { isRunningSubagentState } from "./classify.ts";
 import {
   getChildSubagentLifecycle,
@@ -9,6 +8,7 @@ import {
   SUBAGENT_REPORT_REMINDER_MESSAGE_CUSTOM_TYPE,
 } from "./ledger.ts";
 import type { ReconcileResult, SubagentReconciler } from "./reconcile.ts";
+import type { WorkerRuntime } from "./worker-runtime.ts";
 
 const LINGER_POLL_MS = 1_000;
 const OWNED_SUBAGENT_POLL_MS = 10_000;
@@ -21,7 +21,9 @@ export interface SubagentChildSessionState {
 }
 
 export interface SettledChildParentSession {
+  sessionId: string;
   epoch: number;
+  runtime: WorkerRuntime;
   getBranch(): readonly SessionEntry[];
   hasPendingMessages(): boolean;
   isIdle(): boolean;
@@ -107,9 +109,9 @@ export function createSettledChildLifecycle(
 
         let attached = false;
         try {
-          attached = await hasAttachedTmuxClients(
-            pi,
-            tmuxSessionName(child.identity.ownerSessionId),
+          attached = await parent.runtime.isWatched(
+            child.identity.ownerSessionId,
+            parent.sessionId,
           );
         } catch {
           attached = false;

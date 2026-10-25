@@ -1,23 +1,17 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { SessionWaker, WakeMessaging } from "../session-messaging/message-router.ts";
-import {
-  createTmuxWindow,
-  killTmuxWindow,
-  listTmuxWindows,
-  type TmuxExecutor,
-  tmuxSessionName,
-} from "../shared/tmux.ts";
 import { findOwnedSubagentLaunch, type SubagentLaunched } from "./ledger.ts";
+import type { WorkerRuntime } from "./worker-runtime.ts";
 
 export interface WakeParentSession {
   sessionId: string;
   epoch: number;
+  runtime: WorkerRuntime;
   getBranch(): readonly SessionEntry[];
 }
 
 export class SubagentWaker implements SessionWaker {
   constructor(
-    private readonly executor: TmuxExecutor,
     private readonly messaging: WakeMessaging,
     private readonly getParent: () => WakeParentSession | undefined,
     private readonly isCurrent: (epoch: number) => boolean,
@@ -34,23 +28,21 @@ export class SubagentWaker implements SessionWaker {
 
   async wake(target: string): Promise<void> {
     const { parent, launch } = this.resolve(target);
-    const tmuxSession = tmuxSessionName(parent.sessionId);
-    const hasWindow = (await listTmuxWindows(this.executor, tmuxSession)).some(
+    const hasWindow = (await parent.runtime.list(parent.sessionId)).some(
       (window) => window.piSessionId === target,
     );
-    if (!hasWindow) await this.createWindow(parent, launch, tmuxSession);
+    if (!hasWindow) await this.createWindow(parent, launch);
   }
 
   async restart(target: string): Promise<void> {
     const { parent, launch } = this.resolve(target);
-    const tmuxSession = tmuxSessionName(parent.sessionId);
-    const killed = await killTmuxWindow(this.executor, tmuxSession, target);
-    if (!killed) {
+    const stopped = await parent.runtime.stop(parent.sessionId, target);
+    if (!stopped) {
       throw new Error(
-        `Subagent ${target} did not register and its stale tmux window could not be stopped.`,
+        `Subagent ${target} did not register and its stale ${parent.runtime.name} window could not be stopped.`,
       );
     }
-    await this.createWindow(parent, launch, tmuxSession);
+    await this.createWindow(parent, launch);
   }
 
   afterSend(): Promise<void> | void {
@@ -65,16 +57,11 @@ export class SubagentWaker implements SessionWaker {
     return { parent, launch };
   }
 
-  private async createWindow(
-    parent: WakeParentSession,
-    launch: SubagentLaunched,
-    tmuxSession: string,
-  ): Promise<void> {
+  private async createWindow(parent: WakeParentSession, launch: SubagentLaunched): Promise<void> {
     if ((await this.messaging.listSessions()).includes(launch.childSessionId)) return;
     this.requireCurrent(parent);
     this.options.onMaterialize?.(launch);
-    await createTmuxWindow(this.executor, {
-      tmuxSession,
+    await parent.runtime.create(parent.sessionId, {
       name: launch.title,
       cwd: launch.cwd,
       command: launch.resumeCommand,

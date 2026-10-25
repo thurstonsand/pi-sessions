@@ -7,6 +7,7 @@ import {
 } from "../extensions/subagents/ledger.ts";
 import { SubagentReconciler } from "../extensions/subagents/reconcile.ts";
 import { createSettledChildLifecycle } from "../extensions/subagents/settle.ts";
+import { createTmuxWorkerRuntime } from "../extensions/subagents/worker-runtime.ts";
 
 describe("settled child recovery", () => {
   it("settles after a triggered report turn finishes before its original reconciliation", async () => {
@@ -27,15 +28,6 @@ describe("settled child recovery", () => {
         }),
       ];
       const report = { reportId: "grandchild-report", status: "done", summary: "Recovered." };
-      const parent = {
-        sessionId: "aaaaaaaa-1234-1234-1234-123456789abc",
-        epoch: 1,
-        getBranch: () => branch,
-        isIdle: () => true,
-        hasPendingMessages: () => false,
-        shutdown: vi.fn(),
-        reportError: vi.fn(),
-      };
       const pi = {
         appendEntry: vi.fn(),
         sendMessage: vi.fn(),
@@ -56,6 +48,16 @@ describe("settled child recovery", () => {
           }
           return { code: 0, stdout: "", stderr: "", killed: false };
         }),
+      };
+      const parent = {
+        sessionId: "aaaaaaaa-1234-1234-1234-123456789abc",
+        epoch: 1,
+        runtime: createTmuxWorkerRuntime(pi),
+        getBranch: () => branch,
+        isIdle: () => true,
+        hasPendingMessages: () => false,
+        shutdown: vi.fn(),
+        reportError: vi.fn(),
       };
       const reconciler = new SubagentReconciler({
         executor: pi,

@@ -10,6 +10,7 @@ import {
   SUBAGENT_SUSPENDED_CUSTOM_TYPE,
 } from "../extensions/subagents/ledger.ts";
 import { SubagentReconciler } from "../extensions/subagents/reconcile.ts";
+import { createTmuxWorkerRuntime } from "../extensions/subagents/worker-runtime.ts";
 
 const parentId = "12345678-1234-1234-1234-123456789abc";
 const childId = "87654321-1234-1234-1234-123456789abc";
@@ -511,7 +512,13 @@ function createFixture(
       }
     }),
   };
-  const parent = { sessionId: parentId, epoch: 1, getBranch: () => branch, isIdle: () => idle };
+  const parent = {
+    sessionId: parentId,
+    epoch: 1,
+    runtime: createTmuxWorkerRuntime(executor as never),
+    getBranch: () => branch,
+    isIdle: () => idle,
+  };
   const reconciler = new SubagentReconciler({
     executor: executor as never,
     messaging: { listSessions: vi.fn(listSessions), deliverTurnMessage: executor.sendMessage },

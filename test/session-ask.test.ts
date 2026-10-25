@@ -23,6 +23,7 @@ import {
   SUBAGENT_REPORT_CUSTOM_TYPE,
 } from "../extensions/subagents/ledger.ts";
 import { shouldMessageSubagent } from "../extensions/subagents/should-message.ts";
+import { createTmuxWorkerRuntime } from "../extensions/subagents/worker-runtime.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
 const { runSessionAskAgentMock } = vi.hoisted(() => ({
@@ -142,17 +143,19 @@ describe("shouldMessageSubagent", () => {
         depth: 1,
       }),
     ];
+    const executor = {
+      exec: vi.fn(async () => ({
+        code: 0,
+        stdout: window ? `@1\tchild\t${childId}\n` : "",
+        stderr: "",
+        killed: false,
+      })),
+    };
+    const runtime = createTmuxWorkerRuntime(executor);
     return {
-      executor: {
-        exec: vi.fn(async () => ({
-          code: 0,
-          stdout: window ? `@1\tchild\t${childId}\n` : "",
-          stderr: "",
-          killed: false,
-        })),
-      },
+      executor,
       messaging: { listSessions: vi.fn(async () => (live ? [childId] : [])) },
-      getParent: () => ({ sessionId: parentId, getBranch: () => parentBranch }),
+      getParent: () => ({ sessionId: parentId, runtime, getBranch: () => parentBranch }),
       openSession: vi.fn(() => ({ sessionId: childId, getBranch: () => branch })),
     };
   }

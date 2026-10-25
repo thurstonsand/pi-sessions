@@ -2,6 +2,7 @@ import type { SessionEntry, SessionTreeNode } from "@earendil-works/pi-coding-ag
 import { describe, expect, it, vi } from "vitest";
 import { SUBAGENT_LAUNCHED_CUSTOM_TYPE } from "../extensions/subagents/ledger.ts";
 import { TranscriptSubagentRoster } from "../extensions/subagents/roster.ts";
+import { createTmuxWorkerRuntime } from "../extensions/subagents/worker-runtime.ts";
 
 const parentId = "12345678-1234-1234-1234-123456789abc";
 const activeChildId = "aaaaaaaa-1234-1234-1234-123456789abc";
@@ -82,7 +83,7 @@ describe("subagent transcript roster", () => {
           sessionId: activeChildId,
           managedLive: true,
           state: "busy",
-          tmuxWindowId: "@1",
+          observeCommand: "tmux attach-session -t 'pi-123456781234:@1'",
           launchedAt: "2026-03-25T00:00:00.000Z",
           resumeCommand: "resume",
         }),
@@ -189,8 +190,8 @@ function createFixture(options?: {
     ["grandchild.jsonl", grandchild],
   ]);
 
-  const roster = new TranscriptSubagentRoster({
-    executor: {
+  const runtime = createTmuxWorkerRuntime(
+    {
       exec: vi.fn(async (_command: string, args: string[]) => {
         if (args[0] !== "list-windows") {
           throw new Error(`Unexpected tmux command: ${args.join(" ")}`);
@@ -201,8 +202,11 @@ function createFixture(options?: {
           : { code: 1, stdout: "", stderr: "can't find session", killed: false };
       }),
     },
+    {},
+  );
+  const roster = new TranscriptSubagentRoster({
     messaging: { listSessions: vi.fn(async () => options?.liveSessionIds ?? []) },
-    getParent: () => ({ ...parent, epoch: 1 }),
+    getParent: () => ({ ...parent, epoch: 1, runtime }),
     reconcile: vi.fn(async () => ({
       states: new Map(),
       registered: new Set(options?.registeredSessionIds),

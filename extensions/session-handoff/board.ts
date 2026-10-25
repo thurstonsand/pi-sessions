@@ -675,9 +675,7 @@ export class HandoffBoard implements Focusable {
   }
 
   private currentView(): HandoffBoardView {
-    return buildHandoffBoardView(this.snapshot, this.tab, this.selectedByTab[this.tab], {
-      insideTmux: Boolean(process.env.TMUX),
-    });
+    return buildHandoffBoardView(this.snapshot, this.tab, this.selectedByTab[this.tab]);
   }
 }
 

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { createSubagentLaunchTarget } from "../extensions/subagents/launch-target.ts";
 import { SUBAGENT_LAUNCHED_CUSTOM_TYPE } from "../extensions/subagents/ledger.ts";
+import { createTmuxWorkerRuntime } from "../extensions/subagents/worker-runtime.ts";
 
 const parentId = "12345678-1234-1234-1234-123456789abc";
 
@@ -22,8 +23,9 @@ describe("subagent launch target", () => {
       return { code: 0, stdout: "", stderr: "" };
     });
     const target = createSubagentLaunchTarget(
-      { appendEntry, exec } as never,
+      { appendEntry } as never,
       { sessionId: parentId, depth: 0, epoch: 3 },
+      createTmuxWorkerRuntime({ exec } as never),
       (epoch) => epoch === 3,
     );
     expect(
@@ -84,8 +86,9 @@ describe("subagent launch target", () => {
   it("rejects stale launch continuations before writing ownership", async () => {
     const appendEntry = vi.fn();
     const target = createSubagentLaunchTarget(
-      { appendEntry, exec: vi.fn() } as never,
+      { appendEntry } as never,
       { sessionId: parentId, depth: 0, epoch: 1 },
+      createTmuxWorkerRuntime({ exec: vi.fn() }),
       () => false,
     );
 

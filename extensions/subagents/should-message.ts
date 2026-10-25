@@ -1,18 +1,21 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { isSessionStarting } from "../session-handoff/metadata.ts";
-import { listTmuxWindows, type TmuxExecutor, tmuxSessionName } from "../shared/tmux.ts";
 import { classifySubagent } from "./classify.ts";
 import { collectParentLedger, getChildSubagentLifecycle } from "./ledger.ts";
+import type { WorkerRuntime } from "./worker-runtime.ts";
 
 interface SubagentSession {
   sessionId: string;
   getBranch(): readonly SessionEntry[];
 }
 
+interface SubagentParentSession extends SubagentSession {
+  runtime: WorkerRuntime;
+}
+
 export interface ShouldMessageSubagentDependencies {
-  executor: TmuxExecutor;
   messaging: { listSessions(): Promise<string[]> };
-  getParent(): SubagentSession | undefined;
+  getParent(): SubagentParentSession | undefined;
   openSession(path: string): SubagentSession;
 }
 
@@ -31,7 +34,7 @@ export async function shouldMessageSubagent(
   }
 
   const [windows, liveSessions] = await Promise.all([
-    listTmuxWindows(deps.executor, tmuxSessionName(parent.sessionId)),
+    parent.runtime.list(parent.sessionId),
     deps.messaging.listSessions(),
   ]);
   let childBranch: readonly SessionEntry[] | undefined;

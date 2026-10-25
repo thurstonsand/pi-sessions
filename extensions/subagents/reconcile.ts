@@ -1,13 +1,5 @@
 import { type SessionEntry, SessionManager } from "@earendil-works/pi-coding-agent";
 import { isSessionStarting } from "../session-handoff/metadata.ts";
-import {
-  createTmuxWindow,
-  killTmuxSession,
-  killTmuxWindow,
-  listTmuxWindows,
-  type TmuxExecutor,
-  tmuxSessionName,
-} from "../shared/tmux.ts";
 import type { TurnMessage } from "../shared/turn-delivery.ts";
 import {
   classifySubagent,
@@ -30,10 +22,12 @@ import {
   type SubagentReportMessage,
 } from "./ledger.ts";
 import { formatReportForModel } from "./report.ts";
+import type { WorkerRuntime } from "./worker-runtime.ts";
 
 export interface ReconcileParentSession {
   sessionId: string;
   epoch: number;
+  runtime: WorkerRuntime;
   getBranch(): readonly SessionEntry[];
 }
 
@@ -46,7 +40,7 @@ export interface ReconcileMessaging {
   deliverTurnMessage(message: TurnMessage): void;
 }
 
-export interface ReconcileActions extends TmuxExecutor {
+export interface ReconcileActions {
   appendEntry(customType: string, data: unknown): void;
   sendMessage(message: TurnMessage): void;
 }
@@ -155,9 +149,8 @@ export class SubagentReconciler {
       return;
     }
 
-    const tmuxSession = tmuxSessionName(parent.sessionId);
     const ledger = collectParentLedger(parent.getBranch(), parent.sessionId);
-    const windows = await listTmuxWindows(this.deps.executor, tmuxSession);
+    const windows = await parent.runtime.list(parent.sessionId);
     const ownedChildIds = new Set(ledger.launches.map((launch) => launch.childSessionId));
     const childSessionIds = windows
       .map((window) => window.piSessionId)
@@ -170,7 +163,7 @@ export class SubagentReconciler {
       });
     }
     this.requireCurrent(parent);
-    await killTmuxSession(this.deps.executor, tmuxSession);
+    await parent.runtime.stopAll(parent.sessionId);
   }
 
   private async run(): Promise<ReconcileResult> {
@@ -191,9 +184,8 @@ export class SubagentReconciler {
 
     const branch = parent.getBranch();
     const ledger = collectParentLedger(branch, parent.sessionId);
-    const tmuxSession = tmuxSessionName(parent.sessionId);
     const [windows, liveSessionIds] = await Promise.all([
-      listTmuxWindows(this.deps.executor, tmuxSession),
+      parent.runtime.list(parent.sessionId),
       this.deps.messaging.listSessions(),
     ]);
     const liveSessions = new Set(liveSessionIds);
@@ -231,7 +223,7 @@ export class SubagentReconciler {
         if (this.hasSentReport(report.reportId)) {
           continue;
         }
-        // Presence and tmux awaits can yield to live delivery; read only when recovery needs it.
+        // Presence and runtime awaits can yield to live delivery; read only when recovery needs it.
         reportLedger ??= collectParentLedger(parent.getBranch(), parent.sessionId);
         if (!reportLedger.receivedReportIds.has(report.reportId)) {
           this.append(parent, SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE, {
@@ -247,8 +239,7 @@ export class SubagentReconciler {
 
       if (child.state === "suspended" && restoreSuspended) {
         this.append(parent, SUBAGENT_LAUNCHED_CUSTOM_TYPE, child.launch);
-        await createTmuxWindow(this.deps.executor, {
-          tmuxSession,
+        await parent.runtime.create(parent.sessionId, {
           name: child.launch.title,
           cwd: child.launch.cwd,
           command: child.launch.resumeCommand,
@@ -262,7 +253,7 @@ export class SubagentReconciler {
         runtimeChanged = true;
       } else if (child.state === "stopping") {
         this.requireCurrent(parent);
-        await killTmuxWindow(this.deps.executor, tmuxSession, child.launch.childSessionId);
+        await parent.runtime.stop(parent.sessionId, child.launch.childSessionId);
         runtimeChanged = true;
       }
     }
@@ -271,14 +262,14 @@ export class SubagentReconciler {
     for (const window of windows) {
       if (!ownedIds.has(window.piSessionId)) {
         this.requireCurrent(parent);
-        await killTmuxWindow(this.deps.executor, tmuxSession, window.piSessionId);
+        await parent.runtime.stop(parent.sessionId, window.piSessionId);
         runtimeChanged = true;
       }
     }
 
     if (runtimeChanged) {
       const [currentWindows, currentLiveSessionIds] = await Promise.all([
-        listTmuxWindows(this.deps.executor, tmuxSession),
+        parent.runtime.list(parent.sessionId),
         this.deps.messaging.listSessions(),
       ]);
       const currentWindowSessionIds = new Set(currentWindows.map((window) => window.piSessionId));

@@ -46,7 +46,6 @@ describe("handoff board view model", () => {
       snapshot({ userSessions: [directionalSession] }),
       "user-sessions",
       0,
-      { insideTmux: false },
     );
 
     expect(view.rows).toMatchObject([{ status: "starting" }]);
@@ -55,9 +54,7 @@ describe("handoff board view model", () => {
 
   it("offers recovery for broker-absent sessions even when transcript evidence is unavailable", () => {
     const entry = { ...directionalSession, runEvidence: undefined };
-    const view = buildHandoffBoardView(snapshot({ userSessions: [entry] }), "user-sessions", 0, {
-      insideTmux: false,
-    });
+    const view = buildHandoffBoardView(snapshot({ userSessions: [entry] }), "user-sessions", 0);
 
     expect(view.rows).toMatchObject([{ status: "unknown" }]);
     expect(view.action?.resumeCommand).toBe("pi --session-id split-child");
@@ -71,7 +68,6 @@ describe("handoff board view model", () => {
       }),
       "user-sessions",
       0,
-      { insideTmux: false },
     );
 
     expect(view.rows).toMatchObject([{ status: "live" }]);
@@ -83,9 +79,7 @@ describe("handoff board view model", () => {
       ...directionalSession,
       receipt: { ...directionalSession.receipt, launch: "deferred" as const },
     };
-    const view = buildHandoffBoardView(snapshot({ userSessions: [deferred] }), "user-sessions", 0, {
-      insideTmux: false,
-    });
+    const view = buildHandoffBoardView(snapshot({ userSessions: [deferred] }), "user-sessions", 0);
 
     expect(view.rows).toMatchObject([{ status: "ready" }]);
     expect(view.action?.resumeCommand).toBe("pi --session-id split-child");
@@ -96,9 +90,7 @@ describe("handoff board view model", () => {
       ...directionalSession,
       runEvidence: { transcriptAvailable: true, hasStarted: true },
     };
-    const view = buildHandoffBoardView(snapshot({ userSessions: [entry] }), "user-sessions", 0, {
-      insideTmux: false,
-    });
+    const view = buildHandoffBoardView(snapshot({ userSessions: [entry] }), "user-sessions", 0);
 
     expect(view.rows).toMatchObject([{ status: "closed" }]);
     expect(view.action?.resumeCommand).toBe("pi --session-id split-child");
@@ -113,7 +105,6 @@ describe("handoff board view model", () => {
       snapshot({ userSessions: [entry], hasLiveSessionEvidence: false }),
       "user-sessions",
       0,
-      { insideTmux: false },
     );
 
     expect(view.rows).toMatchObject([{ status: "unknown" }]);
@@ -138,9 +129,7 @@ describe("handoff board view model", () => {
       onActiveBranch: true,
       managedLive: false,
     };
-    const view = buildHandoffBoardView(snapshot({ subagents: [subagent] }), "subagents", 0, {
-      insideTmux: false,
-    });
+    const view = buildHandoffBoardView(snapshot({ subagents: [subagent] }), "subagents", 0);
 
     expect(view.details).toEqual([
       { label: "Session", value: "worker" },
@@ -155,7 +144,6 @@ describe("handoff board view model", () => {
       snapshot({ userSessions: [directionalSession] }),
       "user-sessions",
       0,
-      { insideTmux: false },
     );
 
     expect(view.details).toEqual([

@@ -3,6 +3,7 @@ import type { SendMessageResult } from "../extensions/session-messaging/install.
 import { MessageRouter } from "../extensions/session-messaging/message-router.ts";
 import { SUBAGENT_LAUNCHED_CUSTOM_TYPE } from "../extensions/subagents/ledger.ts";
 import { SubagentWaker } from "../extensions/subagents/wake.ts";
+import { createTmuxWorkerRuntime } from "../extensions/subagents/worker-runtime.ts";
 
 const parentId = "12345678-1234-1234-1234-123456789abc";
 const childId = "87654321-1234-1234-1234-123456789abc";
@@ -134,10 +135,10 @@ function createRouter(
   const parent = {
     sessionId: parentId,
     epoch: 4,
+    runtime: createTmuxWorkerRuntime(tmux as never),
     getBranch: () => [launchEntry()],
   };
   const waker = new SubagentWaker(
-    tmux as never,
     messaging,
     () => parent as never,
     (epoch) => epoch === 4,

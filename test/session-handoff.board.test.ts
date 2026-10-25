@@ -41,7 +41,7 @@ describe("handoff board", () => {
     const board = createBoard(
       snapshot([
         subagent("child-1", "Lifecycle 恢復 probe", "busy", {
-          tmuxWindowId: "@1",
+          observeCommand: "tmux attach-session -t 'pi-123456781234:@1'",
           managedLive: true,
         }),
         subagent("child-2", "Nested API investigator", "completed", { depth: 2 }),
@@ -206,13 +206,13 @@ describe("handoff board", () => {
     expect(done).toHaveBeenCalledOnce();
   });
 
-  it("copies a tmux observe command for stamped windows", async () => {
+  it("copies the observe command for live windows", async () => {
     const copy = vi.fn(async () => {});
     const board = createBoard(
       snapshot([
         subagent("child-1", "Worker", "starting", {
           managedLive: true,
-          tmuxWindowId: "@7",
+          observeCommand: "tmux attach-session -t 'pi-123456781234:@7'",
         }),
       ]),
       { copy },
@@ -220,9 +220,8 @@ describe("handoff board", () => {
 
     board.handleInput("a");
 
-    const action = process.env.TMUX ? "switch-client" : "attach-session";
     await vi.waitFor(() =>
-      expect(copy).toHaveBeenCalledWith(`tmux ${action} -t 'pi-123456781234:@7'`),
+      expect(copy).toHaveBeenCalledWith("tmux attach-session -t 'pi-123456781234:@7'"),
     );
   });
 
@@ -296,7 +295,7 @@ describe("handoff board", () => {
       snapshot([
         subagent("child-1", "Worker", "starting", {
           managedLive: true,
-          tmuxWindowId: "@7",
+          observeCommand: "tmux attach-session -t 'pi-123456781234:@7'",
         }),
       ]),
       {
@@ -346,7 +345,12 @@ describe("handoff board mouse", () => {
   it("highlights action text while held and clears release feedback without losing its action", () => {
     const bg = vi.fn((_token: string, text: string) => text);
     const board = createBoard(
-      snapshot([subagent("child", "Worker", "busy", { managedLive: true, tmuxWindowId: "@1" })]),
+      snapshot([
+        subagent("child", "Worker", "busy", {
+          managedLive: true,
+          observeCommand: "tmux attach-session -t 'pi-123456781234:@1'",
+        }),
+      ]),
       { boardTheme: { ...theme, bg } },
     );
     const point = pointAt(board.render(86), "x stop");
@@ -366,7 +370,12 @@ describe("handoff board mouse", () => {
     const bg = vi.fn((_token: string, text: string) => text);
     const stop = vi.fn(async () => {});
     const board = createBoard(
-      snapshot([subagent("child", "Worker", "busy", { managedLive: true, tmuxWindowId: "@1" })]),
+      snapshot([
+        subagent("child", "Worker", "busy", {
+          managedLive: true,
+          observeCommand: "tmux attach-session -t 'pi-123456781234:@1'",
+        }),
+      ]),
       { stop, boardTheme: { ...theme, bg } },
     );
     const point = pointAt(board.render(86), "x stop");
@@ -583,13 +592,16 @@ describe("handoff board mouse", () => {
   it("copies observe and resume commands through their full action hints", async () => {
     const copy = vi.fn(async () => {});
     const board = createBoard(
-      snapshot([subagent("child", "Worker", "completed", { tmuxWindowId: "@7" })]),
+      snapshot([
+        subagent("child", "Worker", "completed", {
+          observeCommand: "tmux attach-session -t 'pi-123456781234:@7'",
+        }),
+      ]),
       { copy },
     );
     clickAt(board, "copy observe");
-    const action = process.env.TMUX ? "switch-client" : "attach-session";
     await vi.waitFor(() =>
-      expect(copy).toHaveBeenCalledWith(`tmux ${action} -t 'pi-123456781234:@7'`),
+      expect(copy).toHaveBeenCalledWith("tmux attach-session -t 'pi-123456781234:@7'"),
     );
     await vi.waitFor(() => expect(board.render(86).join("\n")).toContain("Observe command copied"));
     board.handleInput(".");

@@ -41,6 +41,7 @@ import {
 } from "./settle.ts";
 import { shouldMessageSubagent } from "./should-message.ts";
 import { SubagentWaker } from "./wake.ts";
+import { createTmuxWorkerRuntime, type WorkerRuntime } from "./worker-runtime.ts";
 
 const SUBAGENT_PROMPT_SECTION = "pi_sessions_subagent";
 const SUBAGENT_PROMPT = `You are working as a subagent on one task delegated by a parent session. The handoff defines your task. Work independently, stay within its scope, and do not duplicate work assigned to the parent or another subagent. Use the available tools to complete the task and validate your conclusions. Messages from the parent may refine the task or request a follow-up, but they do not replace your original task with unrelated work.`;
@@ -48,7 +49,8 @@ const SUBAGENT_PROMPT = `You are working as a subagent on one task delegated by 
 interface ParentSessionState extends SubagentParentSession {
   getSessionName(): string | undefined;
   launchState: SubagentLaunchState;
-  tmuxInstalled: boolean;
+  runtime: WorkerRuntime;
+  canLaunchWorkers: boolean;
   getTree(): SessionTreeNode[];
   hasPendingMessages(): boolean;
   shutdown(): void;
@@ -100,13 +102,12 @@ export function installSubagents(
   });
   const settledChildLifecycle = createSettledChildLifecycle(pi, reconciler, isCurrentSession);
   const roster = new TranscriptSubagentRoster({
-    executor: pi,
     messaging: deps.messaging,
     getParent: () => current?.parent,
     reconcile: () => reconciler.reconcile(),
     openSession: openRosterSession,
   });
-  const waker = new SubagentWaker(pi, deps.messaging, () => current?.parent, isCurrentSession, {
+  const waker = new SubagentWaker(deps.messaging, () => current?.parent, isCurrentSession, {
     onMaterialize: (launch) => pi.appendEntry(SUBAGENT_LAUNCHED_CUSTOM_TYPE, launch),
     afterSend: async () => {
       await reconciler.reconcile();
@@ -241,7 +242,6 @@ export function installSubagents(
     cancelSession: (sessionId) => cancellationRouter.cancelSession(sessionId),
     shouldMessageSubagent: (sessionId) =>
       shouldMessageSubagent(sessionId, {
-        executor: pi,
         messaging: deps.messaging,
         getParent: () => current?.parent,
         openSession: openRosterSession,
@@ -255,10 +255,13 @@ export function installSubagents(
     },
     getLaunchTargets() {
       const parent = current?.parent;
-      if (!parent?.tmuxInstalled || parent.launchState.depth >= deps.settings.subagents.maxDepth) {
+      if (
+        !parent?.canLaunchWorkers ||
+        parent.launchState.depth >= deps.settings.subagents.maxDepth
+      ) {
         return [];
       }
-      return [createSubagentLaunchTarget(pi, parent.launchState, isCurrentSession)];
+      return [createSubagentLaunchTarget(pi, parent.launchState, parent.runtime, isCurrentSession)];
     },
     async onSessionStart(_event, ctx) {
       settledChildLifecycle.cancel();
@@ -278,7 +281,8 @@ export function installSubagents(
         shutdown: ctx.shutdown,
         epoch,
         launchState: { sessionId, depth: identity?.depth ?? 0, epoch },
-        tmuxInstalled: await isTmuxInstalled(pi, ctx.cwd),
+        runtime: createTmuxWorkerRuntime(pi),
+        canLaunchWorkers: await isTmuxInstalled(pi, ctx.cwd),
         reportError: (error) => notifySubagentFailure(ctx.ui, error),
       };
       reconciler.beginSession();

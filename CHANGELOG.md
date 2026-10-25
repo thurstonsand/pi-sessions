@@ -2,6 +2,17 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.21.0] - 2026-10-25
+
+### Added
+
+- **Herdr support.** When you run Pi in Herdr, subagents open in their own background tab in your workspace instead of a hidden tmux window. Herdr tracks each one as its own agent, so your session's status no longer gets stuck on "working" after launching a subagent ([#15](https://github.com/thurstonsand/pi-sessions/issues/15)). A finished subagent closes its tab on its own, unless you're looking at it. Directional handoffs open Herdr splits, and the handoff board's "copy observe" jumps to the subagent's tab. Inside Herdr, tmux is no longer needed for subagents.
+
+### Changed
+
+- If you run tmux inside Herdr, handoffs and subagents now open in Herdr instead of tmux.
+- Updated Pi development dependencies to 1.4.0.
+
 ## [0.20.2] - 2026-10-21
 
 ### Fixed

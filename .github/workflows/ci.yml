@@ -45,3 +45,25 @@ jobs:
           path: .mise/smoke/
           include-hidden-files: true
           if-no-files-found: ignore
+
+  windows:
+    name: Windows
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up mise
+        uses: jdx/mise-action@v5
+        with:
+          install_args: node
+          cache: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Test
+        run: mise run test
+
+      - name: Real Herdr smoke test
+        run: mise run smoke:herdr

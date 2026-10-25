@@ -19,7 +19,11 @@ Each run has a disposable home, agent directory, index, broker directory, and pr
 
 Artifacts live under `.mise/smoke/<run>/`: RPC events and stderr, worker pane text, the disposable transcripts and index, and `result.json` only after all checks and cleanup succeed. Failures retain `failure.txt` and surviving pane captures. The broker's latest startup output is in `broker/broker.log` inside the captured fixture. Outside the harness, the broker writes the same private log in its messaging directory and names it in startup errors.
 
+`mise run smoke` first runs `mise run smoke:herdr`, which installs a pinned Herdr, starts a disposable headless `herdr server`, resolves its pane over the socket API, launches a stamped worker through a quoted `cd`, and closes it.
+
 CI runs this lane after the routine check and uploads its artifacts. The scripted provider verifies integration mechanics, not generated briefing quality, real provider authentication, auto-title, or interactive mouse behavior; those remain in the manual lane below.
+
+A Windows CI job runs the unit tests, minus the files `vitest.config.ts` lists as not yet ported, and `mise run smoke:herdr` against Herdr's Windows build, where the socket API is a named pipe and workers launch through Git Bash. The Pi and tmux lane does not run on Windows.
 
 ## Repeatable benchmarks
 

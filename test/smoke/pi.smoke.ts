@@ -258,7 +258,7 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
       hostStarted = true;
       hostTmux("set-option", "-g", "default-shell", "/bin/sh");
     }
-    const ready = async (id: string, rpc?: RpcSession, profiled = false) => {
+    const ready = async (id: string, rpc?: RpcSession) => {
       const file = join(agentDir, `${id}.ready.json`);
       await waitFor(`ready ${id}`, () => {
         rpc?.assertRunning();
@@ -272,11 +272,16 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
       expect(result.packageEntry).toBe(join(packageRoot, "extensions/pi-sessions.ts"));
       expect(result.agentDir).toBe(agentDir);
       expect(result.sessionFile.startsWith(`${agentDir}/sessions/`)).toBe(true);
-      // A profiled worker's `--tools` allowlist hides every other extension tool.
-      if (profiled) expect(result.tools).not.toContain("session_search");
-      else expect(result.tools).toContain("session_search");
       return result;
     };
+    // Read after startup completes, not the scenario extension's earlier session_start: pi-sessions registers its
+    // recall and peer tools in its own session_start, once hosts have claimed theirs.
+    const startedTools = (id: string) =>
+      (
+        JSON.parse(readFileSync(join(agentDir, `${id}.tools.json`), "utf8")) as {
+          name: string;
+        }[]
+      ).map((tool) => tool.name);
     const parent = new RpcSession(cwd, env, parentId, join(artifacts, "parent.jsonl"));
     sessions.push(parent);
     const parentReady = await ready(parentId, parent);
@@ -285,12 +290,8 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
     await ready(peerId, peer);
 
     await parent.tool("write", { path: "fresh.txt", content: "SMOKE_FRESH_TOKEN" });
-    // Read after startup completes, not the scenario extension's earlier session_start.
-    const toolNames = (
-      JSON.parse(readFileSync(join(agentDir, `${parentId}.tools.json`), "utf8")) as {
-        name: string;
-      }[]
-    ).map((tool) => tool.name);
+    const toolNames = startedTools(parentId);
+    for (const name of ["session_search", "session_ask"]) expect(toolNames).toContain(name);
     for (const name of [
       "session_reachable",
       "session_send_message",
@@ -339,7 +340,7 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
         "--approve --model 'smoke/scripted:off' --tools 'read,submit_task_report'",
       );
     }
-    const childReady = await ready(receipt.sessionId, undefined, !withHost);
+    const childReady = await ready(receipt.sessionId);
     expect(childReady.cwd).toBe(childCwd);
     const windows = tmux("list-windows", "-a", "-F", "#{window_id}\t#{@pi_session_id}");
     const workerWindow = windows
@@ -360,6 +361,9 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
         ).length;
     writeFileSync(join(agentDir, "release-worker"), "");
     await waitFor("first report", () => (reports() === 1 ? true : undefined));
+    // A profiled worker's `--tools` allowlist hides every other extension tool.
+    if (!withHost) expect(startedTools(receipt.sessionId)).not.toContain("session_search");
+    else expect(startedTools(receipt.sessionId)).toContain("session_search");
     await waitFor("worker exit", () =>
       !tmux("list-windows", "-a", "-F", "#{@pi_session_id}").includes(receipt.sessionId)
         ? true
@@ -379,7 +383,7 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
         ? true
         : undefined,
     );
-    const resumed = await ready(receipt.sessionId, undefined, !withHost);
+    const resumed = await ready(receipt.sessionId);
     expect(resumed.pid).not.toBe(childReady.pid);
     const visibleReports = () =>
       SessionManager.open(parentReady.sessionFile)

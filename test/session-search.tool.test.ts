@@ -438,12 +438,14 @@ function registerSessionSearchTool() {
   const settings = loadSettings();
   installSearch(
     {
+      getActiveTools: () => [],
+      setActiveTools() {},
       registerTool(tool: ToolDefinition) {
         registeredTool = tool;
       },
     } as unknown as ExtensionAPI,
-    { settings, index: { path: settings.index.path } },
-  );
+    { settings, index: { path: settings.index.path }, claimsRecall: () => false },
+  ).refresh();
 
   if (!registeredTool) {
     throw new Error("session_search tool was not registered");

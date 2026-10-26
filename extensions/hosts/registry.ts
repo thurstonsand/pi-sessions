@@ -53,4 +53,8 @@ export class HostRegistry {
   claimsPeers(): boolean {
     return this.hosts.length > 0;
   }
+
+  claimsRecall(): boolean {
+    return this.hosts.some((host) => host.recall === true);
+  }
 }

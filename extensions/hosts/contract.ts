@@ -5,6 +5,7 @@ export const HOST_SCHEMA = Type.Object(
   {
     name: Type.String({ pattern: "^[a-z][a-z0-9-]*$" }),
     peers: Type.Literal(true),
+    recall: Type.Optional(Type.Literal(true)),
   },
   { additionalProperties: false },
 );

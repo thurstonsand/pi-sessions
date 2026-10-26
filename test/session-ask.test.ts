@@ -575,6 +575,8 @@ function registerSessionAskTool(shouldMessageSubagent?: (sessionId: string) => P
   const settings = loadSettings();
   installAsk(
     {
+      getActiveTools: () => [],
+      setActiveTools() {},
       registerTool(tool: ToolDefinition) {
         registeredTool = tool;
       },
@@ -585,10 +587,11 @@ function registerSessionAskTool(shouldMessageSubagent?: (sessionId: string) => P
     {
       settings,
       index: { path: settings.index.path },
+      claimsRecall: () => false,
       getModelRuntime: () => ({}) as never,
       ...(shouldMessageSubagent ? { shouldMessageSubagent } : {}),
     },
-  );
+  ).refresh();
 
   if (!registeredTool) {
     throw new Error("session_ask tool was not registered");

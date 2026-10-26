@@ -1,5 +1,6 @@
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { installRecallTool } from "../hosts/install.ts";
 import { isSessionStarting } from "../session-handoff/metadata.ts";
 import type { IndexHandle } from "../shared/composition.ts";
 import type { ModelRuntimeProvider } from "../shared/model-runtime.ts";
@@ -30,14 +31,15 @@ export function installAsk(
   deps: {
     settings: SessionSettings;
     index: IndexHandle;
+    claimsRecall(): boolean;
     getModelRuntime: ModelRuntimeProvider;
     shouldMessageSubagent?: (sessionId: string) => Promise<boolean>;
   },
-): void {
+): { refresh(): void } {
   const { settings } = deps;
   const indexPath = deps.index.path;
 
-  pi.registerTool({
+  return installRecallTool(pi, deps.claimsRecall, {
     name: "session_ask",
     label: "Session Ask",
     description: "Interrogate a Pi session transcript",

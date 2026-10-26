@@ -2,6 +2,12 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## Unreleased
+
+### Added
+
+- Hosts may claim recall with `{ name, peers: true, recall: true }`. Pi-sessions then leaves `session_search` and `session_ask` to the host, while keeping its index and subagent tools. Recall tools register after host discovery, remain available from the first turn in standalone Pi, and stay suppressed across `/reload` in a hosted session. Peer-only host claims remain supported.
+
 ## [0.21.2] - 2026-10-26
 
 ### Fixed

@@ -94,18 +94,24 @@ export default function piSessions(pi: ExtensionAPI): void {
       }),
     );
   }
+  const recallTools: { refresh(): void }[] = [];
   if (settings.features.search) {
-    installSearch(pi, { settings, index });
+    recallTools.push(
+      installSearch(pi, { settings, index, claimsRecall: () => hosts.claimsRecall() }),
+    );
   }
   if (settings.features.ask) {
-    installAsk(pi, {
-      settings,
-      index,
-      getModelRuntime: getSessionModelRuntime,
-      ...(subagents
-        ? { shouldMessageSubagent: (sessionId) => subagents.shouldMessageSubagent(sessionId) }
-        : {}),
-    });
+    recallTools.push(
+      installAsk(pi, {
+        settings,
+        index,
+        claimsRecall: () => hosts.claimsRecall(),
+        getModelRuntime: getSessionModelRuntime,
+        ...(subagents
+          ? { shouldMessageSubagent: (sessionId) => subagents.shouldMessageSubagent(sessionId) }
+          : {}),
+      }),
+    );
   }
   if (settings.features.autoTitle) {
     lifecycles.push(
@@ -131,6 +137,7 @@ export default function piSessions(pi: ExtensionAPI): void {
   pi.on("session_start", async (event, ctx) => {
     sessionEpoch += 1;
     hosts.discover(pi.events);
+    for (const tool of recallTools) tool.refresh();
     // One answer per session start, so split handoffs and subagent workers agree on a backend.
     herdr = await resolveHerdrSession();
     for (const lifecycle of lifecycles) {

@@ -3,9 +3,83 @@ import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import type { HostRegistrationRequest } from "../extensions/hosts/contract.ts";
 import { HostRegistry } from "../extensions/hosts/registry.ts";
+import { installAsk } from "../extensions/session-ask/install.ts";
 import type { SessionDirectory } from "../extensions/session-messaging/directory.ts";
 import { installDirectoryTools } from "../extensions/session-messaging/pi/install.ts";
+import { installSearch } from "../extensions/session-search/install.ts";
+import { loadSettings } from "../extensions/shared/settings.ts";
 import { createFakeExtensionApi } from "./test-helpers.ts";
+
+describe("recall claims", () => {
+  it.each(["search", "ask"] as const)(
+    "defers %s, preserves host tools, guards retained definitions and restores standalone recall",
+    async (kind) => {
+      const pi = createFakeExtensionApi();
+      const name = `session_${kind}`;
+      let active = [name, "subagent_launch"];
+      let claimed = true;
+      const definitions: ToolDefinition[] = [];
+      vi.mocked(pi.getActiveTools).mockImplementation(() => active);
+      vi.mocked(pi.setActiveTools).mockImplementation((tools) => {
+        active = tools;
+      });
+      vi.mocked(pi.registerTool).mockImplementation((tool) => {
+        definitions.push(tool);
+      });
+      const deps = {
+        settings: loadSettings(),
+        index: { path: "/unused" },
+        claimsRecall: () => claimed,
+        getModelRuntime: () => ({}) as never,
+      };
+      const installed = kind === "search" ? installSearch(pi, deps) : installAsk(pi, deps);
+      expect(definitions).toHaveLength(0);
+      installed.refresh();
+      expect(definitions).toHaveLength(0);
+      expect(active).toEqual([name, "subagent_launch"]);
+      claimed = false;
+      installed.refresh();
+      installed.refresh();
+      expect(definitions).toHaveLength(1);
+      expect(active).toEqual([name, "subagent_launch"]);
+      const tool = definitions[0];
+      if (!tool) throw new Error("Standalone recall tool was not registered.");
+      // Invalid input reaches the standalone implementation, not the host guard.
+      const params = kind === "search" ? { limit: 0 } : { session: "", question: "why?" };
+      await expect(tool.execute("test", params, undefined, undefined, {} as never)).rejects.toThrow(
+        kind === "search" ? "limit must be greater than 0" : "requires a session id",
+      );
+      claimed = true;
+      installed.refresh();
+      expect(active).toEqual(["subagent_launch"]);
+      await expect(tool.execute("test", params, undefined, undefined, {} as never)).rejects.toThrow(
+        "Recall tools belong to the current host",
+      );
+      claimed = false;
+      installed.refresh();
+      expect(active).toEqual(["subagent_launch", name]);
+      expect(definitions).toHaveLength(1);
+    },
+  );
+
+  it("accepts recall independently of a legacy peer-only claim and resets it on discovery", () => {
+    const events = createEventBus();
+    const registry = new HostRegistry();
+    const off = events.on("pi-sessions:hosts", (value) => {
+      (value as HostRegistrationRequest).register({ name: "swb", peers: true, recall: true });
+    });
+    registry.discover(events);
+    expect(registry.claimsRecall()).toBe(true);
+    expect(registry.claimsPeers()).toBe(true);
+    off();
+    events.on("pi-sessions:hosts", (value) => {
+      (value as HostRegistrationRequest).register({ name: "legacy", peers: true });
+    });
+    registry.discover(events);
+    expect(registry.claimsRecall()).toBe(false);
+    expect(registry.claimsPeers()).toBe(true);
+  });
+});
 
 describe("peer claims", () => {
   it("leaves host tools intact, deactivates retained peer definitions and restores standalone tools", async () => {
@@ -82,6 +156,7 @@ describe("peer claims", () => {
     { name: "swb", peers: false },
     { name: "subagent", peers: true },
     { name: "Swb", peers: true },
+    { name: "swb", peers: true, recall: false },
     { name: "swb", peers: true, launch: () => {} },
   ])("rejects invalid claims even when Pi swallows errors", (host) => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => {});

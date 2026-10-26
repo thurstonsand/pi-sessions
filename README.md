@@ -138,14 +138,14 @@ Pass bare session UUIDs, not `@session:` tokens. A subagent cannot message or ca
 
 ## Host extension API
 
-A host claims ownership of peer coordination, rather than supplying launch, listing, or wake callbacks. External extensions register over `pi.events`; neither extension imports the other.
+A host claims ownership of peer coordination and optionally recall, rather than supplying launch, listing, or wake callbacks. External extensions register over `pi.events`; neither extension imports the other.
 
 Install a listener during extension initialization, **not** in your `session_start` handler:
 
 ```ts
 pi.events.on("pi-sessions:hosts", (request) => {
   const { register } = request as HostRegistrationRequest;
-  register({ name: "swb", peers: true });
+  register({ name: "swb", peers: true, recall: true });
 });
 ```
 
@@ -159,11 +159,13 @@ interface HostRegistrationRequest {
 interface Host {
   name: string;
   peers: true;
+  recall?: true;
 }
 ```
 
-- **Registration:** pi-sessions emits `pi-sessions:hosts` at every `session_start`, including reloads and switches. Register synchronously before returning or awaiting anything. Registration freezes when `emit` returns; late calls throw. Names must match `[a-z][a-z0-9-]*`, be unique, and cannot be `left`, `right`, `up`, `down`, `deferred`, `subagent`, `tmux`, `ghostty`, or `herdr`. TypeBox validates exactly `{ name, peers: true }`; additional properties are rejected.
+- **Registration:** pi-sessions emits `pi-sessions:hosts` at every `session_start`, including reloads and switches. Register synchronously before returning or awaiting anything. Registration freezes when `emit` returns; late calls throw. Names must match `[a-z][a-z0-9-]*`, be unique, and cannot be `left`, `right`, `up`, `down`, `deferred`, `subagent`, `tmux`, `ghostty`, or `herdr`. TypeBox validates `{ name, peers: true, recall?: true }`; unknown properties and `recall: false` are rejected. Existing peer-only hosts remain supported.
 - **Ownership:** any registered claim suppresses pi-sessions' `session_reachable`, `session_send_message`, `session_cancel`, and `session_handoff`. Peer tools are never registered at extension load, so a host may register its own tools at load without conflicts. Discovery runs before late registration. Pi currently has no tool-unregistration API: definitions retained from a prior standalone session are deactivated with `setActiveTools` and execution-guarded; reload rebuilds registrations. A new standalone session reactivates pi-sessions' tools.
+- **Recall:** `recall: true` additionally suppresses `session_search` and `session_ask`. These tools register only after host discovery, so a host can provide the same names at load time. Retained standalone definitions are deactivated and execution-guarded just like peer tools. Without a recall claim, enabled recall tools are active from the first turn. Indexing, handoff, and the subagent directory keep using pi-sessions' index regardless of recall ownership. Older pi-sessions releases reject the new field; upgrade pi-sessions before enabling a host's recall claim.
 - **Subagents:** `subagent_list`, `subagent_send`, `subagent_cancel`, `subagent_launch`, and `submit_task_report` remain pi-sessions-owned under a host. Availability still follows feature settings, a Herdr pane or tmux installation, delegation depth, and whether the caller is a subagent. The host supplies no waker; owned-worker recovery retains its two 30-second broker-registration waits.
 
 ## Durable lineage entry

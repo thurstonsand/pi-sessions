@@ -1,5 +1,6 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { installRecallTool } from "../hosts/install.ts";
 import type { IndexHandle } from "../shared/composition.ts";
 import { stripSearchSnippetMarkers } from "../shared/search-snippet.ts";
 import {
@@ -23,12 +24,13 @@ const DEFAULT_SESSION_SEARCH_LIMIT = 6;
 export interface SearchInstallDeps {
   settings: SessionSettings;
   index: IndexHandle;
+  claimsRecall(): boolean;
 }
 
-export function installSearch(pi: ExtensionAPI, deps: SearchInstallDeps): void {
+export function installSearch(pi: ExtensionAPI, deps: SearchInstallDeps): { refresh(): void } {
   const indexPath = deps.index.path;
 
-  pi.registerTool({
+  return installRecallTool(pi, deps.claimsRecall, {
     name: "session_search",
     label: "Session Search",
     description: "Search Pi sessions",

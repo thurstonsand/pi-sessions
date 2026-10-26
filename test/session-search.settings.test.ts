@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { getDefaultIndexPath, loadSettings } from "../extensions/shared/settings.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
@@ -57,7 +58,7 @@ describe("pi-sessions index settings", () => {
     );
 
     const settings = loadSettings();
-    expect(settings.index.path).toBe(`${dir}/index.sqlite`);
+    expect(settings.index.path).toBe(path.join(dir, "index.sqlite"));
   });
 
   it("ignores project settings and only reads the global index dir", () => {
@@ -78,7 +79,7 @@ describe("pi-sessions index settings", () => {
     );
 
     const settings = loadSettings();
-    expect(settings.index.path).toBe(`${globalDir}/index.sqlite`);
+    expect(settings.index.path).toBe(path.join(globalDir, "index.sqlite"));
   });
 
   it("rejects relative index dirs", () => {

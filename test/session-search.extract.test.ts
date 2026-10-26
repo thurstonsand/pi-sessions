@@ -6,7 +6,7 @@ import {
   parseSessionContent,
   scanSessionEntries,
 } from "../extensions/session-search/extract.ts";
-import { createTestFilesystem } from "./test-helpers.ts";
+import { createTestFilesystem, toIndexPath } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-extract-");
 
@@ -175,7 +175,7 @@ describe("extractSessionRecord", () => {
         }),
       ]),
     );
-    expect(extracted?.repoRoots).toEqual([repoRoot]);
+    expect(extracted?.repoRoots).toEqual([toIndexPath(repoRoot)]);
     expect(extracted?.fileTouches).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -189,7 +189,7 @@ describe("extractSessionRecord", () => {
           op: "changed",
           source: "tool_call",
           rawPath: `${repoRoot}/generated/out.ts`,
-          absPath: `${repoRoot}/generated/out.ts`,
+          absPath: `${toIndexPath(repoRoot)}/generated/out.ts`,
           repoRelPath: "generated/out.ts",
         }),
         expect.objectContaining({

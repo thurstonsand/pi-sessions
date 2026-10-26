@@ -3,7 +3,7 @@ import type { FileTouchOp, FileTouchSource, PathScope } from "../../session-sear
 import { safeParseTypeBoxJson } from "../typebox.ts";
 import type { SqliteDatabase } from "./sqlite.ts";
 
-export const INDEX_SCHEMA_VERSION = 14;
+export const INDEX_SCHEMA_VERSION = 15;
 
 export type SessionOrigin = "handoff" | "subagent" | "fork" | "unknown_child";
 export type SessionKind = "user" | "subagent";

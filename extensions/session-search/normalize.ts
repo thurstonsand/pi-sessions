@@ -40,7 +40,7 @@ export function deriveRepoRootForPath(absPath: string): string | undefined {
 
   while (true) {
     if (existsSync(path.join(current, ".git"))) {
-      return current;
+      return normalizeAbsolute(current);
     }
 
     const parent = path.dirname(current);
@@ -73,20 +73,6 @@ export function deriveSessionRepoRoots(
   }
 
   return [...repoRoots].sort();
-}
-
-export function matchesRepoRoot(repoRoot: string, repoQuery: string): boolean {
-  const normalizedRepoRoot = path.normalize(repoRoot);
-  const normalizedQuery = normalizeSearchPath(repoQuery);
-  if (!normalizedQuery) {
-    return false;
-  }
-
-  if (path.isAbsolute(normalizedQuery) || normalizedQuery.includes("/")) {
-    return normalizedRepoRoot === normalizedQuery || normalizedRepoRoot.endsWith(normalizedQuery);
-  }
-
-  return path.basename(normalizedRepoRoot) === normalizedQuery;
 }
 
 export function normalizeSearchPath(rawPath: string): string | undefined {

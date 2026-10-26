@@ -446,7 +446,7 @@ describe("session handoff extraction", () => {
 
     expect(createSpy).toHaveBeenCalledWith(
       "/tmp/project",
-      expect.stringMatching(/pi-sessions\/session-handoff$/),
+      expect.stringMatching(/pi-sessions[\\/]session-handoff$/),
     );
     expect(inMemorySpy).not.toHaveBeenCalled();
     expect(result?.debugSessionPath).toBe("/tmp/handoff-runs/extraction.jsonl");

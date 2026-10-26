@@ -9,7 +9,7 @@ import {
   upsertSession,
 } from "../extensions/shared/session-index/index.ts";
 import { rebuildSessionIndex } from "../extensions/shared/session-index/recovery.ts";
-import { createTestFilesystem } from "./test-helpers.ts";
+import { createTestFilesystem, toIndexPath } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-reindex-");
 
@@ -175,7 +175,7 @@ describe("rebuildSessionIndex", () => {
     expect(readFileSync(indexPath).length).toBeGreaterThan(0);
     expect(sessions).toHaveLength(1);
     expect(sessions[0]?.sessionId).toBe("demo-session");
-    expect(sessions[0]?.repoRoots).toEqual([repoRoot]);
+    expect(sessions[0]?.repoRoots).toEqual([toIndexPath(repoRoot)]);
     expect(hits).toHaveLength(1);
     expect(hits[0]?.snippet).toContain("session");
     expect(fileHits).toHaveLength(1);

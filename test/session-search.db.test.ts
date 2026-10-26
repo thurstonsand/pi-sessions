@@ -16,7 +16,7 @@ import {
   upsertSession,
   withSessionIndex,
 } from "../extensions/shared/session-index/index.ts";
-import { createTestFilesystem } from "./test-helpers.ts";
+import { createTestFilesystem, toIndexPath } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-db-");
 
@@ -115,6 +115,7 @@ describe("session-search db", () => {
     const dir = testFs.createTempDir();
     const dbPath = path.join(dir, "index.sqlite");
     const repoRoot = path.join(dir, "repo");
+    const indexedRoot = toIndexPath(repoRoot);
 
     const db = openIndexDatabase(dbPath, { create: true });
     initializeSchema(db);
@@ -126,7 +127,7 @@ describe("session-search db", () => {
         sessionPath: "/tmp/session-1.jsonl",
         sessionName: "Repo work",
         cwd: `${repoRoot}/app`,
-        repoRoots: [repoRoot],
+        repoRoots: [indexedRoot],
         startedAt: "2026-03-22T00:00:00.000Z",
         modifiedAt: "2026-03-22T00:10:00.000Z",
         messageCount: 2,
@@ -140,9 +141,9 @@ describe("session-search db", () => {
       op: "changed",
       source: "tool_call",
       rawPath: "src/index.ts",
-      absPath: `${repoRoot}/app/src/index.ts`,
+      absPath: `${indexedRoot}/app/src/index.ts`,
       cwdRelPath: "src/index.ts",
-      repoRoot,
+      repoRoot: indexedRoot,
       repoRelPath: "app/src/index.ts",
       basename: "index.ts",
       pathScope: "relative",
@@ -154,9 +155,9 @@ describe("session-search db", () => {
       op: "changed",
       source: "tool_call",
       rawPath: "src/index.ts",
-      absPath: `${repoRoot}/app/src/index.ts`,
+      absPath: `${indexedRoot}/app/src/index.ts`,
       cwdRelPath: "src/index.ts",
-      repoRoot,
+      repoRoot: indexedRoot,
       repoRelPath: "app/src/index.ts",
       basename: "index.ts",
       pathScope: "relative",

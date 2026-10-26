@@ -88,6 +88,11 @@ export function createFakeModelRuntime(options: {
   };
 }
 
+/** The index stores paths with forward slashes on every platform. */
+export function toIndexPath(nativePath: string): string {
+  return nativePath.replaceAll("\\", "/");
+}
+
 export interface TestFilesystem {
   createTempDir(): string;
   cleanup(): void;

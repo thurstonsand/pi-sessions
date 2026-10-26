@@ -2,10 +2,9 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   deriveSessionRepoRoots,
-  matchesRepoRoot,
   normalizePathRecord,
 } from "../extensions/session-search/normalize.ts";
-import { createTestFilesystem } from "./test-helpers.ts";
+import { createTestFilesystem, toIndexPath } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-normalize-");
 
@@ -22,9 +21,9 @@ describe("session-search normalize", () => {
 
     const normalized = normalizePathRecord("lib/index.ts", cwd);
 
-    expect(normalized.absPath).toBe(`${repoRoot}/src/lib/index.ts`);
+    expect(normalized.absPath).toBe(`${toIndexPath(repoRoot)}/src/lib/index.ts`);
     expect(normalized.cwdRelPath).toBe("lib/index.ts");
-    expect(normalized.repoRoot).toBe(repoRoot);
+    expect(normalized.repoRoot).toBe(toIndexPath(repoRoot));
     expect(normalized.repoRelPath).toBe("src/lib/index.ts");
     expect(normalized.basename).toBe("index.ts");
     expect(normalized.pathScope).toBe("relative");
@@ -42,8 +41,6 @@ describe("session-search normalize", () => {
       { ...normalizePathRecord(`${secondRepo}/src/index.ts`, firstRepo), op: "changed" },
     ]);
 
-    expect(repoRoots).toEqual([firstRepo, secondRepo]);
-    expect(matchesRepoRoot(firstRepo, firstRepo)).toBe(true);
-    expect(matchesRepoRoot(secondRepo, "repo-two")).toBe(true);
+    expect(repoRoots).toEqual([toIndexPath(firstRepo), toIndexPath(secondRepo)]);
   });
 });

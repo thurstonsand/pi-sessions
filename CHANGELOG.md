@@ -2,6 +2,16 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [0.21.2] - 2026-10-26
+
+### Fixed
+
+- On Windows, `session_search`'s `repo` filter now matches. Repo roots were stored with backslashes and never compared equal to the query's path.
+
+### Changed
+
+- Session index schema version 15. The index rebuilds itself on the next session start; other Pi windows still on an older pi-sessions show a `/reload` warning until reloaded.
+
 ## [0.21.1] - 2026-10-25
 
 ### Fixed

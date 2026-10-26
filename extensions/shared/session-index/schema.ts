@@ -26,7 +26,9 @@ export function openIndexDatabase(
   return openSqlite(dbPath, { create, readonly, timeoutMs: options?.timeoutMs });
 }
 
+// A savepoint makes it one transaction on its own, and nests inside a caller's.
 export function initializeSchema(db: SessionIndexDatabase): void {
+  db.exec("SAVEPOINT initialize_schema");
   db.exec(`
     CREATE TABLE IF NOT EXISTS metadata (
       key TEXT PRIMARY KEY,
@@ -155,6 +157,7 @@ export function initializeSchema(db: SessionIndexDatabase): void {
   `);
 
   setMetadata(db, "schema_version", String(INDEX_SCHEMA_VERSION));
+  db.exec("RELEASE initialize_schema");
 }
 
 // A rebuild replaces a valid index's contents in place, never its file: a

@@ -687,34 +687,36 @@ function createTitleMatchPickerDb(): string {
   const dir = testFs.createTempDir();
   const dbPath = path.join(dir, "index.sqlite");
   const db = openIndexDatabase(dbPath, { create: true });
-  initializeSchema(db);
+  db.transaction(() => {
+    initializeSchema(db);
 
-  insertSession(
-    db,
-    {
+    insertSession(
+      db,
+      {
+        sessionId: "88888888-8888-4888-8888-888888888888",
+        sessionPath: "/tmp/title-match.jsonl",
+        sessionName: "Selector session title",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-23T00:00:00.000Z",
+        modifiedAt: "2026-03-23T00:10:00.000Z",
+        messageCount: 12,
+        entryCount: 12,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
       sessionId: "88888888-8888-4888-8888-888888888888",
-      sessionPath: "/tmp/title-match.jsonl",
-      sessionName: "Selector session title",
-      cwd: "/repo/app",
-      repoRoots: ["/repo"],
-      startedAt: "2026-03-23T00:00:00.000Z",
-      modifiedAt: "2026-03-23T00:10:00.000Z",
-      messageCount: 12,
-      entryCount: 12,
-    },
-    "full_reindex",
-  );
-  insertTextChunk(db, {
-    sessionId: "88888888-8888-4888-8888-888888888888",
-    entryId: "title-match-name",
-    entryType: "session_name",
-    role: "system",
-    ts: "2026-03-23T00:00:00.000Z",
-    sourceKind: "session_name",
-    text: "Selector session title",
-  });
+      entryId: "title-match-name",
+      entryType: "session_name",
+      role: "system",
+      ts: "2026-03-23T00:00:00.000Z",
+      sourceKind: "session_name",
+      text: "Selector session title",
+    });
 
-  rebuildSessionLineageRelations(db);
+    rebuildSessionLineageRelations(db);
+  });
   db.close();
   return dbPath;
 }
@@ -723,181 +725,183 @@ function createPickerDb(): string {
   const dir = testFs.createTempDir();
   const dbPath = path.join(dir, "index.sqlite");
   const db = openIndexDatabase(dbPath, { create: true });
-  initializeSchema(db);
+  db.transaction(() => {
+    initializeSchema(db);
 
-  insertSession(
-    db,
-    {
+    insertSession(
+      db,
+      {
+        sessionId: "11111111-1111-4111-8111-111111111111",
+        sessionPath: "/tmp/parent.jsonl",
+        sessionName: "Parent session",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-23T00:00:00.000Z",
+        modifiedAt: "2026-03-23T00:10:00.000Z",
+        messageCount: 10,
+        entryCount: 10,
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
       sessionId: "11111111-1111-4111-8111-111111111111",
-      sessionPath: "/tmp/parent.jsonl",
-      sessionName: "Parent session",
-      cwd: "/repo/app",
-      repoRoots: ["/repo"],
-      startedAt: "2026-03-23T00:00:00.000Z",
-      modifiedAt: "2026-03-23T00:10:00.000Z",
-      messageCount: 10,
-      entryCount: 10,
-    },
-    "full_reindex",
-  );
-  insertTextChunk(db, {
-    sessionId: "11111111-1111-4111-8111-111111111111",
-    entryId: "parent-search",
-    entryType: "message",
-    role: "assistant",
-    ts: "2026-03-23T00:10:00.000Z",
-    sourceKind: "assistant_text",
-    text: "selector",
-  });
+      entryId: "parent-search",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-23T00:10:00.000Z",
+      sourceKind: "assistant_text",
+      text: "selector",
+    });
 
-  insertSession(
-    db,
-    {
+    insertSession(
+      db,
+      {
+        sessionId: "22222222-2222-4222-8222-222222222222",
+        sessionPath: "/tmp/current.jsonl",
+        sessionName: "Current session",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-23T00:20:00.000Z",
+        modifiedAt: "2026-03-23T00:30:00.000Z",
+        messageCount: 20,
+        entryCount: 20,
+        parentSessionPath: "/tmp/parent.jsonl",
+        parentSessionId: "11111111-1111-4111-8111-111111111111",
+        sessionOrigin: "handoff",
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
       sessionId: "22222222-2222-4222-8222-222222222222",
-      sessionPath: "/tmp/current.jsonl",
-      sessionName: "Current session",
-      cwd: "/repo/app",
-      repoRoots: ["/repo"],
-      startedAt: "2026-03-23T00:20:00.000Z",
-      modifiedAt: "2026-03-23T00:30:00.000Z",
-      messageCount: 20,
-      entryCount: 20,
-      parentSessionPath: "/tmp/parent.jsonl",
-      parentSessionId: "11111111-1111-4111-8111-111111111111",
-      sessionOrigin: "handoff",
-    },
-    "full_reindex",
-  );
-  insertTextChunk(db, {
-    sessionId: "22222222-2222-4222-8222-222222222222",
-    entryId: "current-search",
-    entryType: "message",
-    role: "assistant",
-    ts: "2026-03-23T00:30:00.000Z",
-    sourceKind: "assistant_text",
-    text: "selector",
-  });
+      entryId: "current-search",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-23T00:30:00.000Z",
+      sourceKind: "assistant_text",
+      text: "selector",
+    });
 
-  insertSession(
-    db,
-    {
+    insertSession(
+      db,
+      {
+        sessionId: "33333333-3333-4333-8333-333333333333",
+        sessionPath: "/tmp/child.jsonl",
+        sessionName: "Child session",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-23T00:40:00.000Z",
+        modifiedAt: "2026-03-23T00:50:00.000Z",
+        messageCount: 30,
+        entryCount: 30,
+        parentSessionPath: "/tmp/current.jsonl",
+        parentSessionId: "22222222-2222-4222-8222-222222222222",
+        sessionOrigin: "handoff",
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
       sessionId: "33333333-3333-4333-8333-333333333333",
-      sessionPath: "/tmp/child.jsonl",
-      sessionName: "Child session",
-      cwd: "/repo/app",
-      repoRoots: ["/repo"],
-      startedAt: "2026-03-23T00:40:00.000Z",
-      modifiedAt: "2026-03-23T00:50:00.000Z",
-      messageCount: 30,
-      entryCount: 30,
-      parentSessionPath: "/tmp/current.jsonl",
-      parentSessionId: "22222222-2222-4222-8222-222222222222",
-      sessionOrigin: "handoff",
-    },
-    "full_reindex",
-  );
-  insertTextChunk(db, {
-    sessionId: "33333333-3333-4333-8333-333333333333",
-    entryId: "child-search",
-    entryType: "message",
-    role: "assistant",
-    ts: "2026-03-23T00:50:00.000Z",
-    sourceKind: "assistant_text",
-    text: "selector",
-  });
+      entryId: "child-search",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-23T00:50:00.000Z",
+      sourceKind: "assistant_text",
+      text: "selector",
+    });
 
-  insertSession(
-    db,
-    {
+    insertSession(
+      db,
+      {
+        sessionId: "44444444-4444-4444-8444-444444444444",
+        sessionPath: "/tmp/grandchild.jsonl",
+        sessionName: "Grandchild session",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-23T01:00:00.000Z",
+        modifiedAt: "2026-03-23T01:10:00.000Z",
+        messageCount: 40,
+        entryCount: 40,
+        parentSessionPath: "/tmp/child.jsonl",
+        parentSessionId: "33333333-3333-4333-8333-333333333333",
+        sessionOrigin: "handoff",
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
       sessionId: "44444444-4444-4444-8444-444444444444",
-      sessionPath: "/tmp/grandchild.jsonl",
-      sessionName: "Grandchild session",
-      cwd: "/repo/app",
-      repoRoots: ["/repo"],
-      startedAt: "2026-03-23T01:00:00.000Z",
-      modifiedAt: "2026-03-23T01:10:00.000Z",
-      messageCount: 40,
-      entryCount: 40,
-      parentSessionPath: "/tmp/child.jsonl",
-      parentSessionId: "33333333-3333-4333-8333-333333333333",
-      sessionOrigin: "handoff",
-    },
-    "full_reindex",
-  );
-  insertTextChunk(db, {
-    sessionId: "44444444-4444-4444-8444-444444444444",
-    entryId: "grandchild-search",
-    entryType: "message",
-    role: "assistant",
-    ts: "2026-03-23T01:10:00.000Z",
-    sourceKind: "assistant_text",
-    text: "selector",
-  });
+      entryId: "grandchild-search",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-23T01:10:00.000Z",
+      sourceKind: "assistant_text",
+      text: "selector",
+    });
 
-  insertSession(
-    db,
-    {
-      sessionId: "55555555-5555-4555-8555-555555555555",
-      sessionPath: "/tmp/great-grandchild.jsonl",
-      sessionName: "Great grandchild session",
-      cwd: "/repo/app",
-      repoRoots: ["/repo"],
-      startedAt: "2026-03-23T01:20:00.000Z",
-      modifiedAt: "2026-03-23T01:30:00.000Z",
-      messageCount: 50,
-      entryCount: 50,
-      parentSessionPath: "/tmp/grandchild.jsonl",
-      parentSessionId: "44444444-4444-4444-8444-444444444444",
-      sessionOrigin: "handoff",
-    },
-    "full_reindex",
-  );
+    insertSession(
+      db,
+      {
+        sessionId: "55555555-5555-4555-8555-555555555555",
+        sessionPath: "/tmp/great-grandchild.jsonl",
+        sessionName: "Great grandchild session",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-23T01:20:00.000Z",
+        modifiedAt: "2026-03-23T01:30:00.000Z",
+        messageCount: 50,
+        entryCount: 50,
+        parentSessionPath: "/tmp/grandchild.jsonl",
+        parentSessionId: "44444444-4444-4444-8444-444444444444",
+        sessionOrigin: "handoff",
+      },
+      "full_reindex",
+    );
 
-  insertSession(
-    db,
-    {
+    insertSession(
+      db,
+      {
+        sessionId: "66666666-6666-4666-8666-666666666666",
+        sessionPath: "/tmp/sibling.jsonl",
+        sessionName: "Sibling session",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-23T01:40:00.000Z",
+        modifiedAt: "2026-03-23T01:50:00.000Z",
+        messageCount: 60,
+        entryCount: 60,
+        parentSessionPath: "/tmp/parent.jsonl",
+        parentSessionId: "11111111-1111-4111-8111-111111111111",
+        sessionOrigin: "handoff",
+      },
+      "full_reindex",
+    );
+    insertTextChunk(db, {
       sessionId: "66666666-6666-4666-8666-666666666666",
-      sessionPath: "/tmp/sibling.jsonl",
-      sessionName: "Sibling session",
-      cwd: "/repo/app",
-      repoRoots: ["/repo"],
-      startedAt: "2026-03-23T01:40:00.000Z",
-      modifiedAt: "2026-03-23T01:50:00.000Z",
-      messageCount: 60,
-      entryCount: 60,
-      parentSessionPath: "/tmp/parent.jsonl",
-      parentSessionId: "11111111-1111-4111-8111-111111111111",
-      sessionOrigin: "handoff",
-    },
-    "full_reindex",
-  );
-  insertTextChunk(db, {
-    sessionId: "66666666-6666-4666-8666-666666666666",
-    entryId: "sibling-search",
-    entryType: "message",
-    role: "assistant",
-    ts: "2026-03-23T01:50:00.000Z",
-    sourceKind: "assistant_text",
-    text: "selector",
+      entryId: "sibling-search",
+      entryType: "message",
+      role: "assistant",
+      ts: "2026-03-23T01:50:00.000Z",
+      sourceKind: "assistant_text",
+      text: "selector",
+    });
+
+    insertSession(
+      db,
+      {
+        sessionId: "77777777-7777-4777-8777-777777777777",
+        sessionPath: "/tmp/unrelated.jsonl",
+        sessionName: "Unrelated session",
+        cwd: "/repo/app",
+        repoRoots: ["/repo"],
+        startedAt: "2026-03-23T01:55:00.000Z",
+        modifiedAt: "2026-03-23T01:56:00.000Z",
+        messageCount: 70,
+        entryCount: 70,
+      },
+      "full_reindex",
+    );
+
+    rebuildSessionLineageRelations(db);
   });
-
-  insertSession(
-    db,
-    {
-      sessionId: "77777777-7777-4777-8777-777777777777",
-      sessionPath: "/tmp/unrelated.jsonl",
-      sessionName: "Unrelated session",
-      cwd: "/repo/app",
-      repoRoots: ["/repo"],
-      startedAt: "2026-03-23T01:55:00.000Z",
-      modifiedAt: "2026-03-23T01:56:00.000Z",
-      messageCount: 70,
-      entryCount: 70,
-    },
-    "full_reindex",
-  );
-
-  rebuildSessionLineageRelations(db);
   db.close();
   return dbPath;
 }

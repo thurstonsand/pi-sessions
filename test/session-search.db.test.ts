@@ -307,50 +307,52 @@ describe("session-search db", () => {
     const dbPath = path.join(dir, "index.sqlite");
 
     const db = openIndexDatabase(dbPath, { create: true });
-    initializeSchema(db);
-    for (const sessionId of ["strict-session", "partial-session", "excluded-session"]) {
-      insertSession(
-        db,
-        {
-          sessionId,
-          sessionPath: `/tmp/${sessionId}.jsonl`,
-          sessionName: sessionId,
-          cwd: "/repo/app",
-          repoRoots: ["/repo"],
-          startedAt: "2026-03-22T00:00:00.000Z",
-          modifiedAt: "2026-03-22T00:10:00.000Z",
-          messageCount: 1,
-          entryCount: 1,
-        },
-        "full_reindex",
-      );
-    }
-    insertTextChunk(db, {
-      sessionId: "strict-session",
-      entryId: "strict-entry",
-      entryType: "message",
-      role: "user",
-      ts: "2026-03-22T00:01:00.000Z",
-      sourceKind: "user_text",
-      text: "alpha beta gamma",
-    });
-    insertTextChunk(db, {
-      sessionId: "partial-session",
-      entryId: "partial-entry",
-      entryType: "message",
-      role: "user",
-      ts: "2026-03-22T00:02:00.000Z",
-      sourceKind: "user_text",
-      text: "alpha beta",
-    });
-    insertTextChunk(db, {
-      sessionId: "excluded-session",
-      entryId: "excluded-entry",
-      entryType: "message",
-      role: "user",
-      ts: "2026-03-22T00:03:00.000Z",
-      sourceKind: "user_text",
-      text: "alpha beta forbidden",
+    db.transaction(() => {
+      initializeSchema(db);
+      for (const sessionId of ["strict-session", "partial-session", "excluded-session"]) {
+        insertSession(
+          db,
+          {
+            sessionId,
+            sessionPath: `/tmp/${sessionId}.jsonl`,
+            sessionName: sessionId,
+            cwd: "/repo/app",
+            repoRoots: ["/repo"],
+            startedAt: "2026-03-22T00:00:00.000Z",
+            modifiedAt: "2026-03-22T00:10:00.000Z",
+            messageCount: 1,
+            entryCount: 1,
+          },
+          "full_reindex",
+        );
+      }
+      insertTextChunk(db, {
+        sessionId: "strict-session",
+        entryId: "strict-entry",
+        entryType: "message",
+        role: "user",
+        ts: "2026-03-22T00:01:00.000Z",
+        sourceKind: "user_text",
+        text: "alpha beta gamma",
+      });
+      insertTextChunk(db, {
+        sessionId: "partial-session",
+        entryId: "partial-entry",
+        entryType: "message",
+        role: "user",
+        ts: "2026-03-22T00:02:00.000Z",
+        sourceKind: "user_text",
+        text: "alpha beta",
+      });
+      insertTextChunk(db, {
+        sessionId: "excluded-session",
+        entryId: "excluded-entry",
+        entryType: "message",
+        role: "user",
+        ts: "2026-03-22T00:03:00.000Z",
+        sourceKind: "user_text",
+        text: "alpha beta forbidden",
+      });
     });
 
     const relaxedHits = searchSessionChunks(db, {
@@ -369,16 +371,18 @@ describe("session-search db", () => {
     expect(relaxedHits.map((hit) => hit.entryId)).toEqual(["strict-entry", "partial-entry"]);
     expect(explicitHits.map((hit) => hit.entryId)).toEqual(["strict-entry"]);
     expect(sessionHits.map((hit) => hit.sessionId)).toEqual(["strict-session", "partial-session"]);
-    for (let i = 0; i < 300; i++) {
-      insertTextChunk(db, {
-        sessionId: "strict-session",
-        entryId: `flood-${i}`,
-        entryType: "message",
-        ts: "2026-03-22T00:01:00.000Z",
-        sourceKind: "user_text",
-        text: "alpha beta gamma",
-      });
-    }
+    db.transaction(() => {
+      for (let i = 0; i < 300; i++) {
+        insertTextChunk(db, {
+          sessionId: "strict-session",
+          entryId: `flood-${i}`,
+          entryType: "message",
+          ts: "2026-03-22T00:01:00.000Z",
+          sourceKind: "user_text",
+          text: "alpha beta gamma",
+        });
+      }
+    });
     expect(
       searchSessions(db, { query: "alpha beta gamma -forbidden", limit: 10 }).map(
         (hit) => hit.sessionId,

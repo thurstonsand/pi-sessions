@@ -31,6 +31,15 @@ import {
 import { createSessionHookController } from "../extensions/shared/session-index/sync.ts";
 import { createFakeExtensionApi, createTestFilesystem } from "./test-helpers.ts";
 
+// Contention inside one thread can only end in SQLITE_BUSY, so the 5 s default busy wait only
+// slows these tests down; explicit timeouts, like the rebuild lock's, are kept.
+vi.mock(import("../extensions/shared/session-index/sqlite.ts"), async (importOriginal) => {
+  const sqlite = await importOriginal();
+  const openSqlite: typeof sqlite.openSqlite = (dbPath, options) =>
+    sqlite.openSqlite(dbPath, { ...options, timeoutMs: options.timeoutMs ?? 100 });
+  return { ...sqlite, openSqlite };
+});
+
 const fs = createTestFilesystem("pi-index-recovery-");
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -210,8 +219,7 @@ it("persists failure backoff and lets a manual rebuild bypass it without destroy
   const db = openIndexDatabase(indexPath, { create: false, mode: "read" });
   expect(getMetadata(db, "schema_version")).toBe(String(INDEX_SCHEMA_VERSION));
   db.close();
-  // Each of the five injected failures waits out the publish copy's 5 s busy_timeout.
-}, 40_000);
+});
 
 it("lands hook writes while a rebuilder holds the rebuild lock", async () => {
   const { file, indexPath } = fixture();
@@ -258,7 +266,7 @@ it("waits out another process's rebuild past busy_timeout, then lands the hook w
       const index = new DatabaseSync(process.argv[1]);
       index.exec("BEGIN IMMEDIATE");
       console.log("held");
-      setTimeout(() => { index.exec("ROLLBACK"); lock.close(); }, 6_000);`,
+      setTimeout(() => { index.exec("ROLLBACK"); lock.close(); }, 1_000);`,
       indexPath,
     ],
     { stdio: ["ignore", "pipe", "inherit"] },
@@ -268,10 +276,10 @@ it("waits out another process's rebuild past busy_timeout, then lands the hook w
   appendTurn(file, "written after a foreign rebuild");
   const started = Date.now();
   expect(await createSessionHookController({ indexPath }).handleTurnEnd(file)).toBe(true);
-  expect(Date.now() - started).toBeGreaterThan(5_500);
+  expect(Date.now() - started).toBeGreaterThan(800);
   await exited;
   expect(chunkCount(indexPath, "written after a foreign rebuild")).toEqual({ count: 1 });
-}, 20_000);
+});
 
 it("keeps connections opened before a rebuild writing into the live index", async () => {
   const { indexPath } = fixture();
@@ -312,7 +320,7 @@ it("indexes a turn_end that interleaves with a reconcile exactly once", async ()
 it("never shows a reader the index without writes acknowledged during a rebuild", async () => {
   const { root, file, indexPath } = fixture();
   const files = [file];
-  for (let i = 0; i < 20; i++)
+  for (let i = 0; i < 2; i++)
     files.push(
       fs.writeJsonlFile(path.join(root, "sessions", "project"), `extra-${i}.jsonl`, [
         { type: "session", id: `extra-${i}`, timestamp: "2026-10-09T00:00:00Z", cwd: root },

@@ -493,7 +493,7 @@ export class SessionReferencePickerComponent implements Focusable {
 
   private getFirstSessionIndex(): number {
     const firstIndex = this.items.findIndex((item) => item.kind === "session");
-    return firstIndex >= 0 ? firstIndex : 0;
+    return Math.max(firstIndex, 0);
   }
 
   private moveSelection(delta: number): void {

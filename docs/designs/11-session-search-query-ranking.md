@@ -12,13 +12,13 @@ Revise `session_search` and the shared session-reference search backend around a
 
 The current session search implementation stores useful evidence in SQLite, but the query path is too naive for the way the tool is used. All of the following are verified against `extensions/shared/session-index/search.ts` and `extensions/shared/session-index/common.ts`:
 
-- SQLite BM25 rank is selected and ordered by, but never enters result scoring. Worse, because `addSearchEvidence` replaces the snippet on `snippetScore >= accumulator.snippetScore` and rows arrive best-rank-first, the snippet shown for a session is the *lowest*-ranked chunk among the winning source kind.
+- SQLite BM25 rank is selected and ordered by, but never enters result scoring. Worse, because `addSearchEvidence` replaces the snippet on `snippetScore >= accumulator.snippetScore` and rows arrive best-rank-first, the snippet shown for a session is the _lowest_-ranked chunk among the winning source kind.
 - Free-text search is strict `AND` of prefix tokens. Quoting only works when the entire query is one quoted string; embedded phrases and boolean expressions are unsupported.
-- Query sanitization (`sanitizeFtsToken`) reduces everything to `[A-Za-z0-9_]` tokens joined with `AND`. A path query like `extensions/session-search.ts` matches sessions containing `extensions`, `session`, `search`, and `ts` *anywhere*, losing all adjacency. (Session references are less affected than paths: the dedicated session-id evidence path does its own tokenization and still prefix-matches on an 8-character UUID segment.)
+- Query sanitization (`sanitizeFtsToken`) reduces everything to `[A-Za-z0-9_]` tokens joined with `AND`. A path query like `extensions/session-search.ts` matches sessions containing `extensions`, `session`, `search`, and `ts` _anywhere_, losing all adjacency. (Session references are less affected than paths: the dedicated session-id evidence path does its own tokenization and still prefix-matches on an 8-character UUID segment.)
 - Several filters are applied in JavaScript after loading candidate rows: repo matching parses `repo_roots_json` per row, file-touch matching loads every touch row in the time/cwd window and matches paths in JS, and session exclusion filters a JS `Set`. Neither the candidate query nor the FTS query carries a `LIMIT`, and the FTS query duplicates the full session metadata onto every chunk row.
-- Ranking signals are ad hoc. Recency is a harmonic decay on the session's *position* in the filtered candidate list (`RECENCY_BASE_SCORE / (index + 1)`), not its age, so the score depends on how many sessions match the filters. Each matching chunk adds a flat per-source weight with no bound, so ~75 matching chunks in one long session (75 × 20) out-scores an exact session-id match (1500).
+- Ranking signals are ad hoc. Recency is a harmonic decay on the session's _position_ in the filtered candidate list (`RECENCY_BASE_SCORE / (index + 1)`), not its age, so the score depends on how many sessions match the filters. Each matching chunk adds a flat per-source weight with no bound, so ~75 matching chunks in one long session (75 × 20) out-scores an exact session-id match (1500).
 - The tool returns one snippet per session even when multiple high-signal chunks matched.
-- The picker and tool share `searchSessions`, so query semantics improve in one shared layer — but the picker then re-sorts results by lineage priority *above* relevance (`prioritizeSessionResults` in `extensions/session-handoff/query.ts`), so ranking fixes will not surface in picker search mode without a decision here.
+- The picker and tool share `searchSessions`, so query semantics improve in one shared layer — but the picker then re-sorts results by lineage priority _above_ relevance (`prioritizeSessionResults` in `extensions/session-handoff/query.ts`), so ranking fixes will not surface in picker search mode without a decision here.
 - Time filters are asymmetric and misdocumented: `after` bounds `modified_ts` while `before` bounds `created_ts` (interval-overlap semantics), but the tool parameter descriptions say both bound modified time. Separately, `normalizeTimeFilter` silently drops unparseable dates, so an invalid filter widens the search instead of failing.
 
 The goal is not to build a general search engine. The goal is a better local recall tool for Pi sessions: predictable enough for an agent to call, expressive enough for humans, and simple enough to trust.
@@ -141,12 +141,12 @@ Both renderers change with this shape: the tool’s `renderResult`/`formatSearch
 
 A spike compared TypeScript parser libraries against a small custom parser. No TypeScript library was found that targets SQLite FTS5 `MATCH` syntax directly. Lucene-like parsers such as `liqe` parse too much language, reject useful pi-sessions inputs such as paths and session-reference-like tokens, and still require a custom SQLite FTS compiler. Older libraries preserve too little structure around unary negation.
 
-The chosen path is a small custom lexer/parser/compiler dedicated to the supported grammar. One FTS5 fact shapes the compiler: FTS5 `NOT` is a *binary* set-difference operator; there is no unary `NOT` in `MATCH` syntax. Combined with session-level negation (Decision 4), this means unary negation never reaches `MATCH` at all. The compiler output is:
+The chosen path is a small custom lexer/parser/compiler dedicated to the supported grammar. One FTS5 fact shapes the compiler: FTS5 `NOT` is a _binary_ set-difference operator; there is no unary `NOT` in `MATCH` syntax. Combined with session-level negation (Decision 4), this means unary negation never reaches `MATCH` at all. The compiler output is:
 
 ```ts
 interface CompiledQuery {
-  match: string;        // positive expression only
-  excludes: string[];   // one MATCH string per top-level negation
+  match: string; // positive expression only
+  excludes: string[]; // one MATCH string per top-level negation
 }
 ```
 
@@ -212,7 +212,7 @@ The current implementation selects SQLite BM25 rank but effectively ignores it. 
 - recency
 - bounded repeated-hit evidence
 
-SQLite BM25 values should not be added raw to the product score. They are query-local and lower-is-better. The safer approach is rank-position normalization: over the overfetched chunk rows ordered by BM25, chunk *i* contributes `w(sourceKind) × 1/(1 + i)` (or similar), and a session’s text score sums its top K chunks (K ≈ 5) so contribution has diminishing returns and a hard bound.
+SQLite BM25 values should not be added raw to the product score. They are query-local and lower-is-better. The safer approach is rank-position normalization: over the overfetched chunk rows ordered by BM25, chunk _i_ contributes `w(sourceKind) × 1/(1 + i)` (or similar), and a session’s text score sums its top K chunks (K ≈ 5) so contribution has diminishing returns and a hard bound.
 
 Recency must be age-based, not position-based. The current `RECENCY_BASE_SCORE / (candidateIndex + 1)` makes a session’s score depend on how many other sessions matched the filters, which is unstable across corpora and filter combinations. Replace it with exponential decay on `modified_ts` age (half-life on the order of weeks, tunable in `scoring.ts`). Recency remains part of the relevance score, not just a final tie-break, because recent sessions are often more likely to be the intended recall target.
 
@@ -270,7 +270,7 @@ Small, but each one is a trap for the next change:
 - **Negative-only query:** Reject in Phase 1 with guidance to add a positive search term.
 - **Negation under OR or nested parens:** Reject forms such as `foo OR -bar` in Phase 1; session-level exclusion cannot represent them.
 - **Quoted single word:** Treat `"sqlite"` as exact, not prefix.
-- **Unquoted symbol-heavy term:** Quote it for FTS5. Under unicode61 the tokenizer then splits the quoted string into an ordered *phrase* (`"extensions/session-search.ts"` → phrase `extensions session search ts`), which is exactly the adjacency-preserving behavior paths need — without promising literal punctuation-sensitive substring search.
+- **Unquoted symbol-heavy term:** Quote it for FTS5. Under unicode61 the tokenizer then splits the quoted string into an ordered _phrase_ (`"extensions/session-search.ts"` → phrase `extensions session search ts`), which is exactly the adjacency-preserving behavior paths need — without promising literal punctuation-sensitive substring search.
 - **Invalid time filter value:** Fail closed with a validation error in the shared layer. Today `normalizeTimeFilter` silently drops unparseable dates, which widens the search; the tool wrapper validates but the picker path does not.
 - **No-query file search:** Return matching sessions chronologically, newest first by default.
 - **Very broad query:** Use SQL overfetch and bounded per-session evidence/contribution to avoid one long session dominating payloads.

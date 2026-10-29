@@ -67,7 +67,7 @@ The four Pi development dependencies move from `^0.80.2` to `^0.80.6`; peer mini
 Pi 0.80.6 publicly exposes the `ThinkingLevel` type with:
 
 ```ts
-"off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
+"off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 ```
 
 It does not publicly export its runtime all-level array or `isValidThinkingLevel` through the package root/export map. Pi Sessions therefore owns one runtime `THINKING_LEVELS` constant and one type guard. Tool schemas, settings parsing, and any remaining validation consume that single boundary.
@@ -107,7 +107,7 @@ Model ids containing slashes or colons are not reparsed by Pi Sessions. Pi owns 
 The tool gains a required field:
 
 ```ts
-title: string
+title: string;
 ```
 
 Its description states that this short title becomes the child session's title and should summarize rather than repeat the full goal. For tool-launched handoffs, this title is authoritative: it labels the launch receipt, initial session entry, reviewed child, and final handoff metadata. Child extraction does not replace it with a second generated title.
@@ -132,7 +132,7 @@ On success, `renderResult()` updates that same layout instead of adding a second
 The **handoff kickoff** is a model-visible custom message sent with:
 
 ```ts
-sendMessage(message, { triggerTurn: true })
+sendMessage(message, { triggerTurn: true });
 ```
 
 Its `content` is exactly the approved handoff prompt, so provider context is unchanged. Its `details` carry renderer metadata:

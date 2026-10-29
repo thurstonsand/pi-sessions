@@ -20,8 +20,8 @@
     }
   },
   "markdown": {
-    "formatter": {
-      "enabled": false
+    "parser": {
+      "frontmatter": true
     }
   }
 }

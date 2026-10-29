@@ -555,4 +555,3 @@ The cleanest implementation is:
 - a command-only `/retitle` escape hatch
 
 That keeps v1 small, fits the package’s existing architecture, and borrows the right ideas from both reference extensions without importing their extra scope.
-

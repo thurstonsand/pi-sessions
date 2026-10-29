@@ -64,16 +64,16 @@ Open the frontend implementation task in a session to the right.
 
 ## Features
 
-| Extension          | Surface                                                                | What it does                                            |
-| ------------------ | ---------------------------------------------------------------------- | ------------------------------------------------------- |
-| Session Search     | `session_search` pi tool                                               | Search through old sessions                             |
-| Session Ask        | `session_ask` pi tool                                                  | Ask questions about old sessions                        |
-| Session Handoff    | `session_handoff` pi tool, `/handoff` board                            | Start user-facing child sessions                        |
-| Session Messaging  | `session_reachable`, `session_send_message`, `session_cancel` pi tools | Coordinate between live user-facing Pi sessions          |
-| Subagents          | `subagent_list`, `subagent_send`, `subagent_cancel`, `subagent_launch`, `submit_task_report` | Delegate and manage background work |
-| Session Picker     | `Alt+O`                                                                | Reference old sessions in your prompt                   |
-| Session Index      | `/session-index` slash command                                         | Shows index status and rebuilds the local session index |
-| Session Auto Title | in background, `/title` slash command                                  | Give sessions titles                                    |
+| Extension          | Surface                                                                                      | What it does                                            |
+| ------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Session Search     | `session_search` pi tool                                                                     | Search through old sessions                             |
+| Session Ask        | `session_ask` pi tool                                                                        | Ask questions about old sessions                        |
+| Session Handoff    | `session_handoff` pi tool, `/handoff` board                                                  | Start user-facing child sessions                        |
+| Session Messaging  | `session_reachable`, `session_send_message`, `session_cancel` pi tools                       | Coordinate between live user-facing Pi sessions         |
+| Subagents          | `subagent_list`, `subagent_send`, `subagent_cancel`, `subagent_launch`, `submit_task_report` | Delegate and manage background work                     |
+| Session Picker     | `Alt+O`                                                                                      | Reference old sessions in your prompt                   |
+| Session Index      | `/session-index` slash command                                                               | Shows index status and rebuilds the local session index |
+| Session Auto Title | in background, `/title` slash command                                                        | Give sessions titles                                    |
 
 Settings live under `sessions` in `~/.pi/agent/settings.json`. A project's `.pi/settings.json` overrides them the way pi merges its own settings: nested objects merge key by key, and the project wins.
 
@@ -244,6 +244,7 @@ An agent profile lets `subagent_launch` start a subagent with extra instructions
 
 ```markdown
 ---
+
 name: oracle
 description: Read-only second opinion on a plan, diff, or hard bug. Use for reviews and high-impact judgment calls.
 model: anthropic/claude-fable-5-1:high

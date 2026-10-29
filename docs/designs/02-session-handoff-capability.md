@@ -79,8 +79,10 @@ The handoff command should behave like this:
 8. once accepted, the extension creates a prepared child session containing only a native session header with `parentSession`
 9. the extension packages the approved handoff payload into `PI_SESSIONS_HANDOFF_BOOTSTRAP` as base64-encoded JSON, including the target child session id
 10. the child session is activated:
-   - plain `/handoff <goal>` switches into the prepared child session in-process
-   - split-pane handoff invokes Ghostty's AppleScript split API via `/usr/bin/osascript` to launch a fresh `pi --session <full-uuid>` in the new pane
+
+- plain `/handoff <goal>` switches into the prepared child session in-process
+- split-pane handoff invokes Ghostty's AppleScript split API via `/usr/bin/osascript` to launch a fresh `pi --session <full-uuid>` in the new pane
+
 11. on child-session start, the extension consumes the bootstrap env var, validates that the target session is still fresh, appends durable handoff metadata, and sends the approved handoff prompt as the first user message
 
 This keeps the current session alive when the user asks for a background handoff, while still making the new session visibly real rather than pretending the old UI simply continued.
@@ -138,16 +140,20 @@ Recommended draft shape:
 Continuing work from session <canonical reference>. When you lack specific information you can use `session_ask` to get it.
 
 ## Task
+
 <nextTask or user goal>
 
 ## Relevant Files
+
 - path/to/file
 - path/to/other
 
 ## Context
+
 <summary>
 
 ## Open Questions
+
 - ...
 ```
 
@@ -220,8 +226,8 @@ Recommended `session_ask` evolution:
 ```ts
 session_ask({
   session: string, // absolute path, raw session id, or canonical handoff ref
-  question: string
-})
+  question: string,
+});
 ```
 
 The public form should just be `session`.

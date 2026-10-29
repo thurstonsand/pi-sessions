@@ -36,7 +36,7 @@ description = "Lint"
 depends = ["lint:*"]
 
 [tasks."lint:biome"]
-description = "Lint TypeScript and JSON"
+description = "Lint TypeScript, JSON and Markdown"
 run = "biome check ."
 
 [tasks."lint:actions"]

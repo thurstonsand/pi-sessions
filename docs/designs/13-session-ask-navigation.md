@@ -41,7 +41,7 @@ The durable shape of a session is not a flat transcript. It is a tree. The usefu
 The caller invokes:
 
 ```ts
-session_ask({ session: string, question: string })
+session_ask({ session: string, question: string });
 ```
 
 The extension resolves the target session using the session index, then starts the navigation sub-agent. The returned answer remains markdown text, with optional relevant-file metadata in tool details.
@@ -74,23 +74,26 @@ A Conversation Span is a contiguous section of a root-to-leaf conversation path 
 
 Spans render as:
 
-```md
+````md
 #### Span (startEntryId, endEntryId) (on_active_branch)
+
 - branches_to: nextStart | otherNextStart
 - entries: 42
 - last_activity: 2026-07-04T12:34:56.000Z
 - first_user_message:
-  ````md
+
+  ```md
   ...
-  ````
+  ```
 - branch_summary:
   entry: abc123
   timestamp: ...
   content:
-    ````md
-    ...
-    ````
-```
+
+  ```md
+  ...
+  ```
+````
 
 The start id is a read anchor. The end id is the `pathTarget` for reading that span. `branches_to` lists the next span starts; multiple values indicate a fork. `on_active_branch` marks membership in the current live path, while shared trunk spans may both be active and branch to abandoned spans.
 
@@ -102,18 +105,19 @@ This is `O(spans)`, not `O(entries)`. Precise entry ids are discovered through `
 
 Searches the target session through the session index and returns entry-level hits. Model-facing output is formatted for navigation:
 
-```md
+````md
 ### entryId
+
 source_kind: assistant_text
 timestamp: ...
 size: 1234
 branches: leafId*
 span: (spanStart, spanEnd) on_active_branch; before 7; after 2
 snippet:
-````
-...
-````
 ```
+...
+```
+````
 
 Rank is kept in structured details, not shown to the model. Hits include branch membership and containing-span context so the sub-agent can choose safe `before`/`after` windows.
 

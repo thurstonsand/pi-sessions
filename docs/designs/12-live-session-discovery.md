@@ -93,7 +93,7 @@ If the messaging extension is not active or the broker is unreachable, `live: tr
 
 Message payloads carry bare ids. On delivery — before writing the durable receipt — the receiver looks up the source's name and cwd in the session index and writes them into the receipt entry. The receiver already opens the index per incoming message for the lineage relation (`getCachedRelationTo(source, true)`); the metadata lookup rides the same access.
 
-This keeps two properties that pure-id receipts would lose: the session file stays self-contained (a receipt is readable years later without an index), and the recorded name is the name *at delivery time* — fresher than today's registration-time snapshot, and honest as a historical record.
+This keeps two properties that pure-id receipts would lose: the session file stays self-contained (a receipt is readable years later without an index), and the recorded name is the name _at delivery time_ — fresher than today's registration-time snapshot, and honest as a historical record.
 
 Tradeoff: delivery display gains an index dependency. A source unknown to the index degrades to a bare session id in the receipt and the rendered message. Sessions are indexed at `session_start`, so this gap is nearly nil in practice.
 
@@ -107,7 +107,7 @@ The session reference picker already computes this same map for its markers and 
 
 No protocol versioning, no dual-shape parsing, no shims. The old broker process is killed by hand. Pending receipts written in the old payload shape are silently skipped by the existing `safeParseTypeBoxValue` replay path — an accepted, bounded loss (undelivered messages from before the upgrade, in a single-user system).
 
-The one ordering consequence: the broker shrink lands *after* `session_list_live` is deleted, so no phase ships a tool whose output degraded under it. See the implementation plan.
+The one ordering consequence: the broker shrink lands _after_ `session_list_live` is deleted, so no phase ships a tool whose output degraded under it. See the implementation plan.
 
 ## Edge Cases & Failure Modes
 

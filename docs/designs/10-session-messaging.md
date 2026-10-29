@@ -59,7 +59,7 @@ Lists every other reachable session registered with the local broker.
 Parameters:
 
 ```ts
-session_list_live()
+session_list_live();
 ```
 
 Semantics:
@@ -80,9 +80,9 @@ Representative result shape:
       sessionId: "...",
       sessionName: "Research thread",
       cwd: "/path/to/repo",
-      relation: "child"
-    }
-  ]
+      relation: "child",
+    },
+  ];
 }
 ```
 
@@ -256,7 +256,7 @@ Why:
 
 Before calling `pi.sendMessage`, the recipient appends a non-context custom entry:
 
-```ts
+```text
 pi-sessions.message_received
 ```
 
@@ -265,10 +265,10 @@ That receipt contains the full message payload and metadata. If appending the re
 Then the recipient calls `pi.sendMessage` with a model-visible custom message:
 
 ```ts
-customType: "pi-sessions.session_message"
-content: "Incoming message from session ..."
-display: true
-details: fullMetadata
+customType: "pi-sessions.session_message";
+content: "Incoming message from session ...";
+display: true;
+details: fullMetadata;
 ```
 
 Why:
@@ -323,7 +323,7 @@ The model-visible prompt should stay small: source title when present, source UU
 
 After broker acknowledgement, the sender appends:
 
-```ts
+```text
 pi-sessions.message_sent
 ```
 
@@ -376,8 +376,8 @@ Reconnect is silent in v1. If the broker is down when an agent calls `session_li
 Tool implementations should not think in terms of broker connections. They should call a `SessionMessagingService` surface:
 
 ```ts
-listLiveSessions(ctx)
-sendMessage(ctx, params)
+listLiveSessions(ctx);
+sendMessage(ctx, params);
 ```
 
 The service owns broker connectivity as an internal detail:

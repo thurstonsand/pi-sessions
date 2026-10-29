@@ -43,14 +43,14 @@ The grammar from design doc 11 is unchanged. One concept is added on top of it:
 
 Worked examples:
 
-| Query | Strict (unchanged) | Relaxed pass |
-| --- | --- | --- |
-| `bar baz fud` | `bar AND baz AND fud` | `bar OR baz OR fud` |
-| `foo AND bar baz fud` | `foo AND bar AND baz AND fud` | `foo AND (bar OR baz OR fud)` |
-| `foo AND bar baz -fud` | same, excluding sessions matching `fud` | `foo AND (bar OR baz)`, same exclusion |
-| `foo AND bar -baz fud` | two single-term runs | not relaxable — strict only |
-| `"session search" ranking cleanup` | phrase AND `ranking` AND `cleanup` | phrase AND (`ranking` OR `cleanup`) |
-| `(a b) OR c` | `(a AND b) OR c` | `(a OR b) OR c` |
+| Query                              | Strict (unchanged)                      | Relaxed pass                           |
+| ---------------------------------- | --------------------------------------- | -------------------------------------- |
+| `bar baz fud`                      | `bar AND baz AND fud`                   | `bar OR baz OR fud`                    |
+| `foo AND bar baz fud`              | `foo AND bar AND baz AND fud`           | `foo AND (bar OR baz OR fud)`          |
+| `foo AND bar baz -fud`             | same, excluding sessions matching `fud` | `foo AND (bar OR baz)`, same exclusion |
+| `foo AND bar -baz fud`             | two single-term runs                    | not relaxable — strict only            |
+| `"session search" ranking cleanup` | phrase AND `ranking` AND `cleanup`      | phrase AND (`ranking` OR `cleanup`)    |
+| `(a b) OR c`                       | `(a AND b) OR c`                        | `(a OR b) OR c`                        |
 
 ## Design Decisions
 
@@ -64,7 +64,7 @@ In the cross-session `searchSessions` path the chunk query overfetches (`max(200
 
 ### 2. The adjacency run is the only relaxable unit
 
-Explicit syntax is a contract. Anything the caller wrote deliberately — quoted terms and phrases, `AND`, `OR`, negation — is never loosened; only bare adjacent terms relax. A run is a *maximal sequence of consecutive unquoted terms*: any non-plain token terminates it. This single rule yields the intuitive readings verified during design (see worked examples), including that a negation splits its neighbors into separate runs and that `foo AND bar -baz fud` is not relaxable at all.
+Explicit syntax is a contract. Anything the caller wrote deliberately — quoted terms and phrases, `AND`, `OR`, negation — is never loosened; only bare adjacent terms relax. A run is a _maximal sequence of consecutive unquoted terms_: any non-plain token terminates it. This single rule yields the intuitive readings verified during design (see worked examples), including that a negation splits its neighbors into separate runs and that `foo AND bar -baz fud` is not relaxable at all.
 
 Consequences worth noting:
 

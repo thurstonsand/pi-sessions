@@ -104,8 +104,8 @@ Add a new follow-up analysis tool:
 ```ts
 session_ask({
   sessionPath: string,
-  question: string // required, non-empty
-})
+  question: string, // required, non-empty
+});
 ```
 
 Recommended v1 behavior for `session_ask`:

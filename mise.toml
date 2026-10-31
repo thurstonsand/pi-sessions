@@ -8,7 +8,7 @@ enter = "mise bootstrap --yes --quiet"
 
 [tools]
 hk = "2.8.1"
-node = "24"
+node = "26"
 
 [env]
 HK_MISE = "1"
@@ -56,7 +56,7 @@ run = "git diff --exit-code -- dist"
 [tasks.renovate]
 description = "Run Renovate"
 run = "PATH=\"{{ tools.node.path }}/bin:$PATH\" renovate"
-tools.node = "24"
+tools.node = "26"
 tools."npm:renovate" = { version = "44.180.0", allow_builds = [
   "re2",
 ], trust_policy_excludes = [
@@ -66,7 +66,7 @@ tools."npm:renovate" = { version = "44.180.0", allow_builds = [
 [tasks."lint:renovate"]
 description = "Validate Renovate configuration"
 run = "PATH=\"{{ tools.node.path }}/bin:$PATH\" renovate-config-validator renovate.json"
-tools.node = "24"
+tools.node = "26"
 tools."npm:renovate" = { version = "44.180.0", allow_builds = [
   "re2",
 ], trust_policy_excludes = [

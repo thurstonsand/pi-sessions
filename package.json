@@ -16,7 +16,7 @@
     "pi-package"
   ],
   "engines": {
-    "node": ">=24 <26"
+    "node": ">=24 <27"
   },
   "files": [
     "dist",

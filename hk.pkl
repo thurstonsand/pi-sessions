@@ -1,33 +1,23 @@
 amends "package://github.com/jdx/hk/releases/download/v2.10.0/hk@2.10.0#/Config.pkl"
-
 import "package://github.com/jdx/hk/releases/download/v2.10.0/hk@2.10.0#/Builtins.pkl"
 
 local linters = new Mapping<String, Step> {
-  ["biome"] = (Builtins.biome) {
-    // The builtin leaves out Markdown and YAML, which Biome formats here too
-    glob = List("**/*.js", "**/*.ts", "**/*.json", "**/*.md", "**/*.yml")
-  }
-  ["jactionlint"] = Builtins.jactionlint
-  // pi tracks main for git installs, so every commit must carry a dist/ that matches its source
-  ["broker"] {
-    glob = List("extensions/**/*.ts", "tsconfig.broker.json", "dist/**")
-    check = "mise run build:broker && git diff --exit-code -- dist"
-  }
-  ["renovate"] {
-    glob = "renovate.json"
-    check = "mise run lint:renovate"
-  }
+    ["jactionlint"] = Builtins.jactionlint
 }
 
 hooks {
-  ["pre-commit"] {
-    steps = linters
-  }
-  ["check"] {
-    steps = linters
-  }
-  ["fix"] {
-    fix = true
-    steps = linters
-  }
+    ["pre-commit"] {
+        steps {
+            ["lint"] {
+                check = "mise run lint"
+                exclusive = true
+            }
+        }
+    }
+    ["check"] {
+        steps = linters
+    }
+    ["fix"] {
+        steps = linters
+    }
 }

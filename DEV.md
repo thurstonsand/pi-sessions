@@ -17,6 +17,7 @@ mise run build:broker
 mise run check      # full verification gate
 mise run smoke      # isolated real Pi/tmux integration; see SMOKE.md
 mise run bench      # repeatable indexing/search/hook measurements; see SMOKE.md
+mise run release X.Y.Z  # cut a release from a green main; see docs/release.md
 ```
 
 Single test file:

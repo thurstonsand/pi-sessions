@@ -4,31 +4,22 @@ How `pi-sessions` is released to npm. This is the human companion to the `npm-re
 
 ## Release model
 
-`pi-sessions` publishes to npm from GitHub Actions when a stable `vX.Y.Z` tag is pushed. `.github/workflows/release.yml` runs CI, sets the package version from the tag, packs the package, and publishes it with the `latest` dist-tag through npm Trusted Publishing (OIDC). There is no manual `npm publish`.
+`package.json` on `main` carries the version of the newest release, and `CHANGELOG.md`'s newest `## [X.Y.Z] - YYYY-MM-DD` section matches it. Changes waiting for a release collect under `## [Unreleased]` at the top. `mise run lint:changelog`, part of `mise run check` and CI, fails when a heading is neither of those two forms, when versions do not strictly descend, or when the newest release is not `package.json`'s version.
 
-`package.json`'s version is never bumped locally. The tag is the sole source of truth: CI sets the version from the tag (`npm version "${GITHUB_REF_NAME#v}"`) in its own ephemeral checkout, and that bump is never committed back to `main`.
+Pi reads both: for git and npm installs alike, it compares `package.json`'s version with the one it last saw and shows the newer `CHANGELOG.md` sections after an update. `CHANGELOG.md` ships in the npm package for that reason.
+
+`mise run release X.Y.Z` cuts a release, and pushing its `vX.Y.Z` tag starts `.github/workflows/release.yml`. That workflow first checks that the tag, `package.json` and the changelog's newest section name the same version, then runs CI, packs the package and publishes it with the `latest` dist-tag and provenance through npm Trusted Publishing (OIDC). CI never commits. There is no manual `npm publish`.
 
 ## Release flow
 
-1. Add a new `## [X.Y.Z] - YYYY-MM-DD` entry to the top of `CHANGELOG.md`.
-2. Verify locally with `mise run check` and `npm pack --dry-run`; confirm the package contains `dist/session-messaging/broker/process.js`.
-3. Commit the release prep.
-4. Push `main`.
-5. Create an annotated `vX.Y.Z` tag using the matching `CHANGELOG.md` entry as the tag body.
-6. Push the tag.
-7. The `Release` workflow runs CI, sets the package version from the tag, packs, and publishes to npm.
-
-## Release note extraction
-
-Use the helper script to extract the exact changelog entry for the git tag body:
-
-```bash
-VERSION=X.Y.Z
-scripts/extract-release-notes.sh "v${VERSION}" > "/tmp/pi-sessions-v${VERSION}-notes.md"
-git tag -a "v${VERSION}" --cleanup=verbatim -F "/tmp/pi-sessions-v${VERSION}-notes.md"
-git push origin main
-git push origin "v${VERSION}"
-```
+1. Collect the release notes under `## [Unreleased]` in `CHANGELOG.md`, push them to `main`, and wait for CI to pass.
+2. Run `mise run release X.Y.Z`. It refuses unless it runs on `main` with a clean tree that matches `origin/main`, CI on `HEAD` passed, `## [Unreleased]` has entries, and `X.Y.Z` is newer than `package.json`'s version. Then it:
+   - moves the Unreleased entries under `## [X.Y.Z] - <today>` and leaves an empty `## [Unreleased]`;
+   - writes `X.Y.Z` into `package.json` and `package-lock.json`;
+   - commits `chore(release): X.Y.Z`;
+   - creates the annotated tag `vX.Y.Z`, whose body is that changelog section from `scripts/extract-release-notes.sh`;
+   - pushes `main` and the tag together.
+3. The `Release` workflow checks the version, runs CI, packs, and publishes to npm.
 
 ## Notes
 

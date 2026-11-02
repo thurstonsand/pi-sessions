@@ -1,6 +1,6 @@
 {
   "name": "pi-sessions",
-  "version": "0.6.0",
+  "version": "0.22.0",
   "type": "module",
   "description": "Pi session search, ask, handoff, messaging, auto-titling, and indexing tools",
   "license": "MIT",
@@ -19,6 +19,7 @@
     "node": ">=24"
   },
   "files": [
+    "CHANGELOG.md",
     "dist",
     "extensions",
     "images"
@@ -26,8 +27,7 @@
   "pi": {
     "extensions": [
       "./extensions/pi-sessions.ts"
-    ],
-    "changelogPath": ""
+    ]
   },
   "scripts": {
     "build:broker": "mise run build:broker",

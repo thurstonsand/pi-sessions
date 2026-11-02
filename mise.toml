@@ -46,6 +46,10 @@ run = "biome check ."
 description = "Lint GitHub Actions workflows"
 run = "hk check --all --step jactionlint"
 
+[tasks."lint:changelog"]
+description = "Verify CHANGELOG.md's headings and that its newest release is package.json's version"
+run = "node scripts/check-changelog.ts"
+
 [tasks."lint:broker"]
 description = "Verify the committed broker build matches its source"
 depends = ["build:broker"]
@@ -76,6 +80,11 @@ tools."npm:renovate" = { version = "44.198.2", allow_builds = [
 ], trust_policy_excludes = [
   "@yarnpkg/libzip@3.2.2",
 ] }
+
+[tasks.release]
+description = "Release X.Y.Z from a green main: date the Unreleased changelog section, set the version, commit, tag and push"
+usage = 'arg "<version>" help="The version to release, as X.Y.Z"'
+run = 'scripts/release.sh "${usage_version}"'
 
 [tasks.format]
 description = "Format and apply safe fixes"

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Pi 1.5 shows pi-sessions' release notes after an update, including for git installs.
+
 ### Changed
 
 - Node 26 is supported: `engines` is now `>=24`.

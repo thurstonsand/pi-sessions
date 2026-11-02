@@ -2,6 +2,13 @@
 
 <!-- markdownlint-disable MD024 -->
 
+## [Unreleased]
+
+### Changed
+
+- Node 26 is supported: `engines` is now `>=24`.
+- Updated Pi development dependencies to 1.5.0.
+
 ## [0.22.0] - 2026-10-26
 
 ### Added

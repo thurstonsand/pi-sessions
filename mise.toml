@@ -8,7 +8,9 @@ enter = "mise bootstrap --yes --quiet"
 
 [tools]
 hk = "2.10.0"
+jactionlint = "2.4.0"
 node = "26"
+shellcheck = "0.11.0"
 
 [env]
 HK_MISE = "1"
@@ -32,22 +34,8 @@ description = "Compile the detached messaging broker into dist/"
 run = "tsc --project tsconfig.broker.json"
 
 [tasks.lint]
-description = "Lint"
-depends = ["lint:*"]
-
-[tasks."lint:biome"]
-description = "Lint TypeScript, JSON and Markdown"
-run = "biome check ."
-
-[tasks."lint:actions"]
-description = "Lint GitHub Actions workflows"
-run = "actionlint"
-tools.actionlint = "1.7.12"
-
-[tasks."lint:broker"]
-description = "Verify the committed broker build matches its source"
-depends = ["build:broker"]
-run = "git diff --exit-code -- dist"
+description = "Run hk's checks: Biome, jactionlint, the committed broker build and Renovate's config"
+run = "hk check --all"
 
 # Renovate's bin shim ends in `exec node`, and mise builds a task's PATH from the shell's
 # pre-activation ordering, which on a Homebrew machine starts at /opt/homebrew/bin -- ahead of the
@@ -77,7 +65,7 @@ tools."npm:renovate" = { version = "44.198.2", allow_builds = [
 
 [tasks.format]
 description = "Format and apply safe fixes"
-run = "biome check --write ."
+run = "hk fix --all"
 
 [tasks.typecheck]
 description = "Type-check TypeScript"

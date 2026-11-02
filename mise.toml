@@ -50,6 +50,15 @@ run = "hk check --all --step jactionlint"
 description = "Verify CHANGELOG.md's headings and that its newest release is package.json's version"
 run = "node scripts/check-changelog.ts"
 
+# `npm ci` installs what the lockfile says without re-resolving it, so a lockfile npm can no longer
+# resolve still passes CI; Renovate and bootstrap run the resolver and would hit ERESOLVE.
+[tasks."lint:lockfile"]
+description = "Verify npm still resolves package.json to the committed lockfile"
+run = [
+  "npm install --package-lock-only --ignore-scripts --no-audit --no-fund",
+  "git diff --exit-code package-lock.json",
+]
+
 [tasks."lint:broker"]
 description = "Verify the committed broker build matches its source"
 depends = ["build:broker"]

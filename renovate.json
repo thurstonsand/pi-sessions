@@ -6,6 +6,7 @@
     ":configMigration",
     ":maintainLockFilesWeekly",
     "abandonments:recommended",
+    "helpers:pinGitHubActionDigests",
     ":enableVulnerabilityAlertsWithAdditionalLabel(security)"
   ],
   "dependencyDashboard": true,

@@ -4,9 +4,7 @@ on:
   push:
     tags: ["v*"]
 
-permissions:
-  contents: read
-  id-token: write
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,21 +14,26 @@ jobs:
   ci:
     name: CI
     uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
 
   publish-npm:
     name: Publish npm package
     needs: ci
     runs-on: ubuntu-latest
     environment: npm
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
-          cache: npm
           registry-url: https://registry.npmjs.org
 
       - name: Set package version from tag

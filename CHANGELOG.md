@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-11-02
+
 ### Added
 
 - Pi 1.5 shows pi-sessions' release notes after an update, including for git installs.

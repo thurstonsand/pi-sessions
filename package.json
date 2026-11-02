@@ -26,7 +26,8 @@
   "pi": {
     "extensions": [
       "./extensions/pi-sessions.ts"
-    ]
+    ],
+    "changelogPath": ""
   },
   "scripts": {
     "build:broker": "mise run build:broker",

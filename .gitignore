@@ -1,5 +1,6 @@
 node_modules/
-.mise/
+.mise/*
+!.mise/locks/
 .amp/portals/*
 .DS_Store
 

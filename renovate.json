@@ -60,10 +60,9 @@
       "allowedVersions": "<25"
     },
     {
-      "description": "Renovate itself supports only Node 24 (engines `^24.11.0`), so the node its mise tasks run on waits for Renovate rather than following the project toolchain. Raise the ceiling, and the `mise where` in those tasks, when Renovate's engines move.",
-      "matchManagers": ["mise"],
-      "matchDepTypes": ["task-renovate-tools", "task-lint:renovate-tools"],
-      "matchDepNames": ["node"],
+      "description": "Renovate supports only Node 24 (its engines say ^24.11), so the toolset its own tasks run in stays there while the repo moves on",
+      "matchFileNames": ["mise.renovate.toml"],
+      "matchPackageNames": ["node"],
       "allowedVersions": "<25"
     },
     {

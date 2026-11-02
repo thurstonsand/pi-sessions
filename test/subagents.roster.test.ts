@@ -198,8 +198,14 @@ function createFixture(options?: {
         }
         const childId = options?.windowChildId;
         return childId
-          ? { code: 0, stdout: `@1\tChild\t${childId}\n`, stderr: "", killed: false }
-          : { code: 1, stdout: "", stderr: "can't find session", killed: false };
+          ? {
+              code: 0,
+              stdout: `@1\tChild\t${childId}\n`,
+              stderr: "",
+              killed: false,
+              truncated: false,
+            }
+          : { code: 1, stdout: "", stderr: "can't find session", killed: false, truncated: false };
       }),
     },
     {},

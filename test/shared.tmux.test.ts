@@ -11,12 +11,19 @@ import {
   tmuxSessionName,
 } from "../extensions/shared/tmux.ts";
 
-const ok = (stdout = ""): ExecResult => ({ stdout, stderr: "", code: 0, killed: false });
+const ok = (stdout = ""): ExecResult => ({
+  stdout,
+  stderr: "",
+  code: 0,
+  killed: false,
+  truncated: false,
+});
 const missing = (): ExecResult => ({
   stdout: "",
   stderr: "can't find session: pi-deadbeef",
   code: 1,
   killed: false,
+  truncated: false,
 });
 
 describe("tmux substrate", () => {
@@ -53,7 +60,13 @@ describe("tmux substrate", () => {
   it.each(["server exited unexpectedly", "no current target"])(
     "treats a server shutting down with `%s` as having no session",
     async (stderr) => {
-      const vanishing = (): ExecResult => ({ stdout: "", stderr, code: 1, killed: false });
+      const vanishing = (): ExecResult => ({
+        stdout: "",
+        stderr,
+        code: 1,
+        killed: false,
+        truncated: false,
+      });
       const executor = fakeExecutor(vanishing(), vanishing(), vanishing(), missing());
 
       await expect(listTmuxWindows(executor, "pi-deadbeef")).resolves.toEqual([]);
@@ -263,6 +276,7 @@ function statefulExecutor(): TmuxExecutor & { commands: string[] } {
               stderr: "duplicate session: pi-88171ce49021",
               code: 1,
               killed: false,
+              truncated: false,
             };
           }
           sessionExists = true;

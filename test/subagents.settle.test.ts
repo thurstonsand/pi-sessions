@@ -38,6 +38,7 @@ describe("settled child recovery", () => {
               stdout: orphanExists ? "@1\tOrphan\torphan\n" : "",
               stderr: "",
               killed: false,
+              truncated: false,
             };
           }
           if (args[0] === "kill-window") {
@@ -46,7 +47,7 @@ describe("settled child recovery", () => {
             });
             orphanExists = false;
           }
-          return { code: 0, stdout: "", stderr: "", killed: false };
+          return { code: 0, stdout: "", stderr: "", killed: false, truncated: false };
         }),
       };
       const parent = {

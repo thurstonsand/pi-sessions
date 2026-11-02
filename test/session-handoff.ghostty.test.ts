@@ -133,8 +133,14 @@ describe("ghostty launch backend", () => {
   it("falls back to the focused terminal when a stored id fails", async () => {
     const pi = createPiApi();
     (pi.exec as ReturnType<typeof vi.fn>)
-      .mockResolvedValueOnce({ stdout: "", stderr: "no such terminal", code: 1, killed: false })
-      .mockResolvedValueOnce({ stdout: "", stderr: "", code: 0, killed: false });
+      .mockResolvedValueOnce({
+        stdout: "",
+        stderr: "no such terminal",
+        code: 1,
+        killed: false,
+        truncated: false,
+      })
+      .mockResolvedValueOnce({ stdout: "", stderr: "", code: 0, killed: false, truncated: false });
     const backend = createGhosttyLaunchBackend(pi as never, {
       direction: "right",
       terminalId: "terminal-123",
@@ -195,6 +201,7 @@ function createPiApi(result?: { code?: number; stdout?: string; stderr?: string 
       stderr: result?.stderr ?? "",
       code: result?.code ?? 0,
       killed: false,
+      truncated: false,
     }),
   };
 }

@@ -59,6 +59,13 @@
       "allowedVersions": "<25"
     },
     {
+      "description": "Renovate itself supports only Node 24 (engines `^24.11.0`), so the node its mise tasks run on waits for Renovate rather than following the project toolchain. Raise the ceiling, and the `mise where` in those tasks, when Renovate's engines move.",
+      "matchManagers": ["mise"],
+      "matchDepTypes": ["task-renovate-tools", "task-lint:renovate-tools"],
+      "matchDepNames": ["node"],
+      "allowedVersions": "<25"
+    },
+    {
       "description": "Pi releases land as soon as they ship. Extensions run inside whatever pi the user has installed, so our types and smoke tests must track the newest release rather than wait out the npm release-age gate. Bumping raises the package.json floor too, so the declared range names the pi we actually build against.",
       "matchPackageNames": ["@earendil-works/**"],
       "minimumReleaseAge": null,

@@ -7,8 +7,8 @@ experimental = true
 enter = "mise bootstrap --yes --quiet"
 
 [tools]
-hk = "2.8.1"
-node = "24"
+hk = "2.10.0"
+node = "26"
 
 [env]
 HK_MISE = "1"
@@ -53,11 +53,13 @@ run = "git diff --exit-code -- dist"
 # pre-activation ordering, which on a Homebrew machine starts at /opt/homebrew/bin -- ahead of the
 # node this task declares. re2 is then compiled by mise's node and loaded by Homebrew's, which
 # fails the ABI check and downgrades regex validation to JavaScript RegExp with only a warning.
+# `{{ tools.node.path }}` names the project's node rather than this task's, and Renovate supports
+# only Node 24, so the PATH entry names the task's node directly.
 [tasks.renovate]
 description = "Run Renovate"
-run = "PATH=\"{{ tools.node.path }}/bin:$PATH\" renovate"
+run = "PATH=\"$(mise where node@24)/bin:$PATH\" renovate"
 tools.node = "24"
-tools."npm:renovate" = { version = "44.180.0", allow_builds = [
+tools."npm:renovate" = { version = "44.198.2", allow_builds = [
   "re2",
 ], trust_policy_excludes = [
   "@yarnpkg/libzip@3.2.2",
@@ -65,9 +67,9 @@ tools."npm:renovate" = { version = "44.180.0", allow_builds = [
 
 [tasks."lint:renovate"]
 description = "Validate Renovate configuration"
-run = "PATH=\"{{ tools.node.path }}/bin:$PATH\" renovate-config-validator renovate.json"
+run = "PATH=\"$(mise where node@24)/bin:$PATH\" renovate-config-validator renovate.json"
 tools.node = "24"
-tools."npm:renovate" = { version = "44.180.0", allow_builds = [
+tools."npm:renovate" = { version = "44.198.2", allow_builds = [
   "re2",
 ], trust_policy_excludes = [
   "@yarnpkg/libzip@3.2.2",
@@ -96,9 +98,11 @@ description = "Drive a real headless Herdr server through the worker runtime"
 run = "vitest run --config vitest.smoke.config.ts test/smoke/herdr.smoke.ts"
 tools."github:herdrdev/herdr" = "0.9.5"
 
+# Node 26 only strips types, and the extension code uses parameter properties, so the benchmark
+# loads it through jiti, the loader Pi itself runs extensions with.
 [tasks.bench]
 description = "Benchmark reindex, search and incremental hooks without writing live state"
-run = "PATH=\"{{ tools.node.path }}/bin:$PATH\" node --experimental-transform-types scripts/benchmark.ts"
+run = "PATH=\"{{ tools.node.path }}/bin:$PATH\" jiti scripts/benchmark.ts"
 
 [tasks.check]
 description = "Run full verification"

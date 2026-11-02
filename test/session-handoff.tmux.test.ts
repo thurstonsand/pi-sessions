@@ -103,6 +103,7 @@ function createPiApi(result?: { code: number; stderr: string }): ExtensionAPI {
       stderr: result?.stderr ?? "",
       code: result?.code ?? 0,
       killed: false,
+      truncated: false,
     }),
   } as never;
 }

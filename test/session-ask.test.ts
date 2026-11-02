@@ -149,6 +149,7 @@ describe("shouldMessageSubagent", () => {
         stdout: window ? `@1\tchild\t${childId}\n` : "",
         stderr: "",
         killed: false,
+        truncated: false,
       })),
     };
     const runtime = createTmuxWorkerRuntime(executor);

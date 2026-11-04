@@ -3,6 +3,7 @@ import { defineTool, type ExtensionAPI, type SessionEntry } from "@earendil-work
 import type { HandoffSubagent } from "../session-handoff/metadata.ts";
 import type { MessagingHandle } from "../session-messaging/install.ts";
 import { formatError } from "../shared/errors.ts";
+import { renderToolNameCall } from "../shared/rendering/tool-name-call.ts";
 import {
   type SessionSubagentReportEnvelope,
   TASK_REPORT_SCHEMA,
@@ -48,6 +49,7 @@ export function createSubmitTaskReportTool(
       "Call submit_task_report exactly once as the final tool call for every delegated task or follow-up that expects a response.",
     ],
     parameters: TASK_REPORT_SCHEMA,
+    renderCall: renderToolNameCall("submit_task_report"),
     async execute(_toolCallId, params) {
       const session = getSession();
       if (!session) {
@@ -64,7 +66,7 @@ export function createSubmitTaskReportTool(
         summary,
         ...(params.details ? { details: params.details } : {}),
         ...(params.references ? { references: params.references } : {}),
-        ...(params.nextSteps ? { nextSteps: params.nextSteps } : {}),
+        ...(params.next_steps ? { next_steps: params.next_steps } : {}),
       };
       pi.appendEntry(SUBAGENT_REPORT_CUSTOM_TYPE, durableReport);
 
@@ -123,7 +125,7 @@ export function buildIncomingSubagentReport(
     summary: envelope.summary,
     ...(envelope.details ? { details: envelope.details } : {}),
     ...(envelope.references ? { references: envelope.references } : {}),
-    ...(envelope.nextSteps ? { nextSteps: envelope.nextSteps } : {}),
+    ...(envelope.next_steps ? { next_steps: envelope.next_steps } : {}),
     provenance: "live",
   };
   return {
@@ -149,8 +151,8 @@ export function formatReportForModel(title: string, report: SubagentReportMessag
     );
     sections.push(`References\n\n${references.join("\n")}`);
   }
-  if (report.nextSteps?.length) {
-    sections.push(`Next steps\n\n${report.nextSteps.map((step) => `- ${step}`).join("\n")}`);
+  if (report.next_steps?.length) {
+    sections.push(`Next steps\n\n${report.next_steps.map((step) => `- ${step}`).join("\n")}`);
   }
   return sections.join("\n\n");
 }

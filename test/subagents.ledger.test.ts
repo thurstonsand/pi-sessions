@@ -7,6 +7,7 @@ import {
   SUBAGENT_CLOSED_CUSTOM_TYPE,
   SUBAGENT_DISOWNED_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
+  SUBAGENT_REPORT_CUSTOM_TYPE,
   SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
   SUBAGENT_REPORT_REMINDER_MESSAGE_CUSTOM_TYPE,
@@ -55,6 +56,38 @@ describe("subagent ledgers", () => {
     expect(ledger.suspendedChildIds).not.toContain(childId);
     expect(ledger.receivedReportIds).toContain("report-1");
     expect(ledger.deliveredReportIds).toContain("report-1");
+  });
+
+  it("reads launches and reports written before the snake_case rename", () => {
+    const ledger = collectParentLedger(
+      [
+        customEntry(SUBAGENT_LAUNCHED_CUSTOM_TYPE, {
+          writerSessionId: ownerId,
+          childSessionId: childId,
+          childSessionFile: "/tmp/child.jsonl",
+          title: "Child",
+          goal: "Work",
+          requestResponse: true,
+          cwd: "/repo",
+          resumeCommand: "resume",
+          depth: 1,
+        }),
+      ],
+      ownerId,
+    );
+    const lifecycle = getChildSubagentLifecycle([
+      customEntry(SUBAGENT_REPORT_CUSTOM_TYPE, {
+        reportId: "old-report",
+        status: "done",
+        summary: "Complete.",
+        nextSteps: ["Ship it."],
+      }),
+    ]);
+
+    expect(ledger.launches).toMatchObject([
+      { childSessionId: childId, briefing: "Work", reportBack: true },
+    ]);
+    expect(lifecycle.reports).toMatchObject([{ reportId: "old-report", next_steps: ["Ship it."] }]);
   });
 
   it("keeps legacy report messages without titles eligible for delivery deduplication", () => {
@@ -122,8 +155,8 @@ function launchEntry(
       childSessionId: childId,
       childSessionFile: "/tmp/child.jsonl",
       title,
-      goal: "Work",
-      requestResponse: true,
+      briefing: "Work",
+      reportBack: true,
       cwd: "/repo",
       resumeCommand: "resume",
       depth: 1,

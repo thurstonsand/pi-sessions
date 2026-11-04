@@ -3,8 +3,7 @@
 - **Pi Sessions**: The Pi extension package in this repo; manages recall, lineage, and coordination between Pi coding sessions.
 - **Current/active session**: The Pi session handling the current command, tool call, hook, or user prompt.
 - **Live session**: A Pi session with a currently running extension, registered with the message broker.
-- **Directory**: The set of sessions a caller may address, with list, resolve, send, cancel, and wake operations. The peer directory contains live user sessions; the subagent directory comes from the ledger/roster and owns worker wake and cancellation.
-- **Reachable session**: A session in the caller's directory. Peers must be live; dormant owned subagents wake on send.
+- **Directory**: The set of sessions a caller may address, with list, resolve, send, cancel, and wake operations. The peer directory contains live user sessions; the subagent directory comes from the ledger/roster, wakes dormant owned subagents on send, and owns worker cancellation.
 - **Message broker**: The singleton local process that owns live-session presence and routes messages between live sessions. It knows session ids only; all session metadata lives in the session index.
 - **Session lineage**: The self/parent/child family relationship between sessions, including ancestors, descendants, siblings, and related branches. Lineage comes from Pi's header, or a durable `pi-sessions.lineage` custom entry when the header has no parent, including children launched by another extension.
 - **Conversation branch**: A root-to-leaf path through a single session's entry tree. Rewinds produce multiple branches within one session.
@@ -16,7 +15,7 @@
 - **Session reference**: An `@session:<uuid>` token inserted into a prompt to refer to a specific prior session. Tools that consume the reference should use the bare UUID value.
 - **Session reference picker**: The interactive picker opened from the prompt editor to find a prior session and insert its session reference.
 - **Handoff**: A transfer of work from one session into a new child session using a generated prompt based on the current session's context.
-- **Host**: An external extension claiming peer ownership synchronously through `pi-sessions:hosts` with `{ name, peers: true, recall?: true }`. A claim suppresses pi-sessions' peer tools; optional recall ownership also suppresses `session_search` and `session_ask`, but never its index or subagent tools. Hosts do not provide pi-sessions launch/list/wake callbacks. Built-in split and deferred launches are backends, not registered hosts.
+- **Host**: An external extension claiming peer ownership synchronously through `pi-sessions:hosts` with `{ name, peers: true, recall?: true }`. A claim suppresses pi-sessions' peer tools; optional recall ownership also suppresses `session_search` and `session_recall`, but never its index or subagent tools. Hosts do not provide pi-sessions launch/list/wake callbacks. Built-in split and deferred launches are backends, not registered hosts.
 - **Background handoff**: A handoff launched while the current session keeps running.
 - **Deferred handoff**: A handoff that creates the child session without launching it; the resume command is returned (and copied to the clipboard) for the user to run anywhere.
 - **Subagent**: A child session created by a handoff for one delegated background task. It is **busy** while a stamped worker window exists (a tmux window, or a Herdr pane when the parent runs in Herdr) and **dormant** when no process runs and only the session file remains.

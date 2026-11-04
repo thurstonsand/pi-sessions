@@ -33,7 +33,7 @@ const SESSION_WAIT_POLL_MS = 100;
 export interface SendMessageRequest {
   target: string;
   body: string;
-  requestResponse?: boolean | undefined;
+  reportBack?: boolean | undefined;
   sourceToolCallId?: string | undefined;
 }
 
@@ -162,9 +162,7 @@ export class SessionMessagingService {
         kind: "message",
         messageId,
         body: request.body,
-        ...(request.requestResponse === undefined
-          ? {}
-          : { requestResponse: request.requestResponse }),
+        ...(request.reportBack === undefined ? {} : { reportBack: request.reportBack }),
         ...(request.sourceToolCallId === undefined
           ? {}
           : { sourceToolCallId: request.sourceToolCallId }),
@@ -199,7 +197,7 @@ export class SessionMessagingService {
         summary: request.summary,
         ...(request.details ? { details: request.details } : {}),
         ...(request.references ? { references: request.references } : {}),
-        ...(request.nextSteps ? { nextSteps: request.nextSteps } : {}),
+        ...(request.next_steps ? { next_steps: request.next_steps } : {}),
         sentAt: new Date().toISOString(),
       },
     });
@@ -245,9 +243,7 @@ export class SessionMessagingService {
       body: message.body,
       sentAt: message.sentAt,
       receivedAt: new Date().toISOString(),
-      ...(message.requestResponse === undefined
-        ? {}
-        : { requestResponse: message.requestResponse }),
+      ...(message.reportBack === undefined ? {} : { reportBack: message.reportBack }),
       ...(message.sourceToolCallId === undefined
         ? {}
         : { sourceToolCallId: message.sourceToolCallId }),

@@ -1,14 +1,11 @@
 import type { ExpandableContentPresentation } from "../../shared/rendering/expandable-content-layout.ts";
 import type { RenderTheme } from "../../shared/rendering/theme.ts";
-import type {
-  ReachableSessionRowViewModel,
-  SessionReachableViewModel,
-} from "./reachable-view-model.ts";
+import type { SessionListRowViewModel, SessionListViewModel } from "./list-view-model.ts";
 
 const COLLAPSED_ROW_COUNT = 6;
 
-export function buildSessionReachablePresentation(
-  model: SessionReachableViewModel,
+export function buildSessionListPresentation(
+  model: SessionListViewModel,
   theme: RenderTheme,
 ): ExpandableContentPresentation {
   const header = theme.fg(
@@ -32,7 +29,7 @@ export function buildSessionReachablePresentation(
   };
 }
 
-function formatRow(row: ReachableSessionRowViewModel, index: number, theme: RenderTheme): string {
+function formatRow(row: SessionListRowViewModel, index: number, theme: RenderTheme): string {
   const annotations =
     row.annotations.length > 0 ? ` ${theme.fg("dim", `[${row.annotations.join(" • ")}]`)}` : "";
   const location = row.location ? ` ${theme.fg("dim", `(${row.location})`)}` : "";
@@ -44,6 +41,6 @@ function formatSessionCount(count: number): string {
   return count === 1 ? "1 session" : `${count} sessions`;
 }
 
-function formatEmptyText(scope: SessionReachableViewModel["scope"]): string {
+function formatEmptyText(scope: SessionListViewModel["scope"]): string {
   return scope === "user" ? "No other live sessions." : "No subagents launched from this session.";
 }

@@ -4,16 +4,16 @@ import {
   findBranchesForEntry,
   loadSessionNavigationData,
   readEntriesFromEntry,
-} from "../extensions/session-ask/navigate.ts";
+} from "../extensions/session-recall/navigate.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
-const testFs = createTestFilesystem("pi-sessions-ask-navigation-");
+const testFs = createTestFilesystem("pi-sessions-recall-navigation-");
 
 afterEach(() => {
   testFs.cleanup();
 });
 
-describe("session ask navigation", () => {
+describe("session recall navigation", () => {
   it("reads forward on a selected branch from a shared trunk entry", () => {
     const root = testFs.createTempDir();
     const sessionPath = testFs.writeJsonlFile(root, "session.jsonl", [
@@ -57,7 +57,7 @@ describe("session ask navigation", () => {
     const branches = findBranchesForEntry(data, "user-1");
     const readResult = readEntriesFromEntry(data, {
       entryId: "user-1",
-      pathTargetEntryId: "assistant-a",
+      toEntryId: "assistant-a",
     });
 
     expect(branches.map((branch) => branch.branchLeafId).sort()).toEqual([
@@ -111,18 +111,18 @@ describe("session ask navigation", () => {
     const full = readEntriesFromEntry(data, {
       entryId: "long-tool-result",
       after: 0,
-      body: "full",
+      toolOutput: "whole",
     });
     const userPreview = preview.entries.find((entry) => entry.entryId === "long-user");
     const toolPreview = preview.entries.find((entry) => entry.entryId === "long-tool-result");
 
-    expect(userPreview?.body).toBe("preview");
+    expect(userPreview?.toolOutput).toBe("trimmed");
     expect(userPreview?.truncated).toBe(false);
-    expect(toolPreview?.body).toBe("preview");
+    expect(toolPreview?.toolOutput).toBe("trimmed");
     expect(toolPreview?.truncated).toBe(false);
     expect(toolPreview?.content).toContain("preview:");
     expect(toolPreview?.content.length).toBeLessThan(userPreview?.content.length ?? 0);
-    expect(full.entries[0]?.body).toBe("full");
+    expect(full.entries[0]?.toolOutput).toBe("whole");
     expect(full.entries[0]?.truncated).toBe(false);
     expect(full.entries[0]?.content.length).toBeGreaterThan(toolPreview?.content.length ?? 0);
   });
@@ -243,7 +243,7 @@ describe("session ask navigation", () => {
     expect(
       readEntriesFromEntry(data, {
         entryId: "branch-summary",
-        pathTargetEntryId: "branch-b-user",
+        toEntryId: "branch-b-user",
       }).entries.map((entry) => entry.entryId),
     ).toEqual(["branch-summary", "branch-b-user"]);
     expect(
@@ -259,7 +259,7 @@ describe("session ask navigation", () => {
       }).entries.map((entry) => entry.entryId),
     ).toEqual(["branch-a-user", "branch-a-leaf"]);
     expect(() => readEntriesFromEntry(data, { entryId: "branch-summary" })).toThrow(
-      "requires before/after or pathTarget",
+      "requires to, before, or after",
     );
     expect(() => readEntriesFromEntry(data, { entryId: "branch-summary", after: 2 })).toThrow(
       "crosses span boundary",

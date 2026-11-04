@@ -291,11 +291,11 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
 
     await parent.tool("write", { path: "fresh.txt", content: "SMOKE_FRESH_TOKEN" });
     const toolNames = startedTools(parentId);
-    for (const name of ["session_search", "session_ask"]) expect(toolNames).toContain(name);
+    for (const name of ["session_search", "session_recall"]) expect(toolNames).toContain(name);
     for (const name of [
-      "session_reachable",
+      "session_list",
       "session_send_message",
-      "session_cancel",
+      "session_cancel_turn",
       "session_handoff",
     ]) {
       expect(toolNames.includes(name)).toBe(
@@ -304,7 +304,7 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
     }
     if (hostTools) {
       expect(toolNames).toContain("session_launch");
-      expect((await parent.tool("session_reachable", {})).details).toEqual({ host: "fake-host" });
+      expect((await parent.tool("session_list", {})).details).toEqual({ host: "fake-host" });
     }
     for (const name of ["subagent_list", "subagent_send", "subagent_cancel", "subagent_launch"])
       expect(toolNames).toContain(name);
@@ -312,21 +312,21 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
     expect(JSON.stringify(search.details)).toContain(parentId);
     expect(readFileSync(join(cwd, "fresh.txt"), "utf8")).toBe("SMOKE_FRESH_TOKEN");
     if (!withHost) {
-      const reachable = await parent.tool("session_reachable", {});
-      expect(JSON.stringify(reachable.details)).toContain(peerId);
+      const peers = await parent.tool("session_list", {});
+      expect(JSON.stringify(peers.details)).toContain(peerId);
       const sent = await parent.tool("session_send_message", {
         session: peerId,
         message: "SMOKE_MESSAGE",
-        requestResponse: false,
+        report_back: false,
       });
       expect(sent.details).toMatchObject({ delivered: true });
     }
 
     const handoff = await parent.tool("subagent_launch", {
-      goal: "Report SMOKE_REPORT to the parent.",
+      briefing: "Report SMOKE_REPORT to the parent.",
       title: "Smoke worker",
       cwd: childCwd,
-      requestResponse: true,
+      report_back: true,
       ...(withHost ? {} : { agent: "smoke-reviewer" }),
     });
     const receipt = parseTypeBoxValue(
@@ -374,7 +374,7 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
     const followup = await parent.tool("subagent_send", {
       session: receipt.sessionId,
       message: "Report SMOKE_REPORT again.",
-      requestResponse: true,
+      report_back: true,
     });
     expect(followup.details).toMatchObject({ delivered: true });
     await waitFor("second report", () => (reports() === 2 ? true : undefined));
@@ -547,7 +547,7 @@ test.each(["fresh", "older", "newer", "failure"])(
         sessions: {
           search: { enable: false },
           hooks: { enable: false },
-          ask: { enable: false },
+          recall: { enable: false },
           handoff: { enable: false },
           subagents: { enable: false },
           autoTitle: { enable: false },
@@ -602,7 +602,7 @@ test.each(["fresh", "older", "newer", "failure"])(
         expect(ready.tools).not.toContain("session_search");
       }
       if (scenario === "newer") {
-        await Promise.all(sessions.map((session) => session.tool("session_reachable", {}, true)));
+        await Promise.all(sessions.map((session) => session.tool("session_list", {}, true)));
         for (const session of sessions) {
           const notices = session.events.filter(
             (event) =>
@@ -629,8 +629,8 @@ test.each(["fresh", "older", "newer", "failure"])(
         expect(failure.attempts).toBe(1);
         expect(failure.nextAllowedAt).toBeGreaterThan(Date.now() + 40_000);
         for (const session of sessions) {
-          await session.tool("session_reachable", {}, true);
-          await session.tool("session_reachable", {}, true);
+          await session.tool("session_list", {}, true);
+          await session.tool("session_list", {}, true);
         }
         expect(JSON.parse(readFileSync(record, "utf8"))).toEqual(failure);
         expect(publications).toEqual([]);
@@ -648,8 +648,8 @@ test.each(["fresh", "older", "newer", "failure"])(
         });
         const [parent, peer] = sessions;
         if (!parent || !peer) throw new Error("Missing test processes");
-        await peer.tool("session_reachable", {});
-        const result = await parent.tool("session_reachable", {});
+        await peer.tool("session_list", {});
+        const result = await parent.tool("session_list", {});
         expect(JSON.stringify(result.details)).toContain(ids[1]);
         expect(JSON.stringify(result.details)).toContain("Recovery peer 1");
         if (scenario === "fresh") {

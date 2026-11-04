@@ -22,12 +22,12 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   getAgentDir: () => "/tmp/agent-dir",
   SessionManager: {
     inMemory: () => ({}),
-    create: () => ({ getSessionFile: () => "/tmp/ask-run.jsonl" }),
+    create: () => ({ getSessionFile: () => "/tmp/recall-run.jsonl" }),
   },
   defineTool: (definition: unknown) => definition,
 }));
 
-vi.mock("../extensions/session-ask/navigate.ts", () => ({
+vi.mock("../extensions/session-recall/navigate.ts", () => ({
   loadSessionNavigationData: loadSessionNavigationDataMock,
   buildSessionMap: () => "(map)",
   buildSessionMetadata: () => ({
@@ -89,7 +89,7 @@ function baseParams(signal?: AbortSignal) {
     } as never,
     question: "What happened?",
     indexPath: "/tmp/index.sqlite",
-    askSettings: undefined,
+    recallSettings: undefined,
     thinkingLevel: undefined,
     signal,
   };
@@ -106,13 +106,13 @@ beforeEach(() => {
   promptMock.mockResolvedValue(undefined);
 });
 
-describe("session_ask abort handling", () => {
+describe("session_recall abort handling", () => {
   it("stops before loading anything when the signal is already aborted", async () => {
-    const { runSessionAskAgent } = await import("../extensions/session-ask/agent.ts");
+    const { runSessionRecallAgent } = await import("../extensions/session-recall/agent.ts");
     const controller = new AbortController();
     controller.abort();
 
-    await expect(runSessionAskAgent(baseParams(controller.signal))).rejects.toMatchObject({
+    await expect(runSessionRecallAgent(baseParams(controller.signal))).rejects.toMatchObject({
       name: "AbortError",
     });
 
@@ -122,14 +122,14 @@ describe("session_ask abort handling", () => {
 
   it("aborts the nested session once mid-prompt and never retries", async () => {
     setupFakeSession();
-    const { runSessionAskAgent } = await import("../extensions/session-ask/agent.ts");
+    const { runSessionRecallAgent } = await import("../extensions/session-recall/agent.ts");
     const controller = new AbortController();
 
     promptMock.mockImplementation(async () => {
       controller.abort();
     });
 
-    await expect(runSessionAskAgent(baseParams(controller.signal))).rejects.toMatchObject({
+    await expect(runSessionRecallAgent(baseParams(controller.signal))).rejects.toMatchObject({
       name: "AbortError",
     });
 
@@ -140,7 +140,7 @@ describe("session_ask abort handling", () => {
 
   it("awaits an in-flight nested abort before disposing", async () => {
     setupFakeSession();
-    const { runSessionAskAgent } = await import("../extensions/session-ask/agent.ts");
+    const { runSessionRecallAgent } = await import("../extensions/session-recall/agent.ts");
     const controller = new AbortController();
 
     let abortSettled = false;
@@ -160,7 +160,7 @@ describe("session_ask abort handling", () => {
       controller.abort();
     });
 
-    await expect(runSessionAskAgent(baseParams(controller.signal))).rejects.toMatchObject({
+    await expect(runSessionRecallAgent(baseParams(controller.signal))).rejects.toMatchObject({
       name: "AbortError",
     });
     expect(disposeMock).toHaveBeenCalledTimes(1);
@@ -168,10 +168,10 @@ describe("session_ask abort handling", () => {
 
   it("retries up to three times and returns undefined when no answer is captured", async () => {
     setupFakeSession();
-    const { runSessionAskAgent } = await import("../extensions/session-ask/agent.ts");
+    const { runSessionRecallAgent } = await import("../extensions/session-recall/agent.ts");
 
     const params = baseParams(undefined);
-    const result = await runSessionAskAgent(params);
+    const result = await runSessionRecallAgent(params);
 
     expect(result).toBeUndefined();
     expect(createAgentSessionMock.mock.calls[0]?.[0].modelRuntime).toBe(params.modelRuntime);
@@ -182,16 +182,16 @@ describe("session_ask abort handling", () => {
 
   it("returns the captured answer without aborting", async () => {
     const fake = setupFakeSession();
-    const { runSessionAskAgent } = await import("../extensions/session-ask/agent.ts");
+    const { runSessionRecallAgent } = await import("../extensions/session-recall/agent.ts");
 
     promptMock.mockImplementation(async () => {
       await fake.getTool("provide_results").execute("call-1", {
         answer: " The fix landed in commit abc123. ",
-        relevantFiles: [{ path: "/repo/app/src/fix.ts", reason: "Contains the fix" }],
+        relevant_files: [{ path: "/repo/app/src/fix.ts", reason: "Contains the fix" }],
       });
     });
 
-    const result = await runSessionAskAgent(baseParams(undefined));
+    const result = await runSessionRecallAgent(baseParams(undefined));
 
     expect(result).toMatchObject({
       answer: "The fix landed in commit abc123.",

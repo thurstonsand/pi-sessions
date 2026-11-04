@@ -1,5 +1,6 @@
 import type { CustomEntry, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
+import { upgradeLegacyEntry } from "../shared/legacy-entry.ts";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
 import { HANDOFF_KICKOFF_CUSTOM_TYPE, HANDOFF_KICKOFF_DETAILS_SCHEMA } from "./kickoff.ts";
 import {
@@ -18,7 +19,7 @@ export const HANDOFF_BOOTSTRAP_FAILED_CUSTOM_TYPE = "pi-sessions.handoff-bootstr
 export const HANDOFF_STALE_SESSION_MESSAGE =
   "Session handoff failed: target session already has user input.";
 export const SESSION_STARTING_MESSAGE =
-  "Target session is still starting. wait for session_reachable to report it as live, then resend.";
+  "Target session is still starting. wait for session_list to report it as live, then resend.";
 
 // An agent profile's instructions travel with the child, which adds them to
 // its subagent prompt section, so they survive wakes and restarts without
@@ -34,13 +35,13 @@ export const HANDOFF_SUBAGENT_SCHEMA = Type.Object({
   childSessionId: Type.String(),
   ownerSessionId: Type.String(),
   depth: Type.Integer({ minimum: 1 }),
-  requestResponse: Type.Boolean(),
+  reportBack: Type.Boolean(),
   agent: Type.Optional(HANDOFF_SUBAGENT_AGENT_SCHEMA),
 });
 
 const HANDOFF_METADATA_BASE = {
   origin: Type.Literal("handoff"),
-  goal: Type.String(),
+  briefing: Type.String(),
   title: Type.String(),
   initial_prompt: Type.String(),
 };
@@ -53,11 +54,11 @@ export const HANDOFF_SESSION_METADATA_SCHEMA = Type.Object({
 const HANDOFF_BOOTSTRAP_BASE = {
   mode: Type.Literal("generate"),
   sessionId: Type.String(),
-  goal: Type.String(),
+  briefing: Type.String(),
   title: Type.String(),
   parentSessionFile: Type.String(),
   sourceLeafId: Type.String(),
-  requestResponse: Type.Boolean(),
+  reportBack: Type.Boolean(),
   bootstrapMode: Type.Union([Type.Literal("review"), Type.Literal("automatic")]),
 };
 
@@ -102,14 +103,14 @@ export type HandoffBootstrapFailed = Static<typeof HANDOFF_BOOTSTRAP_FAILED_SCHE
 export type HandoffBootstrapConsumedReason = HandoffBootstrapConsumed["reason"];
 
 export function createHandoffSessionMetadata(
-  goal: string,
+  briefing: string,
   initialPrompt: string,
   title: string,
   launch: HandoffLaunchValue,
 ): HandoffSessionMetadata {
   return {
     origin: "handoff",
-    goal: goal.trim(),
+    briefing: briefing.trim(),
     title,
     initial_prompt: initialPrompt.trim(),
     launch,
@@ -118,11 +119,11 @@ export function createHandoffSessionMetadata(
 
 export function createChildGeneratedHandoffBootstrap(options: {
   sessionId: string;
-  goal: string;
+  briefing: string;
   title: string;
   parentSessionFile: string;
   sourceLeafId: string;
-  requestResponse: boolean;
+  reportBack: boolean;
   bootstrapMode: "review" | "automatic";
   launch: HandoffLaunchValue;
   subagent?: HandoffSubagent | undefined;
@@ -130,11 +131,11 @@ export function createChildGeneratedHandoffBootstrap(options: {
   const base = {
     mode: "generate" as const,
     sessionId: options.sessionId,
-    goal: options.goal.trim(),
+    briefing: options.briefing.trim(),
     title: options.title.trim(),
     parentSessionFile: options.parentSessionFile,
     sourceLeafId: options.sourceLeafId,
-    requestResponse: options.requestResponse,
+    reportBack: options.reportBack,
     bootstrapMode: options.bootstrapMode,
   };
   if (options.launch === SUBAGENT_LAUNCH) {
@@ -191,7 +192,7 @@ export function findPendingHandoffBootstrap(
       continue;
     }
 
-    const bootstrap = safeParseTypeBoxValue(HANDOFF_BOOTSTRAP_SCHEMA, entry.data);
+    const bootstrap = parseHandoffBootstrap(entry.data);
     if (!bootstrap) {
       return { kind: "invalid", entryId: entry.id };
     }
@@ -245,7 +246,7 @@ export function findCurrentHandoffBootstrap(
       continue;
     }
     if (entry.customType === HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE) {
-      const bootstrap = safeParseTypeBoxValue(HANDOFF_BOOTSTRAP_SCHEMA, entry.data);
+      const bootstrap = parseHandoffBootstrap(entry.data);
       if (bootstrap) {
         bootstrapsById.set(entry.id, bootstrap);
         bootstrapIds.push(entry.id);
@@ -279,7 +280,11 @@ export function findCurrentHandoffBootstrap(
 }
 
 export function parseHandoffSessionMetadata(value: unknown): HandoffSessionMetadata | undefined {
-  return safeParseTypeBoxValue(HANDOFF_SESSION_METADATA_SCHEMA, value);
+  return safeParseTypeBoxValue(HANDOFF_SESSION_METADATA_SCHEMA, upgradeLegacyEntry(value));
+}
+
+function parseHandoffBootstrap(value: unknown): HandoffBootstrap | undefined {
+  return safeParseTypeBoxValue(HANDOFF_BOOTSTRAP_SCHEMA, upgradeLegacyEntry(value));
 }
 
 export function getHandoffMetadataFromEntries(

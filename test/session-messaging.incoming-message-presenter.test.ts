@@ -15,13 +15,13 @@ describe("incoming-message presenter", () => {
           sourceSessionId: "source-1",
           sourceSessionName: "Source Session",
           relation: "parent",
-          requestResponse: true,
+          reportBack: true,
           body: "Message body.",
         },
         theme,
       ),
     ).toEqual({
-      header: "incoming_message from Source Session (source-1) (parent, response requested)",
+      header: "incoming_message from Source Session (source-1) (parent, report back)",
       body: { text: "Message body.", collapsedRows: 3 },
     });
   });

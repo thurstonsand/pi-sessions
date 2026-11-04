@@ -262,15 +262,15 @@ function applyTailSync(
     }
   }
 
-  if (!baseline.handoffGoal && scan.handoffMetadata) {
+  if (!baseline.handoffBriefing && scan.handoffMetadata) {
     const { entryId, ts, metadata } = scan.handoffMetadata;
     insertTextChunk(db, {
       sessionId: baseline.sessionId,
       entryId,
       entryType: "custom",
       ts,
-      sourceKind: "handoff_goal",
-      text: metadata.goal,
+      sourceKind: "handoff_briefing",
+      text: metadata.briefing,
     });
   }
 
@@ -292,7 +292,7 @@ function buildTailSessionRow(
   sessionOrigin?: SessionOrigin,
 ): SessionRow {
   const scan = tail.scan;
-  const tailHandoffMetadata = baseline.handoffGoal ? undefined : scan.handoffMetadata?.metadata;
+  const tailHandoffMetadata = baseline.handoffBriefing ? undefined : scan.handoffMetadata?.metadata;
   let tailOrigin: SessionOrigin | undefined;
   if (baseline.sessionOrigin !== "subagent" && baseline.sessionOrigin !== "fork") {
     tailOrigin = inferSessionOrigin(
@@ -321,7 +321,7 @@ function buildTailSessionRow(
     parentSessionPath: baseline.parentSessionPath,
     parentSessionId: baseline.parentSessionId,
     sessionOrigin: baseline.parentSessionPath ? (nextOrigin ?? "unknown_child") : undefined,
-    handoffGoal: baseline.handoffGoal ?? tailHandoffMetadata?.goal,
+    handoffBriefing: baseline.handoffBriefing ?? tailHandoffMetadata?.briefing,
     indexedFileSize: tail.indexedFileSize,
     indexedFileMtimeMs: tail.indexedFileMtimeMs,
     indexedFileAnchor: tail.indexedFileAnchor,

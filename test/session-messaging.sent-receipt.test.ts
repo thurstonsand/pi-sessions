@@ -10,7 +10,7 @@ const theme = {
 const args = {
   session: "target-1",
   message: "First line.\nSecond line.\nThird line.\nFourth line.",
-  requestResponse: true,
+  report_back: true,
 };
 
 const details = {
@@ -66,7 +66,7 @@ describe("sent session-message tool receipt", () => {
     const rendered = renderCompleted(false);
 
     expect(rendered).toContain(
-      "session_send_message delivered to Target Session (child, response requested)",
+      "session_send_message delivered to Target Session (child, report back)",
     );
     expect(rendered).toContain("First line.");
     expect(rendered).toContain("Second line.");

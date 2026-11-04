@@ -26,14 +26,14 @@ export { DEFERRED_LAUNCH, LAUNCH_DIRECTIONS, SUBAGENT_LAUNCH } from "./launch-ta
 export const MAX_HANDOFF_TITLE_LENGTH = 64;
 
 export interface HandoffToolParams {
-  goal: string;
+  briefing: string;
   title: string;
   launch: HandoffLaunchValue;
   cwd?: string | undefined;
-  requestResponse: boolean;
+  report_back: boolean;
   provider?: string | undefined;
   model?: string | undefined;
-  thinkingLevel?: ThinkingLevel | undefined;
+  thinking_level?: ThinkingLevel | undefined;
   agent?: string | undefined;
 }
 
@@ -47,9 +47,9 @@ export async function executeSessionHandoffTool(
   agentProfiles: AgentProfileCatalog,
   recordClipboardStatus: (sessionId: string, status: ClipboardStatus) => void,
 ) {
-  const goal = params.goal.trim();
-  if (!goal) {
-    throw new Error("session_handoff requires a goal.");
+  const briefing = params.briefing.trim();
+  if (!briefing) {
+    throw new Error("session_handoff requires a briefing.");
   }
 
   const title = params.title.trim();
@@ -93,13 +93,13 @@ export async function executeSessionHandoffTool(
 
   resolveHandoffSource(ctx.sessionManager, sourceLeafId);
 
-  const requestResponse = params.requestResponse;
+  const reportBack = params.report_back;
   const provider = params.provider?.trim();
   const modelId = params.model?.trim();
   if (Boolean(provider) !== Boolean(modelId)) {
     throw new Error("session_handoff requires provider and model together, or neither.");
   }
-  const requestedThinkingLevel = params.thinkingLevel ?? profile?.thinkingLevel;
+  const requestedThinkingLevel = params.thinking_level ?? profile?.thinkingLevel;
   const override =
     provider && modelId
       ? resolveChildModel(modelRuntime, roster, { provider, modelId }, requestedThinkingLevel)
@@ -125,17 +125,17 @@ export async function executeSessionHandoffTool(
     buildBootstrap: (sessionId) =>
       createChildGeneratedHandoffBootstrap({
         sessionId,
-        goal,
+        briefing,
         title,
         parentSessionFile,
         sourceLeafId,
-        requestResponse,
+        reportBack,
         bootstrapMode: target.bootstrapMode,
         launch: target.value,
         subagent: target.describeSubagentChild?.({
           childSessionId: sessionId,
           ownerSessionId: ctx.sessionManager.getSessionId(),
-          requestResponse,
+          reportBack,
           agent: profile && { name: profile.name, instructions: profile.instructions },
         }),
       }),
@@ -145,15 +145,15 @@ export async function executeSessionHandoffTool(
         childSessionId,
         parentSessionId: ctx.sessionManager.getSessionId(),
         parentSessionFile,
-        requestResponse,
+        reportBack,
       }),
   });
   const outcome = await target.launch({
     prepared,
     parentSessionId: ctx.sessionManager.getSessionId(),
     title,
-    goal,
-    requestResponse,
+    briefing,
+    reportBack,
     model,
     cwd: targetCwd.path,
   });
@@ -187,7 +187,25 @@ export async function executeSessionHandoffTool(
     content: [
       {
         type: "text" as const,
-        text: JSON.stringify({ ...details, requestResponse }, null, 2),
+        text: JSON.stringify(
+          {
+            session_id: details.sessionId,
+            child_session_file: details.childSessionFile,
+            title: details.title,
+            launch: details.launch,
+            resume_command: details.resumeCommand,
+            backend: details.backend,
+            cwd: details.cwd,
+            model: details.model,
+            provider: details.provider,
+            model_name: details.modelName,
+            thinking_level: details.thinkingLevel,
+            degraded_from: details.degradedFrom,
+            report_back: reportBack,
+          },
+          null,
+          2,
+        ),
       },
     ],
     details,

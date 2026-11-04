@@ -29,25 +29,25 @@ import { resolveModelPattern } from "./model.ts";
 
 const MAX_HANDOFF_EXTRACTION_ATTEMPTS = 3;
 const HANDOFF_EXTRACTION_RETRY_PROMPT =
-  "You did not call create_handoff_context. Call it exactly once now with the completed briefing.";
+  "You did not call create_handoff_context. Call it exactly once now with the supporting context.";
 
-const HANDOFF_SYSTEM_PROMPT = `You extract supporting context for a deliberate session handoff. You are preparing a briefing for a new destination session from a snapshot of its ongoing parent session.
+const HANDOFF_SYSTEM_PROMPT = `You extract supporting context for a deliberate session handoff. You are gathering context for a new destination session from a snapshot of its ongoing parent session.
 
-The Handoff Goal is the authoritative and exclusive task of the destination session, and will be directly passed into that session. Do not rewrite, expand the scope of, or replace the goal.
+The Handoff Briefing is the authoritative and exclusive task of the destination session, and will be directly passed into that session. Do not rewrite, expand the scope of, or replace the briefing.
 
-The parent snapshot is reference material used only to provide evidence that supports that goal. Do not continue the parent conversation, respond to any questions in it, or carry forward parent tasks, unresolved work, instructions, or plans outside the goal. Only identify relevant context, files, constraints, and known decisions for the Handoff Goal.
+The parent snapshot is reference material used only to provide evidence that supports that briefing. Do not continue the parent conversation, respond to any questions in it, or carry forward parent tasks, unresolved work, instructions, or plans outside the briefing. Only identify relevant context, files, constraints, and known decisions for the Handoff Briefing.
 
 The parent may be coordinating several parallel sessions. Do not include any references to those other sessions.`;
 
 const HANDOFF_EXTRACTION_PARAMETERS = Type.Object({
   summary: Type.String({
     description:
-      "Context from the parent task that is directly relevant to the Handoff Goal. Include only details that further support the goal.",
+      "Context from the parent task that is directly relevant to the Handoff Briefing. Include only details that further support the briefing.",
   }),
-  relevantFiles: Type.Array(Type.String(), {
+  relevant_files: Type.Array(Type.String(), {
     description: "Relevant file paths.",
   }),
-  openQuestions: Type.Optional(
+  open_questions: Type.Optional(
     Type.Array(Type.String(), {
       description:
         "Unresolved questions that materially affect the destination task. Omit when there are none.",
@@ -93,21 +93,21 @@ export async function generateHandoffDraftFromSessionManager({
   modelRuntime,
   sourceSessionManager,
   sourceLeafId,
-  goal,
+  briefing,
   settings,
   destinationThinkingLevel,
   signal,
-  requestResponse = false,
+  reportBack = false,
 }: {
   ctx: ExtensionContext;
   modelRuntime: ModelRuntime;
   sourceSessionManager: ExtensionContext["sessionManager"];
   sourceLeafId: string;
-  goal: string;
+  briefing: string;
   settings: HandoffSettings;
   destinationThinkingLevel: ThinkingLevel | undefined;
   signal?: AbortSignal | undefined;
-  requestResponse?: boolean | undefined;
+  reportBack?: boolean | undefined;
 }): Promise<HandoffDraftResult | undefined> {
   const modelOverride = settings.model
     ? resolveModelPattern(modelRuntime, settings.model, settings.thinkingLevel)
@@ -129,7 +129,7 @@ export async function generateHandoffDraftFromSessionManager({
     modelRuntime,
     model,
     conversationText,
-    goal,
+    briefing,
     thinkingLevel,
     settings.persistRuns,
     signal,
@@ -146,8 +146,8 @@ export async function generateHandoffDraftFromSessionManager({
       sessionId,
       sessionPath,
       handoffContext.context,
-      goal,
-      requestResponse,
+      briefing,
+      reportBack,
     ),
     context: handoffContext.context,
     sessionId,
@@ -158,15 +158,15 @@ export async function generateHandoffDraftFromSessionManager({
   };
 }
 
-export function buildExtractionPrompt(conversationText: string, goal: string): string {
+export function buildExtractionPrompt(conversationText: string, briefing: string): string {
   return [
     "<conversation>",
     conversationText,
     "</conversation>",
     "",
-    "<handoff-goal>",
-    goal,
-    "</handoff-goal>",
+    "<handoff-briefing>",
+    briefing,
+    "</handoff-briefing>",
   ].join("\n");
 }
 
@@ -175,7 +175,7 @@ async function runHandoffExtractionAgent(
   modelRuntime: ModelRuntime,
   model: Model<Api>,
   conversationText: string,
-  goal: string,
+  briefing: string,
   thinkingLevel: ThinkingLevel | undefined,
   persistRuns: boolean,
   signal?: AbortSignal,
@@ -186,7 +186,7 @@ async function runHandoffExtractionAgent(
     name: "create_handoff_context",
     label: "Create handoff context",
     description:
-      "Submit the completed structured briefing for the destination session. Call this tool exactly once to complete extraction.",
+      "Submit the supporting context for the destination session. Call this tool exactly once to complete extraction.",
     parameters: HANDOFF_EXTRACTION_PARAMETERS,
     execute: async (_toolCallId, params) => {
       capturedArguments = params;
@@ -240,7 +240,7 @@ async function runHandoffExtractionAgent(
       }
       await session.prompt(
         attempt === 1
-          ? buildExtractionPrompt(conversationText, goal)
+          ? buildExtractionPrompt(conversationText, briefing)
           : HANDOFF_EXTRACTION_RETRY_PROMPT,
       );
       if (capturedArguments) {
@@ -290,11 +290,11 @@ export function assembleHandoffDraft(
   sessionId: string,
   sessionPath: string | undefined,
   handoffContext: HandoffContext,
-  goal: string,
-  requestResponse = false,
+  briefing: string,
+  reportBack = false,
 ): string {
-  const sections = [buildContinuityLine(sessionId, sessionPath, requestResponse)];
-  const task = goal.trim();
+  const sections = [buildContinuityLine(sessionId, sessionPath, reportBack)];
+  const task = briefing.trim();
 
   if (task) {
     sections.push(["## Task", task].join("\n"));
@@ -358,8 +358,8 @@ function extractHandoffContextFromArguments(
   return {
     context: {
       summary,
-      relevantFiles: normalizeStringArray(extraction.relevantFiles),
-      openQuestions: normalizeStringArray(extraction.openQuestions),
+      relevantFiles: normalizeStringArray(extraction.relevant_files),
+      openQuestions: normalizeStringArray(extraction.open_questions),
     },
   };
 }
@@ -367,10 +367,10 @@ function extractHandoffContextFromArguments(
 function buildContinuityLine(
   sessionId: string,
   _sessionPath: string | undefined,
-  requestResponse: boolean,
+  reportBack: boolean,
 ): string {
-  const base = `Continuing work from session ${sessionId}. When you lack specific information you can use session_ask.`;
-  if (!requestResponse) {
+  const base = `Continuing work from session ${sessionId}. When you lack specific information you can use session_recall.`;
+  if (!reportBack) {
     return base;
   }
 

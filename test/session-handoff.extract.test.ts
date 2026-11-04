@@ -11,7 +11,7 @@ import { createFakeModelRuntime } from "./test-helpers.ts";
 
 function generateHandoffDraft(
   ctx: { sessionManager: { getLeafId(): string } },
-  goal: string,
+  briefing: string,
   thinkingLevel: "medium",
 ) {
   return generateHandoffDraftFromSessionManager({
@@ -19,7 +19,7 @@ function generateHandoffDraft(
     modelRuntime: createModelRuntime(),
     sourceSessionManager: ctx.sessionManager as never,
     sourceLeafId: ctx.sessionManager.getLeafId(),
-    goal,
+    briefing,
     settings: createHandoffSettings(),
     destinationThinkingLevel: thinkingLevel,
   });
@@ -56,7 +56,7 @@ describe("session handoff extraction", () => {
     );
 
     expect(draft).toContain(
-      "Continuing work from session session-123. When you lack specific information you can use session_ask.",
+      "Continuing work from session session-123. When you lack specific information you can use session_recall.",
     );
     expect(draft).not.toContain("/tmp/session.jsonl");
     expect(draft.indexOf("## Task")).toBeLessThan(draft.indexOf("## Relevant Files"));
@@ -64,12 +64,12 @@ describe("session handoff extraction", () => {
     expect(draft).not.toContain("## Open Questions");
   });
 
-  it("uses the exact goal as the destination task", () => {
+  it("uses the exact briefing as the destination task", () => {
     const draft = assembleHandoffDraft(
       "session-123",
       "/tmp/session.jsonl",
       {
-        summary: "Parent context relevant to the goal.",
+        summary: "Parent context relevant to the briefing.",
         relevantFiles: [],
         openQuestions: [],
       },
@@ -118,8 +118,8 @@ describe("session handoff extraction", () => {
           name: "create_handoff_context",
           arguments: {
             summary: "  Keep this.  ",
-            relevantFiles: [" src/index.ts ", "src/index.ts", ""],
-            openQuestions: [" Should tests cover cancel? ", ""],
+            relevant_files: [" src/index.ts ", "src/index.ts", ""],
+            open_questions: [" Should tests cover cancel? ", ""],
           },
         },
       ],
@@ -140,8 +140,8 @@ describe("session handoff extraction", () => {
       createMockAgentSession(
         {
           summary: "The command is partly implemented.",
-          relevantFiles: ["extensions/session-handoff.ts"],
-          openQuestions: ["Should the preview use an overlay?"],
+          relevant_files: ["extensions/session-handoff.ts"],
+          open_questions: ["Should the preview use an overlay?"],
         },
         onPrompt,
       ),
@@ -171,11 +171,11 @@ describe("session handoff extraction", () => {
     expect(options.customTools).toHaveLength(1);
     expect(Object.keys(options.customTools[0].parameters.properties)).toEqual([
       "summary",
-      "relevantFiles",
-      "openQuestions",
+      "relevant_files",
+      "open_questions",
     ]);
-    expect(options.customTools[0].parameters.properties.relevantFiles.maxItems).toBeUndefined();
-    expect(options.customTools[0].parameters.properties.openQuestions.maxItems).toBeUndefined();
+    expect(options.customTools[0].parameters.properties.relevant_files.maxItems).toBeUndefined();
+    expect(options.customTools[0].parameters.properties.open_questions.maxItems).toBeUndefined();
     expect(options.resourceLoader.getSystemPrompt()).toContain(
       "Do not continue the parent conversation, respond to any questions in it, or carry forward parent tasks",
     );
@@ -192,7 +192,7 @@ describe("session handoff extraction", () => {
     };
     const modelRuntime = createFakeModelRuntime({ available: [extractionModel as never] });
     createAgentSessionMock.mockResolvedValue(
-      createMockAgentSession({ summary: "Configured extraction.", relevantFiles: [] }),
+      createMockAgentSession({ summary: "Configured extraction.", relevant_files: [] }),
     );
     const ctx = createGenerationContext();
     const sourceSessionManager = createSourceSessionManager(
@@ -205,7 +205,7 @@ describe("session handoff extraction", () => {
       modelRuntime: modelRuntime as never,
       sourceSessionManager: sourceSessionManager as never,
       sourceLeafId: "user-1",
-      goal: "Finish phase 1.",
+      briefing: "Finish phase 1.",
       settings: {
         ...createHandoffSettings(),
         model: "openai-codex/gpt-5.6-terra",
@@ -222,7 +222,7 @@ describe("session handoff extraction", () => {
     );
   });
 
-  it("passes the serialized conversation and goal, then uses the exact backstop prompt", async () => {
+  it("passes the serialized conversation and briefing, then uses the exact backstop prompt", async () => {
     const prompts: string[] = [];
     createAgentSessionMock.mockResolvedValue(
       createMockAgentSession(undefined, (value) => {
@@ -237,11 +237,11 @@ describe("session handoff extraction", () => {
     expect(prompts[0]).toContain(
       "<conversation>\n[User]: Please implement phase 1.\n</conversation>",
     );
-    expect(prompts[0]).toContain("<handoff-goal>\nFinish phase 1.\n</handoff-goal>");
+    expect(prompts[0]).toContain("<handoff-briefing>\nFinish phase 1.\n</handoff-briefing>");
     expect(prompts).toEqual([
-      expect.stringContaining("<handoff-goal>\nFinish phase 1.\n</handoff-goal>"),
-      "You did not call create_handoff_context. Call it exactly once now with the completed briefing.",
-      "You did not call create_handoff_context. Call it exactly once now with the completed briefing.",
+      expect.stringContaining("<handoff-briefing>\nFinish phase 1.\n</handoff-briefing>"),
+      "You did not call create_handoff_context. Call it exactly once now with the supporting context.",
+      "You did not call create_handoff_context. Call it exactly once now with the supporting context.",
     ]);
   });
 
@@ -251,8 +251,8 @@ describe("session handoff extraction", () => {
     createAgentSessionMock.mockResolvedValue(
       createMockAgentSession({
         summary: "Relevant context.",
-        relevantFiles,
-        openQuestions,
+        relevant_files: relevantFiles,
+        open_questions: openQuestions,
       }),
     );
 
@@ -274,7 +274,7 @@ describe("session handoff extraction", () => {
           promptIndex === 1
             ? {
                 summary: "Captured on retry.",
-                relevantFiles: [],
+                relevant_files: [],
               }
             : undefined,
         (prompt) => prompts.push(prompt),
@@ -290,7 +290,7 @@ describe("session handoff extraction", () => {
     expect(result?.context.summary).toBe("Captured on retry.");
     expect(prompts).toHaveLength(2);
     expect(prompts[1]).toBe(
-      "You did not call create_handoff_context. Call it exactly once now with the completed briefing.",
+      "You did not call create_handoff_context. Call it exactly once now with the supporting context.",
     );
   });
 
@@ -320,11 +320,11 @@ describe("session handoff extraction", () => {
     expect(onPrompt).toHaveBeenCalledTimes(3);
   });
 
-  it("includes the goal and source snapshot in the extraction prompt", () => {
+  it("includes the briefing and source snapshot in the extraction prompt", () => {
     const prompt = buildExtractionPrompt("user: hello", "Finish phase 1.");
 
     expect(prompt).toContain("<conversation>\nuser: hello\n</conversation>");
-    expect(prompt).toContain("<handoff-goal>\nFinish phase 1.\n</handoff-goal>");
+    expect(prompt).toContain("<handoff-briefing>\nFinish phase 1.\n</handoff-briefing>");
   });
 
   it("builds extraction context only from the anchored source branch", async () => {
@@ -347,7 +347,7 @@ describe("session handoff extraction", () => {
               type: "toolCall",
               id: "handoff-call",
               name: "session_handoff",
-              arguments: { goal: "TARGET GOAL", launch: "deferred" },
+              arguments: { briefing: "TARGET BRIEFING", launch: "deferred" },
             },
           ],
         },
@@ -364,7 +364,7 @@ describe("session handoff extraction", () => {
         modelRuntime: createModelRuntime(),
         sourceSessionManager: sourceSessionManager as never,
         sourceLeafId: "anchor",
-        goal: "TARGET GOAL",
+        briefing: "TARGET BRIEFING",
         settings: createHandoffSettings(),
         destinationThinkingLevel: "medium",
       }),
@@ -372,7 +372,7 @@ describe("session handoff extraction", () => {
 
     expect(prompt).toContain("ROOT SOURCE");
     expect(prompt).toContain("ANCHOR SOURCE");
-    expect(prompt).toContain("TARGET GOAL");
+    expect(prompt).toContain("TARGET BRIEFING");
     expect(prompt).not.toContain("session_handoff");
     expect(prompt).not.toContain("SELF CHILD");
     expect(prompt).not.toContain("LATER PARENT COORDINATION");
@@ -388,7 +388,7 @@ describe("session handoff extraction", () => {
         modelRuntime: createModelRuntime(),
         sourceSessionManager: createSourceSessionManager(entries, "latest") as never,
         sourceLeafId: "missing-anchor",
-        goal: "TARGET GOAL",
+        briefing: "TARGET BRIEFING",
         settings: createHandoffSettings(),
         destinationThinkingLevel: "medium",
       }),
@@ -404,7 +404,7 @@ describe("session handoff extraction", () => {
       .mockReturnValue(inMemoryManager as never);
     const createSpy = vi.spyOn(SessionManager, "create");
     createAgentSessionMock.mockResolvedValue(
-      createMockAgentSession({ summary: "In memory.", relevantFiles: [] }),
+      createMockAgentSession({ summary: "In memory.", relevant_files: [] }),
     );
 
     const result = await generateHandoffDraft(
@@ -426,7 +426,7 @@ describe("session handoff extraction", () => {
     const createSpy = vi.spyOn(SessionManager, "create").mockReturnValue(persistedManager as never);
     const inMemorySpy = vi.spyOn(SessionManager, "inMemory");
     createAgentSessionMock.mockResolvedValue(
-      createMockAgentSession({ summary: "Persisted.", relevantFiles: [] }),
+      createMockAgentSession({ summary: "Persisted.", relevant_files: [] }),
     );
     const ctx = createGenerationContext();
     const sourceSessionManager = createSourceSessionManager(
@@ -439,7 +439,7 @@ describe("session handoff extraction", () => {
       modelRuntime: createModelRuntime(),
       sourceSessionManager: sourceSessionManager as never,
       sourceLeafId: "user-1",
-      goal: "Finish phase 1.",
+      briefing: "Finish phase 1.",
       settings: createHandoffSettings(true),
       destinationThinkingLevel: "medium",
     });

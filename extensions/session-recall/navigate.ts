@@ -13,7 +13,7 @@ import { contentToText, isRecord, truncateBlock, truncateInline } from "../share
 const MAX_TOOL_RESULT_PREVIEW_CHARS = 300;
 const MAX_TOOL_CALL_ARGUMENT_PREVIEW_CHARS = 300;
 const MAX_ENTRY_RENDER_CHARS = 12_000;
-const MAX_SESSION_READ_RESULT_CHARS = 50 * 1024;
+const MAX_RECALL_READ_RESULT_CHARS = 50 * 1024;
 const MAX_AGENTS_MD_CHARS = 20_000;
 
 export interface SessionNavigationData {
@@ -26,7 +26,7 @@ export interface SessionNavigationData {
   branches: SessionBranch[];
   spans: ConversationSpan[];
   branchPaths: Map<string, SessionEntry[]>;
-  entryBranchesById: Map<string, SessionSearchHitBranch[]>;
+  entryBranchesById: Map<string, RecallSearchHitBranch[]>;
   spanByEntryId: Map<string, EntrySpanLocation>;
   entrySizes: Map<string, number>;
 }
@@ -52,32 +52,32 @@ export interface ConversationSpan {
   compaction?: SessionOutlineEntry | undefined;
 }
 
-export type SessionReadBodyMode = "preview" | "full";
+export type RecallToolOutput = "trimmed" | "whole";
 
-export interface SessionReadEntry {
+export interface RecallReadEntry {
   entryId: string;
   type: string;
   timestamp: string;
-  pathTargetEntryId: string;
-  body: SessionReadBodyMode;
+  toEntryId: string;
+  toolOutput: RecallToolOutput;
   size: number;
   content: string;
   truncated: boolean;
 }
 
-export interface SessionReadResult {
-  entries: SessionReadEntry[];
+export interface RecallReadResult {
+  entries: RecallReadEntry[];
   nextEntryId?: string | undefined;
-  pathTargetEntryId: string;
+  toEntryId: string;
 }
 
-export interface SessionSearchHitBranch {
+export interface RecallSearchHitBranch {
   branchLeafId: string;
   label: string;
   isActive: boolean;
 }
 
-export interface SessionSearchHitSpan {
+export interface RecallSearchHitSpan {
   startsAtEntryId: string;
   endsAtEntryId: string;
   isActive: boolean;
@@ -171,7 +171,7 @@ export function buildSessionMap(data: SessionNavigationData): string {
   return `- Entry ids are short hex-like ids such as \`1a2b3c4d\`.
 - Pi sessions are trees: rewinds create multiple root-to-leaf conversation branches. Spans marked \`on_active_branch\` are part of the current live path; shared trunk spans can be on the active branch while still branching to abandoned spans.
 - \`branches_to\` lists the next span start ids that continue from the current span. Multiple values mean the conversation forked there.
-- Start with this map for structure. Prefer \`session_search\` to locate specific terms, decisions, files, or tool activity, then use \`session_read\` to inspect full evidence around the most relevant hits.
+- Start with this map for structure. Prefer \`recall_search\` to locate specific terms, decisions, files, or tool activity, then use \`recall_read\` to inspect full evidence around the most relevant hits.
 
 ### Conversation Spans
 ${formatConversationSpans(data.spans)}`;
@@ -236,47 +236,47 @@ export function readEntriesFromEntry(
     entryId: string;
     before?: number | undefined;
     after?: number | undefined;
-    pathTargetEntryId?: string | undefined;
-    body?: SessionReadBodyMode | undefined;
+    toEntryId?: string | undefined;
+    toolOutput?: RecallToolOutput | undefined;
   },
-): SessionReadResult {
+): RecallReadResult {
   const anchor = data.entryById.get(params.entryId);
   if (!anchor) {
     throw new Error(`Entry not found: ${params.entryId}`);
   }
 
-  if (params.before === undefined && params.after === undefined && !params.pathTargetEntryId) {
-    throw new Error("session_read requires before/after or pathTarget.");
+  if (params.before === undefined && params.after === undefined && !params.toEntryId) {
+    throw new Error("recall_read requires to, before, or after.");
   }
-  if (params.pathTargetEntryId && (params.before !== undefined || params.after !== undefined)) {
-    throw new Error("session_read accepts either pathTarget or before/after, not both.");
+  if (params.toEntryId && (params.before !== undefined || params.after !== undefined)) {
+    throw new Error("recall_read accepts either to or before/after, not both.");
   }
 
-  const pathTargetEntryId = resolvePathTargetEntryId(data, anchor, params.pathTargetEntryId);
-  const pathEntries = resolvePathEntries(data, pathTargetEntryId);
+  const toEntryId = resolveToEntryId(data, anchor, params.toEntryId);
+  const pathEntries = resolvePathEntries(data, toEntryId);
   const anchorIndex = pathEntries.findIndex((entry) => entry.id === anchor.id);
   if (anchorIndex < 0) {
-    throw new Error(`Entry ${anchor.id} is not on path to ${pathTargetEntryId}.`);
+    throw new Error(`Entry ${anchor.id} is not on path to ${toEntryId}.`);
   }
 
-  const pathTargetIndex = pathEntries.findIndex((entry) => entry.id === pathTargetEntryId);
+  const toIndex = pathEntries.findIndex((entry) => entry.id === toEntryId);
   const readRange = resolveReadRange({
     anchorIndex,
-    pathTargetIndex,
+    toIndex,
     before: params.before,
     after: params.after,
   });
-  assertReadStaysWithinSpan(data, pathEntries, readRange, params.pathTargetEntryId);
-  const body = params.body ?? "preview";
+  assertReadStaysWithinSpan(data, pathEntries, readRange, params.toEntryId);
+  const toolOutput = params.toolOutput ?? "trimmed";
   const requestedEntries = pathEntries.slice(readRange.startIndex, readRange.endIndex + 1);
-  const page = renderReadPage(requestedEntries, pathTargetEntryId, data.entrySizes, body);
+  const page = renderReadPage(requestedEntries, toEntryId, data.entrySizes, toolOutput);
   const nextEntry =
     page.entries.length < requestedEntries.length
       ? requestedEntries[page.entries.length]
       : undefined;
 
   return {
-    pathTargetEntryId,
+    toEntryId,
     nextEntryId: nextEntry?.id,
     entries: page.entries,
   };
@@ -285,14 +285,14 @@ export function readEntriesFromEntry(
 export function findBranchesForEntry(
   data: SessionNavigationData,
   entryId: string,
-): SessionSearchHitBranch[] {
+): RecallSearchHitBranch[] {
   return data.entryBranchesById.get(entryId) ?? [];
 }
 
 export function findSpanForEntry(
   data: SessionNavigationData,
   entryId: string,
-): SessionSearchHitSpan | undefined {
+): RecallSearchHitSpan | undefined {
   const location = data.spanByEntryId.get(entryId);
   if (!location) {
     return undefined;
@@ -379,8 +379,8 @@ function buildBranchLabel(entries: SessionEntry[]): string {
 function buildEntryBranchesById(
   branches: SessionBranch[],
   branchPaths: Map<string, SessionEntry[]>,
-): Map<string, SessionSearchHitBranch[]> {
-  const result = new Map<string, SessionSearchHitBranch[]>();
+): Map<string, RecallSearchHitBranch[]> {
+  const result = new Map<string, RecallSearchHitBranch[]>();
   const branchByLeafId = new Map(branches.map((branch) => [branch.leafId, branch]));
 
   for (const [leafId, pathEntries] of branchPaths) {
@@ -388,7 +388,7 @@ function buildEntryBranchesById(
     if (!branch) {
       continue;
     }
-    const hitBranch: SessionSearchHitBranch = {
+    const hitBranch: RecallSearchHitBranch = {
       branchLeafId: branch.leafId,
       label: branch.label,
       isActive: branch.isActive,
@@ -551,16 +551,16 @@ function isSpanStart(entry: SessionEntry): boolean {
   return entry.type === "branch_summary" || entry.type === "compaction";
 }
 
-function resolvePathTargetEntryId(
+function resolveToEntryId(
   data: SessionNavigationData,
   anchor: SessionEntry,
-  pathTargetEntryId: string | undefined,
+  toEntryId: string | undefined,
 ): string {
-  if (pathTargetEntryId) {
-    if (!data.entryById.has(pathTargetEntryId)) {
-      throw new Error(`Path target entry not found: ${pathTargetEntryId}`);
+  if (toEntryId) {
+    if (!data.entryById.has(toEntryId)) {
+      throw new Error(`Entry not found for to: ${toEntryId}`);
     }
-    return pathTargetEntryId;
+    return toEntryId;
   }
 
   const containingSpan = data.spanByEntryId.get(anchor.id)?.span;
@@ -580,14 +580,14 @@ interface ReadRange {
 
 function resolveReadRange(params: {
   anchorIndex: number;
-  pathTargetIndex: number;
+  toIndex: number;
   before?: number | undefined;
   after?: number | undefined;
 }): ReadRange {
   if (params.before === undefined && params.after === undefined) {
     return {
       startIndex: params.anchorIndex,
-      endIndex: params.pathTargetIndex,
+      endIndex: params.toIndex,
     };
   }
 
@@ -603,9 +603,9 @@ function assertReadStaysWithinSpan(
   data: SessionNavigationData,
   pathEntries: SessionEntry[],
   readRange: ReadRange,
-  explicitPathTargetEntryId: string | undefined,
+  explicitToEntryId: string | undefined,
 ): void {
-  if (explicitPathTargetEntryId) {
+  if (explicitToEntryId) {
     return;
   }
 
@@ -617,7 +617,7 @@ function assertReadStaysWithinSpan(
 
   if (readRange.startIndex < location.startIndex || readRange.endIndex > location.endIndex) {
     throw new Error(
-      `session_read context crosses span boundary from ${anchor.id}. Set pathTarget to ${location.span.endsAtEntryId} or another descendant entry id to read across spans.`,
+      `recall_read context crosses span boundary from ${anchor.id}. Pass ${location.span.endsAtEntryId} or another descendant entry id as to to read across spans.`,
     );
   }
 }
@@ -645,17 +645,17 @@ function normalizeContextCount(value: number | undefined): number {
 
 function renderReadPage(
   entries: SessionEntry[],
-  pathTargetEntryId: string,
+  toEntryId: string,
   entrySizes: Map<string, number>,
-  body: SessionReadBodyMode,
-): { entries: SessionReadEntry[] } {
-  const renderedEntries: SessionReadEntry[] = [];
+  toolOutput: RecallToolOutput,
+): { entries: RecallReadEntry[] } {
+  const renderedEntries: RecallReadEntry[] = [];
   let renderedSize = 0;
 
   for (const entry of entries) {
-    const renderedEntry = renderReadEntry(entry, pathTargetEntryId, entrySizes, body);
+    const renderedEntry = renderReadEntry(entry, toEntryId, entrySizes, toolOutput);
     const nextSize = renderedSize + renderedEntry.content.length;
-    if (renderedEntries.length > 0 && nextSize > MAX_SESSION_READ_RESULT_CHARS) {
+    if (renderedEntries.length > 0 && nextSize > MAX_RECALL_READ_RESULT_CHARS) {
       break;
     }
 
@@ -668,18 +668,18 @@ function renderReadPage(
 
 function renderReadEntry(
   entry: SessionEntry,
-  pathTargetEntryId: string,
+  toEntryId: string,
   entrySizes: Map<string, number>,
-  body: SessionReadBodyMode,
-): SessionReadEntry {
-  const rendered = renderEntryContent(entry, body);
+  toolOutput: RecallToolOutput,
+): RecallReadEntry {
+  const rendered = renderEntryContent(entry, toolOutput);
   const truncated = truncateBlock(rendered, MAX_ENTRY_RENDER_CHARS);
   return {
     entryId: entry.id,
     type: entry.type,
     timestamp: entry.timestamp,
-    pathTargetEntryId,
-    body,
+    toEntryId,
+    toolOutput,
     size: entrySizes.get(entry.id) ?? measureEntrySize(entry),
     content: truncated.text,
     truncated: truncated.truncated,
@@ -722,9 +722,9 @@ function findFirstUserMessage(entries: SessionEntry[]): SessionMessageEntry | un
   );
 }
 
-function renderEntryContent(entry: SessionEntry, body: SessionReadBodyMode = "full"): string {
+function renderEntryContent(entry: SessionEntry, toolOutput: RecallToolOutput = "whole"): string {
   if (entry.type === "message") {
-    return renderMessageEntry(entry, body);
+    return renderMessageEntry(entry, toolOutput);
   }
   if (entry.type === "custom_message") {
     const label = entry.customType === HANDOFF_KICKOFF_CUSTOM_TYPE ? "Handoff kickoff" : "Custom";
@@ -739,7 +739,7 @@ function renderEntryContent(entry: SessionEntry, body: SessionReadBodyMode = "fu
   return JSON.stringify(entry, null, 2);
 }
 
-function renderMessageEntry(entry: SessionMessageEntry, body: SessionReadBodyMode): string {
+function renderMessageEntry(entry: SessionMessageEntry, toolOutput: RecallToolOutput): string {
   const { message } = entry;
   switch (message.role) {
     case "user": {
@@ -747,9 +747,9 @@ function renderMessageEntry(entry: SessionMessageEntry, body: SessionReadBodyMod
       return text ? `[User]: ${text}` : "[User]";
     }
     case "assistant":
-      return renderAssistantMessage(message, body);
+      return renderAssistantMessage(message, toolOutput);
     case "toolResult":
-      return renderToolResultMessage(message, body);
+      return renderToolResultMessage(message, toolOutput);
     case "custom":
       return `[Custom]: ${contentToText(message.content)}`;
     case "bashExecution":
@@ -759,7 +759,7 @@ function renderMessageEntry(entry: SessionMessageEntry, body: SessionReadBodyMod
   }
 }
 
-function renderAssistantMessage(message: AssistantMessage, body: SessionReadBodyMode): string {
+function renderAssistantMessage(message: AssistantMessage, toolOutput: RecallToolOutput): string {
   const content = Array.isArray(message.content) ? message.content : [];
   const textParts: string[] = [];
   let hasThinkingBlock = false;
@@ -775,14 +775,14 @@ function renderAssistantMessage(message: AssistantMessage, body: SessionReadBody
         thinkingParts.push(block.thinking);
       }
     } else if (isRecord(block) && block.type === "toolCall") {
-      toolCalls.push(renderToolCall(block, body));
+      toolCalls.push(renderToolCall(block, toolOutput));
     }
   }
 
   const parts: string[] = [];
   if (hasThinkingBlock) {
     parts.push(
-      body === "preview" || thinkingParts.length === 0
+      toolOutput === "trimmed" || thinkingParts.length === 0
         ? "[Assistant thinking]: thinking…"
         : `[Assistant thinking]: ${thinkingParts.join("\n")}`,
     );
@@ -796,10 +796,10 @@ function renderAssistantMessage(message: AssistantMessage, body: SessionReadBody
   return parts.join("\n\n");
 }
 
-function renderToolResultMessage(message: ToolResultMessage, body: SessionReadBodyMode): string {
+function renderToolResultMessage(message: ToolResultMessage, toolOutput: RecallToolOutput): string {
   const toolName = message.toolName ?? "unknown";
   const content = contentToText(message.content);
-  if (body === "preview") {
+  if (toolOutput === "trimmed") {
     return [
       `[Tool result]`,
       `tool: ${toolName}`,
@@ -818,10 +818,10 @@ function renderToolResultMessage(message: ToolResultMessage, body: SessionReadBo
   ].join("\n");
 }
 
-function renderToolCall(block: Record<string, unknown>, body: SessionReadBodyMode): string {
+function renderToolCall(block: Record<string, unknown>, toolOutput: RecallToolOutput): string {
   const name = typeof block.name === "string" ? block.name : "unknown";
   const args = isRecord(block.arguments) ? block.arguments : {};
-  if (body === "full") {
+  if (toolOutput === "whole") {
     return `${name}(${safeJsonStringify(args)})`;
   }
 
@@ -871,7 +871,7 @@ function stringLength(value: unknown): number {
 }
 
 function measureEntrySize(entry: SessionEntry): number {
-  return renderEntryContent(entry, "full").length;
+  return renderEntryContent(entry, "whole").length;
 }
 
 function indentBlock(value: string, prefix: string): string {

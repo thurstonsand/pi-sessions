@@ -11,14 +11,14 @@ describe("incoming-message view model", () => {
         body: "Message body.",
         sentAt: "2026-01-01T00:00:00.000Z",
         receivedAt: "2026-01-01T00:00:01.000Z",
-        requestResponse: true,
+        reportBack: true,
         relation: "parent",
       }),
     ).toEqual({
       sourceSessionId: "source-1",
       sourceSessionName: "Source Session",
       relation: "parent",
-      requestResponse: true,
+      reportBack: true,
       body: "Message body.",
     });
   });

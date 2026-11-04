@@ -92,7 +92,7 @@ export function buildHandoffBoardView(
               label: "Owner",
               value: selected.ownerIsCurrentSession ? "this session" : selected.ownerTitle,
             },
-            { label: "Goal", value: selected.goal },
+            { label: "Briefing", value: selected.briefing },
           ]
         : [],
       ...(selected ? { action: buildSubagentAction(selected) } : {}),

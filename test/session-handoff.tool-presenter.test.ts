@@ -15,7 +15,7 @@ describe("handoff-tool presenter", () => {
           toolName: "session_handoff",
           launch: "deferred",
           title: "Review rendering",
-          goal: "Inspect the renderer.",
+          briefing: "Inspect the renderer.",
           provider: "openai",
           model: "GPT 5.4",
           thinkingLevel: "high",
@@ -38,7 +38,7 @@ describe("handoff-tool presenter", () => {
       metadata: ["provider openai  ·  model GPT 5.4  ·  thinking high"],
       expandedMetadata: ["session child-1", "cwd /repo/app"],
       body: {
-        text: "goal Inspect the renderer.",
+        text: "briefing Inspect the renderer.",
         collapsedRows: 1,
         spacingBefore: 0,
       },

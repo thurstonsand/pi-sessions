@@ -1,8 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { isSessionStarting, SESSION_STARTING_MESSAGE } from "../../session-handoff/metadata.ts";
 import type { TurnMessage } from "../../shared/turn-delivery.ts";
-import { safeParseTypeBoxValue } from "../../shared/typebox.ts";
-import { RECEIVED_MESSAGE_ENTRY_SCHEMA, type ReceivedMessageEntry } from "./message-contracts.ts";
+import { parseReceivedMessageEntry, type ReceivedMessageEntry } from "./message-contracts.ts";
 
 export const MESSAGE_RECEIVED_CUSTOM_TYPE = "pi-sessions.message_received";
 export const SESSION_MESSAGE_CUSTOM_TYPE = "pi-sessions.session_message";
@@ -41,7 +40,7 @@ export class IncomingSessionMessageRuntime {
 
   deliver(received: ReceivedMessageEntry): void {
     const ctx = this.requireContext();
-    // A starting session is broker-reachable but has not consumed its handoff
+    // A starting session is live on the broker but has not consumed its handoff
     // kickoff. Injecting here would land the message before the kickoff and
     // break the first-message invariant, so refuse delivery until it kicks off.
     if (isSessionStarting(ctx.sessionManager.getBranch())) {
@@ -66,7 +65,7 @@ export class IncomingSessionMessageRuntime {
 
     for (const entry of entries) {
       if (entry.type === "custom_message" && entry.customType === SESSION_MESSAGE_CUSTOM_TYPE) {
-        const delivered = safeParseTypeBoxValue(RECEIVED_MESSAGE_ENTRY_SCHEMA, entry.details);
+        const delivered = parseReceivedMessageEntry(entry.details);
         if (delivered) {
           deliveredMessageIds.add(delivered.messageId);
         }
@@ -77,7 +76,7 @@ export class IncomingSessionMessageRuntime {
         continue;
       }
 
-      const received = safeParseTypeBoxValue(RECEIVED_MESSAGE_ENTRY_SCHEMA, entry.data);
+      const received = parseReceivedMessageEntry(entry.data);
       if (received) {
         pendingReceipts.push(received);
       }
@@ -111,6 +110,6 @@ function formatIncomingMessageForModel(received: ReceivedMessageEntry): string {
   const title = received.source.sessionName?.trim();
   const titlePart = title ? ` "${title}"` : "";
   const relationPart = received.relation ? `, relation: ${received.relation}` : "";
-  const responseLine = received.requestResponse ? "\n\nResponse requested." : "";
-  return `Incoming message from session${titlePart} (session: ${received.source.sessionId}${relationPart}):\n\n${received.body}${responseLine}`;
+  const reportBackLine = received.reportBack ? "\n\nReport back." : "";
+  return `Incoming message from session${titlePart} (session: ${received.source.sessionId}${relationPart}):\n\n${received.body}${reportBackLine}`;
 }

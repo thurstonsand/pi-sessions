@@ -15,7 +15,7 @@ const OWNED_SUBAGENT_POLL_MS = 10_000;
 
 export interface SubagentChildSessionState {
   identity: HandoffSubagent;
-  requestResponse: boolean;
+  reportBack: boolean;
   reportsAtTurnStart: number;
   paused: boolean;
 }
@@ -153,14 +153,14 @@ export function refreshSubagentChildState(
     child?.identity.childSessionId === identity.childSessionId &&
     child.identity.ownerSessionId === identity.ownerSessionId &&
     child.identity.depth === identity.depth &&
-    child.identity.requestResponse === identity.requestResponse &&
+    child.identity.reportBack === identity.reportBack &&
     child.reportsAtTurnStart <= reports
   ) {
     return child;
   }
   return {
     identity,
-    requestResponse: identity.requestResponse,
+    reportBack: identity.reportBack,
     reportsAtTurnStart: reports,
     paused: false,
   };
@@ -195,7 +195,7 @@ function settleChild(
   if (reports > child.reportsAtTurnStart) {
     return true;
   }
-  if (!child.requestResponse) {
+  if (!child.reportBack) {
     pi.appendEntry(SUBAGENT_CLOSED_CUSTOM_TYPE, {
       reason: "no_response_expected",
     });

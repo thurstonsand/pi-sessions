@@ -27,7 +27,7 @@ import { LINEAGE_CUSTOM_TYPE, LINEAGE_SCHEMA, type SessionLineage } from "../sha
 import type { SessionOrigin } from "../shared/session-index/index.ts";
 import { contentToText, isRecord } from "../shared/text.ts";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
-import { SUBAGENT_LAUNCHED_CUSTOM_TYPE, SUBAGENT_LAUNCHED_SCHEMA } from "../subagents/ledger.ts";
+import { parseSubagentLaunched, SUBAGENT_LAUNCHED_CUSTOM_TYPE } from "../subagents/ledger.ts";
 import {
   deriveSessionRepoRoots,
   type FileTouchOp,
@@ -79,7 +79,7 @@ export interface ExtractedSessionRecord {
   parentSessionPath?: string | undefined;
   parentSessionId?: string | undefined;
   sessionOrigin?: SessionOrigin | undefined;
-  handoffGoal?: string | undefined;
+  handoffBriefing?: string | undefined;
   indexedFileSize: number;
   indexedFileMtimeMs: number;
   indexedFileAnchor: string;
@@ -222,7 +222,7 @@ export function extractSessionRecord(sessionPath: string): ExtractedSessionRecor
         parentSession?.launchedSubagent ?? false,
         scan.handoffMetadata?.metadata,
       ),
-      handoffGoal: scan.handoffMetadata?.metadata.goal,
+      handoffBriefing: scan.handoffMetadata?.metadata.briefing,
       indexedFileSize: consumedBytes,
       indexedFileMtimeMs,
       indexedFileAnchor: buildFileAnchor(buffer, consumedBytes),
@@ -538,7 +538,7 @@ function inspectParentSession(
       if (entry.type !== "custom" || entry.customType !== SUBAGENT_LAUNCHED_CUSTOM_TYPE) {
         continue;
       }
-      const launch = safeParseTypeBoxValue(SUBAGENT_LAUNCHED_SCHEMA, entry.data);
+      const launch = parseSubagentLaunched(entry.data);
       if (
         launch?.writerSessionId === header.id &&
         launch.childSessionId === childSessionId &&
@@ -595,7 +595,7 @@ function appendDurableHandoffMetadataChunks(
   }
 
   const { entryId, ts, metadata } = durableHandoffMetadata;
-  chunks.push(createMetadataChunk(entryId, ts, "handoff_goal", metadata.goal));
+  chunks.push(createMetadataChunk(entryId, ts, "handoff_briefing", metadata.briefing));
 }
 
 function createMetadataChunk(

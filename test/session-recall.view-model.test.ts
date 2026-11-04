@@ -1,15 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
-  SESSION_ASK_PROGRESS_DETAILS_SCHEMA,
-  SESSION_ASK_RESULT_DETAILS_SCHEMA,
-} from "../extensions/session-ask/tool-contract.ts";
-import { buildSessionAskView } from "../extensions/session-ask/view-model.ts";
+  SESSION_RECALL_PROGRESS_DETAILS_SCHEMA,
+  SESSION_RECALL_RESULT_DETAILS_SCHEMA,
+} from "../extensions/session-recall/tool-contract.ts";
+import { buildSessionRecallView } from "../extensions/session-recall/view-model.ts";
 import { safeParseTypeBoxValue } from "../extensions/shared/typebox.ts";
 
-describe("session-ask view model", () => {
+describe("session-recall view model", () => {
   it("requires the fields guaranteed by progress and completed results", () => {
     expect(
-      safeParseTypeBoxValue(SESSION_ASK_PROGRESS_DETAILS_SCHEMA, {
+      safeParseTypeBoxValue(SESSION_RECALL_PROGRESS_DETAILS_SCHEMA, {
         question: "Question?",
         sessionId: "session-1",
         sessionName: "Session title",
@@ -17,12 +17,12 @@ describe("session-ask view model", () => {
       }),
     ).toBeDefined();
     expect(
-      safeParseTypeBoxValue(SESSION_ASK_PROGRESS_DETAILS_SCHEMA, {
+      safeParseTypeBoxValue(SESSION_RECALL_PROGRESS_DETAILS_SCHEMA, {
         sessionId: "session-1",
       }),
     ).toBeUndefined();
     expect(
-      safeParseTypeBoxValue(SESSION_ASK_RESULT_DETAILS_SCHEMA, {
+      safeParseTypeBoxValue(SESSION_RECALL_RESULT_DETAILS_SCHEMA, {
         question: "Question?",
         relevantFiles: [],
         sessionId: "session-1",
@@ -34,7 +34,7 @@ describe("session-ask view model", () => {
 
   it("normalizes durable tool details without presentation concerns", () => {
     expect(
-      buildSessionAskView({
+      buildSessionRecallView({
         answer: " Answer. ",
         question: " Question? ",
         relevantFiles: [],

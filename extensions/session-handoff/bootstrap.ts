@@ -109,11 +109,11 @@ async function startChildGeneratedHandoff(
           modelRuntime,
           sourceSessionManager,
           sourceLeafId: bootstrap.sourceLeafId,
-          goal: bootstrap.goal,
+          briefing: bootstrap.briefing,
           settings: handoffSettings,
           destinationThinkingLevel,
           signal,
-          requestResponse: bootstrap.requestResponse,
+          reportBack: bootstrap.reportBack,
         }),
     );
     if (!generatedDraft) {
@@ -149,7 +149,7 @@ async function startChildGeneratedHandoff(
     // The tool-provided bootstrap title is authoritative; extraction does not
     // replace it with a second generated title.
     const metadata = createHandoffSessionMetadata(
-      bootstrap.goal,
+      bootstrap.briefing,
       prompt,
       bootstrap.title,
       bootstrap.launch,

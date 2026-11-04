@@ -27,7 +27,7 @@ export function buildHandoffToolPresentation(
     ],
     ...(expandedMetadata.length > 0 ? { expandedMetadata } : {}),
     body: {
-      text: `${theme.bold("goal")} ${model.goal ?? PENDING}`,
+      text: `${theme.bold("briefing")} ${model.briefing ?? PENDING}`,
       collapsedRows: 1,
       spacingBefore: 0,
     },

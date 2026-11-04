@@ -24,6 +24,6 @@ export function buildSubagentReportMessageView(
     summary: report.summary,
     details: report.details,
     references: report.references ?? [],
-    nextSteps: report.nextSteps ?? [],
+    nextSteps: report.next_steps ?? [],
   };
 }

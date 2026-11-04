@@ -1,6 +1,6 @@
 import type { ToolDefinition } from "@earendil-works/pi-coding-agent";
 import type { SessionDirectory } from "../directory.ts";
-import { createSessionReachableTool, type ReachableToolOptions } from "./reachable-tool.ts";
+import { createSessionListTool, type ListToolOptions } from "./list-tool.ts";
 import {
   createSessionCancelTool,
   createSessionSendMessageTool,
@@ -8,7 +8,7 @@ import {
 } from "./tools.ts";
 
 export interface DirectoryToolWording {
-  list: ReachableToolOptions;
+  list: ListToolOptions;
   send: SendMessageToolWording & { name: string };
   cancel: SendMessageToolWording & { name: string };
 }
@@ -19,7 +19,7 @@ export function createDirectoryTools(
   wording: DirectoryToolWording,
 ): ToolDefinition[] {
   return [
-    createSessionReachableTool(directory, wording.list),
+    createSessionListTool(directory, wording.list),
     createSessionSendMessageTool(
       { sendMessage: directory.send },
       {

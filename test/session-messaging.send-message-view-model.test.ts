@@ -11,7 +11,7 @@ describe("send-message view model", () => {
         {
           session: " target-1 ",
           message: "partial message",
-          requestResponse: true,
+          report_back: true,
         },
         "child",
       ),
@@ -19,7 +19,7 @@ describe("send-message view model", () => {
       status: "sending",
       targetSessionId: "target-1",
       relation: "child",
-      requestResponse: true,
+      reportBack: true,
       body: "partial message",
     });
   });
@@ -27,7 +27,7 @@ describe("send-message view model", () => {
   it("builds the completed view from durable result details", () => {
     expect(
       buildDeliveredMessageView(
-        { message: "  Delivered body.  ", requestResponse: true },
+        { message: "  Delivered body.  ", report_back: true },
         {
           delivered: true,
           messageId: "msg-1",
@@ -40,7 +40,7 @@ describe("send-message view model", () => {
       targetSessionId: "target-1",
       targetSessionName: "Target Session",
       relation: "child",
-      requestResponse: true,
+      reportBack: true,
       body: "Delivered body.",
     });
   });

@@ -35,7 +35,7 @@ const MODEL_INHERITANCE_GUIDELINES = [
 ];
 
 const RESTRICTED_THINKING_GUIDELINE =
-  'A ":level" suffix on a listed model limits it to those thinking levels; set thinkingLevel to one of them, or leave it unset when only one is listed.';
+  'A ":level" suffix on a listed model limits it to those thinking levels; set thinking_level to one of them, or leave it unset when only one is listed.';
 
 const SUBAGENT_MODEL_OVERRIDE_GUIDELINE =
   "For subagents, choose the model that best fits the delegated task; for other launches, only override the model when the task clearly warrants it. When unsure, ask the user for their preference.";
@@ -44,7 +44,7 @@ const DEFAULT_MODEL_OVERRIDE_GUIDELINE =
   "Only override the model when the task clearly warrants it.";
 
 const AGENT_PROFILE_GUIDELINE =
-  "Set agent to run a subagent as one of the agent profiles below when its description fits the task; the profile supplies the model, so leave provider, model, and thinkingLevel unset unless the user asks otherwise.";
+  "Set agent to run a subagent as one of the agent profiles below when its description fits the task; the profile supplies the model, so leave provider, model, and thinking_level unset unless the user asks otherwise.";
 
 export function buildHandoffPromptGuidelines(
   targets: readonly HandoffLaunchTarget[],

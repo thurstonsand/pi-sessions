@@ -1,13 +1,12 @@
 import type { MessageRenderer } from "@earendil-works/pi-coding-agent";
 import { Box } from "@earendil-works/pi-tui";
 import { ExpandableContentLayout } from "../../shared/rendering/expandable-content-layout.ts";
-import { safeParseTypeBoxValue } from "../../shared/typebox.ts";
 import { buildIncomingMessagePresentation } from "./incoming-message-presenter.ts";
 import { buildIncomingMessageView } from "./incoming-message-view-model.ts";
-import { RECEIVED_MESSAGE_ENTRY_SCHEMA } from "./message-contracts.ts";
+import { parseReceivedMessageEntry } from "./message-contracts.ts";
 
 export const renderIncomingSessionMessage: MessageRenderer = (message, options, theme) => {
-  const details = safeParseTypeBoxValue(RECEIVED_MESSAGE_ENTRY_SCHEMA, message.details);
+  const details = parseReceivedMessageEntry(message.details);
   if (!details) {
     return undefined;
   }

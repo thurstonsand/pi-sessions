@@ -2,9 +2,11 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Type } from "typebox";
 import { installRecallTool } from "../hosts/install.ts";
 import type { IndexHandle } from "../shared/composition.ts";
+import { renderToolNameCall } from "../shared/rendering/tool-name-call.ts";
 import { stripSearchSnippetMarkers } from "../shared/search-snippet.ts";
 import {
   type SearchSessionsParams,
+  type SessionIndexStatus,
   type SessionSearchEvidence,
   searchSessions,
   withSessionIndex,
@@ -38,7 +40,7 @@ export function installSearch(pi: ExtensionAPI, deps: SearchInstallDeps): { refr
     promptSnippet: "Locate Pi sessions for follow-up",
     promptGuidelines: [
       "Omit queries in session_search to list matching sessions chronologically.",
-      "After session_search finds a session id, switch to session_ask for questions about it.",
+      "After session_search finds a session id, switch to session_recall for questions about it.",
     ],
     parameters: Type.Object({
       query: Type.Optional(
@@ -140,6 +142,7 @@ export function installSearch(pi: ExtensionAPI, deps: SearchInstallDeps): { refr
         };
       });
     },
+    renderCall: renderToolNameCall("session_search"),
     renderResult: renderSessionSearchResult,
   });
 }
@@ -169,7 +172,7 @@ function formatSearchResultsForModel(details: SessionSearchToolDetails): string 
   return JSON.stringify(
     {
       params: details.params,
-      status: details.status,
+      status: details.status && formatStatusForModel(details.status),
       results: details.results.map(formatSearchResultForModel),
     },
     null,
@@ -180,38 +183,76 @@ function formatSearchResultsForModel(details: SessionSearchToolDetails): string 
 function formatSearchOutput(results: SessionSearchResult[]): SessionSearchOutput {
   return {
     results: results.map((result) => ({
-      sessionId: result.sessionId,
-      sessionName: result.sessionName,
+      session_id: result.sessionId,
+      session_name: result.sessionName,
       cwd: result.cwd,
-      startedAt: result.startedAt,
-      modifiedAt: result.modifiedAt,
-      messageCount: result.messageCount,
+      started_at: result.startedAt,
+      modified_at: result.modifiedAt,
+      message_count: result.messageCount,
       snippet: stripSearchSnippetMarkers(result.snippet) ?? result.snippet,
-      hitCount: result.hitCount,
-      ...(result.sessionOrigin ? { sessionOrigin: result.sessionOrigin } : {}),
+      hit_count: result.hitCount,
+      ...(result.sessionOrigin ? { session_origin: result.sessionOrigin } : {}),
       ...(result.relation ? { relation: result.relation } : {}),
-      ...(result.parentSessionId ? { parentSessionId: result.parentSessionId } : {}),
+      ...(result.parentSessionId ? { parent_session_id: result.parentSessionId } : {}),
     })),
   };
 }
 
-function formatSearchResultForModel(result: SessionSearchResult): SessionSearchResult {
+function formatStatusForModel(status: SessionIndexStatus) {
   return {
-    ...result,
-    snippet: stripSearchSnippetMarkers(result.snippet) ?? result.snippet,
-    evidence: result.evidence.map(formatEvidenceForModel),
+    db_path: status.dbPath,
+    exists: status.exists,
+    schema_version: status.schemaVersion,
+    session_count: status.sessionCount,
+    last_full_reindex_at: status.lastFullReindexAt,
+    recovery_message: status.recoveryMessage,
   };
 }
 
-function formatEvidenceForModel(evidence: SessionSearchEvidence): SessionSearchEvidence {
-  if (evidence.kind !== "text") {
-    return evidence;
-  }
-
+function formatSearchResultForModel(result: SessionSearchResult) {
   return {
-    ...evidence,
-    snippet: stripSearchSnippetMarkers(evidence.snippet) ?? evidence.snippet,
+    session_id: result.sessionId,
+    session_name: result.sessionName,
+    session_path: result.sessionPath,
+    cwd: result.cwd,
+    repo_roots: result.repoRoots,
+    started_at: result.startedAt,
+    modified_at: result.modifiedAt,
+    message_count: result.messageCount,
+    parent_session_path: result.parentSessionPath,
+    parent_session_id: result.parentSessionId,
+    first_user_prompt: result.firstUserPrompt,
+    session_origin: result.sessionOrigin,
+    handoff_briefing: result.handoffBriefing,
+    relation: result.relation,
+    snippet: stripSearchSnippetMarkers(result.snippet) ?? result.snippet,
+    evidence: result.evidence.map(formatEvidenceForModel),
+    score: result.score,
+    hit_count: result.hitCount,
   };
+}
+
+function formatEvidenceForModel(evidence: SessionSearchEvidence) {
+  switch (evidence.kind) {
+    case "text":
+      return {
+        kind: evidence.kind,
+        source_kind: evidence.sourceKind,
+        snippet: stripSearchSnippetMarkers(evidence.snippet) ?? evidence.snippet,
+        score: evidence.score,
+        entry_id: evidence.entryId,
+      };
+    case "file_touch":
+      return {
+        kind: evidence.kind,
+        op: evidence.op,
+        query: evidence.query,
+        path: evidence.path,
+        entry_id: evidence.entryId,
+      };
+    case "session_id":
+      return evidence;
+  }
 }
 
 function validateSearchParams(params: SessionSearchToolParams): string | undefined {

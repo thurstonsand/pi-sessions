@@ -6,6 +6,7 @@ import {
 import { Text } from "@earendil-works/pi-tui";
 import { formatError } from "../../shared/errors.ts";
 import { ExpandableContentLayout } from "../../shared/rendering/expandable-content-layout.ts";
+import { renderToolNameCall } from "../../shared/rendering/tool-name-call.ts";
 import { safeParseTypeBoxValue } from "../../shared/typebox.ts";
 import {
   buildCancelSessionModelText,
@@ -150,7 +151,7 @@ export function createSessionSendMessageTool(
           {
             target,
             body,
-            requestResponse: params.requestResponse,
+            reportBack: params.report_back,
             sourceToolCallId: toolCallId,
           },
           ctx,
@@ -189,6 +190,7 @@ export function createSessionCancelTool(
     label: "Cancel a running session",
     ...options.wording,
     parameters: CANCEL_SESSION_PARAMS,
+    renderCall: renderToolNameCall(options.name),
     renderResult(result, options, theme, context) {
       const output = getFirstText(result);
       if (context.isError) {

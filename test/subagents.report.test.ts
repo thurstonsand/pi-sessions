@@ -67,7 +67,7 @@ describe("subagent reports", () => {
         ownerSessionId: parentId,
         parentSessionFile: "/tmp/parent.jsonl",
         depth: 1,
-        requestResponse: true,
+        reportBack: true,
       },
     }));
 
@@ -78,7 +78,7 @@ describe("subagent reports", () => {
         summary: "  Tests pass.  ",
         details: "Validated locally.",
         references: [{ reference: "test/example.test.ts", description: "Passing test" }],
-        nextSteps: ["Merge the change."],
+        next_steps: ["Merge the change."],
       },
       undefined,
       undefined,
@@ -121,7 +121,7 @@ describe("subagent reports", () => {
         summary: "Implemented and tested.",
         details: "The focused checks pass.",
         references: [{ reference: "test/example.test.ts", description: "Coverage" }],
-        nextSteps: ["Review the diff."],
+        next_steps: ["Review the diff."],
         sentAt: "2026-03-25T00:00:00.000Z",
       },
     );
@@ -141,7 +141,7 @@ describe("subagent reports", () => {
         summary: "Implemented and tested.",
         details: "The focused checks pass.",
         references: [{ reference: "test/example.test.ts", description: "Coverage" }],
-        nextSteps: ["Review the diff."],
+        next_steps: ["Review the diff."],
         provenance: "live",
       },
       content: `Subagent report from "Implement phase" (session: ${childId}, status: done)
@@ -306,8 +306,8 @@ function launchEntry() {
       childSessionId: childId,
       childSessionFile: "/tmp/child.jsonl",
       title: "Implement phase",
-      goal: "Implement it",
-      requestResponse: true,
+      briefing: "Implement it",
+      reportBack: true,
       model: "openai/gpt-5.4",
       cwd: "/repo",
       resumeCommand: "pi --session-id child-session",

@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { SessionDirectory } from "../directory.ts";
 import { createDirectoryTools } from "./directory-tools.ts";
-import { SESSION_REACHABLE_PARAMS, SESSION_REACHABLE_USER_PARAMS } from "./reachable-contract.ts";
+import { SESSION_LIST_PARAMS, SESSION_LIST_USER_PARAMS } from "./list-contract.ts";
 
 export function installDirectoryTools(
   pi: ExtensionAPI,
@@ -21,11 +21,11 @@ export function installDirectoryTools(
     } else {
       const tools = createDirectoryTools(deps.peers, {
         list: {
-          name: "session_reachable",
+          name: "session_list",
           description: "List live user-facing Pi sessions.",
           promptSnippet: "Find live peer sessions",
           promptGuidelines: [],
-          parameters: SESSION_REACHABLE_USER_PARAMS,
+          parameters: SESSION_LIST_USER_PARAMS,
           defaultScope: "user",
         },
         send: {
@@ -33,18 +33,18 @@ export function installDirectoryTools(
           description: "Send a message to another live Pi session.",
           promptSnippet: "Message a live peer",
           promptGuidelines: [
-            "Use session_reachable to find the target.",
+            "Use session_list to find the target.",
             ...(parentSessionId
               ? ["Report to your parent with submit_task_report, never peer messaging."]
               : []),
           ],
         },
         cancel: {
-          name: "session_cancel",
+          name: "session_cancel_turn",
           description: "Cancel another live Pi session's turn.",
           promptSnippet: "Cancel a peer turn",
           promptGuidelines: [
-            "Only cancel a user session when the user directs it.",
+            "Only cancel a user session's turn when the user directs it.",
             ...(parentSessionId ? ["Never cancel your parent session."] : []),
           ],
         },
@@ -68,7 +68,7 @@ export function installDirectoryTools(
           description: "List owned subagents in the branch or tree.",
           promptSnippet: "Find delegated subagents",
           promptGuidelines: [],
-          parameters: SESSION_REACHABLE_PARAMS,
+          parameters: SESSION_LIST_PARAMS,
           defaultScope: "branch",
         },
         send: {

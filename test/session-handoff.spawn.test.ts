@@ -283,7 +283,7 @@ describe("session handoff spawn helpers", () => {
       kind: "pending",
       bootstrap: {
         sessionId: prepared.sessionId,
-        goal: "Finish phase 1",
+        briefing: "Finish phase 1",
         parentSessionFile: "/tmp/project/parent.jsonl",
       },
     });
@@ -293,11 +293,11 @@ describe("session handoff spawn helpers", () => {
 function createBootstrap(sessionId: string) {
   return createChildGeneratedHandoffBootstrap({
     sessionId,
-    goal: "Finish phase 1",
+    briefing: "Finish phase 1",
     title: "Implement autocomplete",
     parentSessionFile: "/tmp/project/parent.jsonl",
     sourceLeafId: "source-leaf",
-    requestResponse: false,
+    reportBack: false,
     bootstrapMode: "review",
     launch: "right",
   });

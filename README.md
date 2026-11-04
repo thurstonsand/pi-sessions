@@ -30,7 +30,7 @@
 
 ![session_search tool](images/session_search.png)
 
-![session_ask tool](images/session_ask.png)
+![session_recall tool](images/session_recall.png)
 
 ## Install
 
@@ -67,9 +67,9 @@ Open the frontend implementation task in a session to the right.
 | Extension          | Surface                                                                                      | What it does                                            |
 | ------------------ | -------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
 | Session Search     | `session_search` pi tool                                                                     | Search through old sessions                             |
-| Session Ask        | `session_ask` pi tool                                                                        | Ask questions about old sessions                        |
+| Session Recall     | `session_recall` pi tool                                                                     | Ask questions about old sessions                        |
 | Session Handoff    | `session_handoff` pi tool, `/handoff` board                                                  | Start user-facing child sessions                        |
-| Session Messaging  | `session_reachable`, `session_send_message`, `session_cancel` pi tools                       | Coordinate between live user-facing Pi sessions         |
+| Session Messaging  | `session_list`, `session_send_message`, `session_cancel_turn` pi tools                       | Coordinate between live user-facing Pi sessions         |
 | Subagents          | `subagent_list`, `subagent_send`, `subagent_cancel`, `subagent_launch`, `submit_task_report` | Delegate and manage background work                     |
 | Session Picker     | `Alt+O`                                                                                      | Reference old sessions in your prompt                   |
 | Session Index      | `/session-index` slash command                                                               | Shows index status and rebuilds the local session index |
@@ -86,7 +86,7 @@ Every feature is on by default. Turn one off with `enable: false` under its own 
     "subagents": { "enable": true },
     "handoff": { "enable": true },
     "search": { "enable": true },
-    "ask": { "enable": true },
+    "recall": { "enable": true },
     "autoTitle": { "enable": true },
     "hooks": { "enable": true }
   }
@@ -104,7 +104,7 @@ File filters distinguish read-or-write evidence from write-only evidence:
 - `files.touched`: sessions that read or changed a path
 - `files.changed`: sessions that changed a path
 
-Use `kind: "user"` or `kind: "subagent"` to filter by session type across the whole index. Searching for sessions that can be addressed right now is a different question, answered by `session_reachable`.
+Use `kind: "user"` or `kind: "subagent"` to filter by session type across the whole index. Searching for sessions that can be addressed right now is a different question, answered by `session_list`.
 
 ## Session Handoff
 
@@ -116,25 +116,25 @@ When a host claims peers, pi-sessions leaves all user-facing coordination and la
 
 Run `/handoff` to open the **Handoffs** board. The Subagents and User sessions tabs show status, age, launch details, and the actions currently available: stop, copy an observation command, or copy a resume command. With a peer-claiming host, only Subagents are shown.
 
-Both launch tools take `goal`, `title` (at most 64 characters), and `requestResponse`, with optional `cwd`, `provider`, `model`, and `thinkingLevel` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). `session_handoff` additionally requires `launch` (`left`, `right`, `up`, `down` when a split backend is available, or `deferred` when enabled). `subagent_launch` has no `launch` parameter, but takes an optional `agent` naming an [agent profile](#agent-profiles). Provider and model must be supplied together.
+Both launch tools take `briefing`, `title` (at most 64 characters), and `report_back`, with optional `cwd`, `provider`, `model`, and `thinking_level` (`off`, `minimal`, `low`, `medium`, `high`, `xhigh`). `session_handoff` additionally requires `launch` (`left`, `right`, `up`, `down` when a split backend is available, or `deferred` when enabled). `subagent_launch` has no `launch` parameter, but takes an optional `agent` naming an [agent profile](#agent-profiles). Provider and model must be supplied together.
 
 ## Session Messaging
 
 Standalone agents can coordinate with live user-facing Pi sessions:
 
-- `session_reachable({})` lists live user sessions only; there is no scope parameter
-- `session_send_message({ session, message, requestResponse })` sends a message to a live user session
-- `session_cancel({ session })` aborts another live user session's current turn
+- `session_list({})` lists live user sessions only; there is no scope parameter
+- `session_send_message({ session, message, report_back })` sends a message to a live user session
+- `session_cancel_turn({ session })` aborts another live user session's current turn
 
 Subagent coordination is a separate addressable directory:
 
 - `subagent_list({ scope? })` lists the ledger/roster with `branch` (default) or `tree` scope
-- `subagent_send({ session, message, requestResponse })` sends to a live subagent (including siblings) or a dormant owned worker, waking owned workers automatically
+- `subagent_send({ session, message, report_back })` sends to a live subagent (including siblings) or a dormant owned worker, waking owned workers automatically
 - `subagent_cancel({ session })` stops a subagent, recording owned cancellation intent before teardown
 - `subagent_launch` creates a delegated background worker (parameters above)
-- `submit_task_report({ status, summary, details?, references?, nextSteps? })` reports to the parent; available only in a subagent session
+- `submit_task_report({ status, summary, details?, references?, next_steps? })` reports to the parent; available only in a subagent session
 
-Pass bare session UUIDs, not `@session:` tokens. A subagent cannot message or cancel its parent; it reports through `submit_task_report`. Incoming messages start an idle recipient and steer a running one. Other dormant sessions cannot receive messages, but remain searchable with `session_search` and `session_ask`. Cancellation results describe delivery and, when available, the resulting worker state; they do not expose transport/managed subsystem tags.
+Pass bare session UUIDs, not `@session:` tokens. A subagent cannot message or cancel its parent; it reports through `submit_task_report`. Incoming messages start an idle recipient and steer a running one. Other dormant sessions cannot receive messages, but remain searchable with `session_search` and `session_recall`. Cancellation results describe delivery and, when available, the resulting worker state; they do not expose transport/managed subsystem tags.
 
 ## Host extension API
 
@@ -164,8 +164,8 @@ interface Host {
 ```
 
 - **Registration:** pi-sessions emits `pi-sessions:hosts` at every `session_start`, including reloads and switches. Register synchronously before returning or awaiting anything. Registration freezes when `emit` returns; late calls throw. Names must match `[a-z][a-z0-9-]*`, be unique, and cannot be `left`, `right`, `up`, `down`, `deferred`, `subagent`, `tmux`, `ghostty`, or `herdr`. TypeBox validates `{ name, peers: true, recall?: true }`; unknown properties and `recall: false` are rejected. Existing peer-only hosts remain supported.
-- **Ownership:** any registered claim suppresses pi-sessions' `session_reachable`, `session_send_message`, `session_cancel`, and `session_handoff`. Peer tools are never registered at extension load, so a host may register its own tools at load without conflicts. Discovery runs before late registration. Pi currently has no tool-unregistration API: definitions retained from a prior standalone session are deactivated with `setActiveTools` and execution-guarded; reload rebuilds registrations. A new standalone session reactivates pi-sessions' tools.
-- **Recall:** `recall: true` additionally suppresses `session_search` and `session_ask`. These tools register only after host discovery, so a host can provide the same names at load time. Retained standalone definitions are deactivated and execution-guarded just like peer tools. Without a recall claim, enabled recall tools are active from the first turn. Indexing, handoff, and the subagent directory keep using pi-sessions' index regardless of recall ownership. Older pi-sessions releases reject the new field; upgrade pi-sessions before enabling a host's recall claim.
+- **Ownership:** any registered claim suppresses pi-sessions' `session_list`, `session_send_message`, `session_cancel_turn`, and `session_handoff`. Peer tools are never registered at extension load, so a host may register its own tools at load without conflicts. Discovery runs before late registration. Pi currently has no tool-unregistration API: definitions retained from a prior standalone session are deactivated with `setActiveTools` and execution-guarded; reload rebuilds registrations. A new standalone session reactivates pi-sessions' tools.
+- **Recall:** `recall: true` additionally suppresses `session_search` and `session_recall`. These tools register only after host discovery, so a host can provide the same names at load time. Retained standalone definitions are deactivated and execution-guarded just like peer tools. Without a recall claim, enabled recall tools are active from the first turn. Indexing, handoff, and the subagent directory keep using pi-sessions' index regardless of recall ownership. Older pi-sessions releases reject the new field; upgrade pi-sessions before enabling a host's recall claim.
 - **Subagents:** `subagent_list`, `subagent_send`, `subagent_cancel`, `subagent_launch`, and `submit_task_report` remain pi-sessions-owned under a host. Availability still follows feature settings, a Herdr pane or tmux installation, delegation depth, and whether the caller is a subagent. The host supplies no waker; owned-worker recovery retains its two 30-second broker-registration waits.
 
 ## Durable lineage entry
@@ -254,7 +254,7 @@ You are the Oracle: a read-only reviewer. Do not modify files. ...
 ```
 
 - `name` must match the file name, and `description` tells the calling agent when to use the profile; both are required. The `subagent_launch` prompt guidelines list every valid profile with its description.
-- `model` is a pi model pattern (`provider/id` or a bare id, optionally with `:<thinking>`), and `thinkingLevel` sets the level separately. Explicit `provider`/`model` and `thinkingLevel` on the launch win, and the resolved model must still be on the handoff roster.
+- `model` is a pi model pattern (`provider/id` or a bare id, optionally with `:<thinking>`), and `thinkingLevel` sets the level separately. Explicit `provider`/`model` and `thinking_level` on the launch win, and the resolved model must still be on the handoff roster.
 - `tools` is a comma-separated allowlist passed to `--tools`; `submit_task_report` is always kept. Without it, the subagent has every tool.
 - The body is added to the subagent's system prompt, in the subagent section after its standard instructions; `AGENTS.md`, extensions, and the report flow are unchanged. The instructions are stored in the child session when it launches, so later edits to the file don't change a running subagent.
 

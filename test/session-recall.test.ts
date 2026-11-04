@@ -3,12 +3,12 @@ import path from "node:path";
 import type { ExtensionAPI, SessionEntry, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { Value } from "typebox/value";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { installAsk } from "../extensions/session-ask/install.ts";
-import { SESSION_ASK_OUTPUT_SCHEMA } from "../extensions/session-ask/tool-contract.ts";
 import {
   createChildGeneratedHandoffBootstrap,
   HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
 } from "../extensions/session-handoff/metadata.ts";
+import { installRecall } from "../extensions/session-recall/install.ts";
+import { SESSION_RECALL_OUTPUT_SCHEMA } from "../extensions/session-recall/tool-contract.ts";
 import {
   initializeSchema,
   insertSession,
@@ -26,19 +26,19 @@ import { shouldMessageSubagent } from "../extensions/subagents/should-message.ts
 import { createTmuxWorkerRuntime } from "../extensions/subagents/worker-runtime.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
-const { runSessionAskAgentMock } = vi.hoisted(() => ({
-  runSessionAskAgentMock: vi.fn(),
+const { runSessionRecallAgentMock } = vi.hoisted(() => ({
+  runSessionRecallAgentMock: vi.fn(),
 }));
 
-vi.mock("../extensions/session-ask/agent.ts", () => ({
-  runSessionAskAgent: runSessionAskAgentMock,
+vi.mock("../extensions/session-recall/agent.ts", () => ({
+  runSessionRecallAgent: runSessionRecallAgentMock,
 }));
 
-const testFs = createTestFilesystem("pi-sessions-ask-");
+const testFs = createTestFilesystem("pi-sessions-recall-");
 const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
 
 afterEach(() => {
-  runSessionAskAgentMock.mockReset();
+  runSessionRecallAgentMock.mockReset();
   if (originalAgentDir === undefined) {
     delete process.env.PI_CODING_AGENT_DIR;
   } else {
@@ -136,8 +136,8 @@ describe("shouldMessageSubagent", () => {
         childSessionId: childId,
         childSessionFile: "/child.jsonl",
         title: "Child",
-        goal: "Work",
-        requestResponse: true,
+        briefing: "Work",
+        reportBack: true,
         cwd: "/repo",
         resumeCommand: "pi --session /child.jsonl",
         depth: 1,
@@ -173,9 +173,9 @@ describe("shouldMessageSubagent", () => {
   }
 });
 
-describe("session_ask tool", () => {
+describe("session_recall tool", () => {
   it("limits collapsed answer previews by rendered terminal rows", () => {
-    const tool = registerSessionAskTool();
+    const tool = registerSessionRecallTool();
     const component = tool.renderResult?.(
       {
         content: [{ type: "text", text: "answer" }],
@@ -203,7 +203,7 @@ describe("session_ask tool", () => {
   });
 
   it("requires a non-empty question", async () => {
-    const tool = registerSessionAskTool();
+    const tool = registerSessionRecallTool();
 
     await expect(
       tool.execute(
@@ -213,11 +213,11 @@ describe("session_ask tool", () => {
         undefined,
         createToolContext(testFs.createTempDir()),
       ),
-    ).rejects.toThrow("session_ask requires a question.");
+    ).rejects.toThrow("session_recall requires a question.");
   });
 
   it("rejects non-uuid session references", async () => {
-    const tool = registerSessionAskTool();
+    const tool = registerSessionRecallTool();
 
     await expect(
       tool.execute(
@@ -243,7 +243,7 @@ describe("session_ask tool", () => {
     setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
     db.close();
 
-    const tool = registerSessionAskTool();
+    const tool = registerSessionRecallTool();
     await expect(
       tool.execute(
         "tool-1",
@@ -303,12 +303,12 @@ describe("session_ask tool", () => {
     );
     db.close();
 
-    runSessionAskAgentMock.mockResolvedValue({
+    runSessionRecallAgentMock.mockResolvedValue({
       answer: "Resolved by exact id.",
       relevantFiles: [],
     });
 
-    const tool = registerSessionAskTool();
+    const tool = registerSessionRecallTool();
     const result = await tool.execute(
       "tool-1",
       { session: sessionId, question: "What happened?" },
@@ -322,13 +322,13 @@ describe("session_ask tool", () => {
       sessionPath,
     });
     expect((result.content[0] as { text: string }).text).toContain("Resolved by exact id.");
-    expect(tool.outputSchema).toBe(SESSION_ASK_OUTPUT_SCHEMA);
-    expect(Value.Check(SESSION_ASK_OUTPUT_SCHEMA, result.structuredContent)).toBe(true);
+    expect(tool.outputSchema).toBe(SESSION_RECALL_OUTPUT_SCHEMA);
+    expect(Value.Check(SESSION_RECALL_OUTPUT_SCHEMA, result.structuredContent)).toBe(true);
     expect(result.structuredContent).toEqual({
-      sessionId,
-      sessionName: "",
+      session_id: sessionId,
+      session_name: "",
       answer: "Resolved by exact id.",
-      relevantFiles: [],
+      relevant_files: [],
     });
   });
 
@@ -336,7 +336,7 @@ describe("session_ask tool", () => {
     const { root, sessionId } = indexPlainSession("cccccccc-1234-1234-1234-123456789abc");
     const shouldMessage = vi.fn(async () => true);
 
-    const tool = registerSessionAskTool(shouldMessage);
+    const tool = registerSessionRecallTool(shouldMessage);
     await expect(
       tool.execute(
         "tool-1",
@@ -346,18 +346,18 @@ describe("session_ask tool", () => {
         createToolContext(root),
       ),
     ).rejects.toThrow(
-      "That session is your unfinished subagent. Use session_send_message to ask it directly.",
+      "That session is your unfinished subagent. Use subagent_send to ask it directly.",
     );
 
     expect(shouldMessage).toHaveBeenCalledWith(sessionId);
-    expect(runSessionAskAgentMock).not.toHaveBeenCalled();
+    expect(runSessionRecallAgentMock).not.toHaveBeenCalled();
   });
 
   it("redirects for a just-launched subagent the index has never seen", async () => {
     const { root } = indexPlainSession("eeeeeeee-1234-1234-1234-123456789abc");
     const unindexedId = "ffffffff-1234-1234-1234-123456789abc";
 
-    const tool = registerSessionAskTool(async (sessionId) => sessionId === unindexedId);
+    const tool = registerSessionRecallTool(async (sessionId) => sessionId === unindexedId);
     await expect(
       tool.execute(
         "tool-1",
@@ -367,18 +367,18 @@ describe("session_ask tool", () => {
         createToolContext(root),
       ),
     ).rejects.toThrow(
-      "That session is your unfinished subagent. Use session_send_message to ask it directly.",
+      "That session is your unfinished subagent. Use subagent_send to ask it directly.",
     );
   });
 
   it("teaches the subagent rule only when subagents are wired in", () => {
     indexPlainSession("abababab-1234-1234-1234-123456789abc");
 
-    expect(registerSessionAskTool(async () => false).promptGuidelines).toContain(
-      "Use session_send_message for your unfinished subagents; session_ask can read completed subagent transcripts.",
+    expect(registerSessionRecallTool(async () => false).promptGuidelines).toContain(
+      "To ask an unfinished subagent, message it with subagent_send instead.",
     );
-    expect(registerSessionAskTool().promptGuidelines).toEqual([
-      "Use session_ask with focused questions rather than broad recap requests.",
+    expect(registerSessionRecallTool().promptGuidelines).toEqual([
+      "Ask session_recall focused questions, not for a recap.",
     ]);
   });
 
@@ -386,12 +386,12 @@ describe("session_ask tool", () => {
     "interrogates a session that is %s",
     async () => {
       const { root, sessionId } = indexPlainSession("dddddddd-1234-1234-1234-123456789abc");
-      runSessionAskAgentMock.mockResolvedValue({
+      runSessionRecallAgentMock.mockResolvedValue({
         answer: "Not a subagent.",
         relevantFiles: [],
       });
 
-      const tool = registerSessionAskTool(async () => false);
+      const tool = registerSessionRecallTool(async () => false);
       const result = await tool.execute(
         "tool-1",
         { session: sessionId, question: "What happened?" },
@@ -400,7 +400,7 @@ describe("session_ask tool", () => {
         createToolContext(root),
       );
 
-      expect(runSessionAskAgentMock).toHaveBeenCalledOnce();
+      expect(runSessionRecallAgentMock).toHaveBeenCalledOnce();
       expect((result.content[0] as { text: string }).text).toContain("Not a subagent.");
     },
   );
@@ -430,11 +430,11 @@ describe("session_ask tool", () => {
         data: createChildGeneratedHandoffBootstrap({
           sessionId,
           launch: "deferred",
-          goal: "Continue the mission",
+          briefing: "Continue the mission",
           title: "Starting child",
           parentSessionFile: "/tmp/parent.jsonl",
           sourceLeafId: "parent-leaf",
-          requestResponse: true,
+          reportBack: true,
           bootstrapMode: "automatic",
         }),
       },
@@ -460,7 +460,7 @@ describe("session_ask tool", () => {
     );
     db.close();
 
-    const tool = registerSessionAskTool();
+    const tool = registerSessionRecallTool();
     const result = await tool.execute(
       "tool-1",
       { session: sessionId, question: "What happened?" },
@@ -469,7 +469,7 @@ describe("session_ask tool", () => {
       createToolContext(root),
     );
 
-    expect(runSessionAskAgentMock).not.toHaveBeenCalled();
+    expect(runSessionRecallAgentMock).not.toHaveBeenCalled();
     expect((result.content[0] as { text: string }).text).toContain("still starting");
     expect(result.details).toMatchObject({
       answer: expect.stringContaining("has not received its kickoff"),
@@ -478,8 +478,8 @@ describe("session_ask tool", () => {
       sessionPath,
       question: "What happened?",
     });
-    expect(tool.outputSchema).toBe(SESSION_ASK_OUTPUT_SCHEMA);
-    expect(Value.Check(SESSION_ASK_OUTPUT_SCHEMA, result.structuredContent)).toBe(true);
+    expect(tool.outputSchema).toBe(SESSION_RECALL_OUTPUT_SCHEMA);
+    expect(Value.Check(SESSION_RECALL_OUTPUT_SCHEMA, result.structuredContent)).toBe(true);
   });
 
   it("includes session metadata and question in updates and final output", async () => {
@@ -537,12 +537,12 @@ describe("session_ask tool", () => {
     );
     db.close();
 
-    runSessionAskAgentMock.mockResolvedValue({
+    runSessionRecallAgentMock.mockResolvedValue({
       answer: "Decisions were made carefully.",
       relevantFiles: [],
     });
 
-    const tool = registerSessionAskTool();
+    const tool = registerSessionRecallTool();
     const updates: Array<{ content: Array<{ type: string; text?: string }> }> = [];
     const result = await tool.execute(
       "tool-1",
@@ -555,7 +555,7 @@ describe("session_ask tool", () => {
     expect(updates).toHaveLength(2);
     const finalUpdate = updates[1];
     if (!finalUpdate) {
-      throw new Error("Expected final session_ask update.");
+      throw new Error("Expected final session_recall update.");
     }
     const updateText = finalUpdate.content[0]?.text;
     expect(updateText).toContain(`session: ${sessionId}`);
@@ -570,11 +570,13 @@ describe("session_ask tool", () => {
   });
 });
 
-function registerSessionAskTool(shouldMessageSubagent?: (sessionId: string) => Promise<boolean>) {
+function registerSessionRecallTool(
+  shouldMessageSubagent?: (sessionId: string) => Promise<boolean>,
+) {
   let registeredTool: ToolDefinition | undefined;
 
   const settings = loadSettings();
-  installAsk(
+  installRecall(
     {
       getActiveTools: () => [],
       setActiveTools() {},
@@ -595,7 +597,7 @@ function registerSessionAskTool(shouldMessageSubagent?: (sessionId: string) => P
   ).refresh();
 
   if (!registeredTool) {
-    throw new Error("session_ask tool was not registered");
+    throw new Error("session_recall tool was not registered");
   }
 
   return registeredTool;

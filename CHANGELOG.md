@@ -4,6 +4,20 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Model-facing tools and arguments are renamed for the call they make, all in snake_case, with no tool or argument aliases:
+  - `session_reachable` → `session_list`, `session_ask` → `session_recall`, `session_cancel` → `session_cancel_turn`.
+  - `session_handoff` and `subagent_launch`: `goal` → `briefing`, `requestResponse` → `report_back`, `thinkingLevel` → `thinking_level`.
+  - `session_send_message` and `subagent_send`: `requestResponse` → `report_back`.
+  - `submit_task_report`: `nextSteps` → `next_steps`.
+  - Inside `session_recall`, the navigation agent's `session_search` and `session_read` are now `recall_search` and `recall_read`; `recall_read` takes `entry_id`, `to` (was `pathTarget`), and `tool_output: trimmed | whole` (was `body: preview | full`); `provide_results` and `create_handoff_context` take `relevant_files` and `open_questions`.
+- The `sessions.ask` settings block is now `sessions.recall`.
+- `session_recall`, `session_search`, `session_list`, `subagent_list`, `session_cancel_turn`, `subagent_cancel`, and `submit_task_report` show only their name on the tool call row. Pi 1.5 otherwise prints every argument there, repeating what the result already shows.
+- Tool output the model reads is snake_case too: `session_list`/`subagent_list` sessions, `session_search` and `session_recall` results and structured content, and the launch receipt `session_handoff` and `subagent_launch` return.
+- Persisted handoff, bootstrap, subagent ledger, report, and received-message entries record `briefing`, `reportBack`, and `next_steps`. Entries written by earlier releases are read with their old names, so existing subagents, pending bootstraps, reports, and the index's handoff briefings carry over.
+- Session index schema version 16. The index rebuilds itself on the next session start.
+
 ## [0.22.1] - 2026-11-02
 
 ### Added

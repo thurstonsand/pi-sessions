@@ -4,6 +4,7 @@ import { installRecallTool } from "../hosts/install.ts";
 import { isSessionStarting } from "../session-handoff/metadata.ts";
 import type { IndexHandle } from "../shared/composition.ts";
 import type { ModelRuntimeProvider } from "../shared/model-runtime.ts";
+import { renderToolNameCall } from "../shared/rendering/tool-name-call.ts";
 import {
   getSessionById,
   type SessionLineageRow,
@@ -11,22 +12,22 @@ import {
 } from "../shared/session-index/index.ts";
 import { isExactSessionId } from "../shared/session-ui.ts";
 import type { SessionSettings } from "../shared/settings.ts";
-import { runSessionAskAgent } from "./agent.ts";
-import { renderSessionAskResult } from "./renderer.ts";
+import { runSessionRecallAgent } from "./agent.ts";
+import { renderSessionRecallResult } from "./renderer.ts";
 import {
-  SESSION_ASK_OUTPUT_SCHEMA,
-  type SessionAskOutput,
-  type SessionAskProgressDetails,
-  type SessionAskRelevantFile,
-  type SessionAskResultDetails,
+  SESSION_RECALL_OUTPUT_SCHEMA,
+  type SessionRecallOutput,
+  type SessionRecallProgressDetails,
+  type SessionRecallRelevantFile,
+  type SessionRecallResultDetails,
 } from "./tool-contract.ts";
 
-interface SessionAskToolParams {
+interface SessionRecallToolParams {
   session: string;
   question: string;
 }
 
-export function installAsk(
+export function installRecall(
   pi: ExtensionAPI,
   deps: {
     settings: SessionSettings;
@@ -40,17 +41,15 @@ export function installAsk(
   const indexPath = deps.index.path;
 
   return installRecallTool(pi, deps.claimsRecall, {
-    name: "session_ask",
-    label: "Session Ask",
+    name: "session_recall",
+    label: "Recall Session",
     description: "Interrogate a Pi session transcript",
     annotations: { readOnlyHint: true, openWorldHint: false },
     promptSnippet: "Recall information, decisions, or reasoning from a Pi session by id",
     promptGuidelines: [
-      "Use session_ask with focused questions rather than broad recap requests.",
+      "Ask session_recall focused questions, not for a recap.",
       ...(deps.shouldMessageSubagent
-        ? [
-            "Use session_send_message for your unfinished subagents; session_ask can read completed subagent transcripts.",
-          ]
+        ? ["To ask an unfinished subagent, message it with subagent_send instead."]
         : []),
     ],
     parameters: Type.Object({
@@ -61,39 +60,39 @@ export function installAsk(
         description: "What to find in that session's transcript",
       }),
     }),
-    outputSchema: SESSION_ASK_OUTPUT_SCHEMA,
-    async execute(_toolCallId, params: SessionAskToolParams, signal, onUpdate, ctx) {
+    outputSchema: SESSION_RECALL_OUTPUT_SCHEMA,
+    async execute(_toolCallId, params: SessionRecallToolParams, signal, onUpdate, ctx) {
       const sessionId = params.session.trim();
       if (!sessionId) {
-        throw new Error("session_ask requires a session id.");
+        throw new Error("session_recall requires a session id.");
       }
 
       const question = params.question.trim();
       if (!question) {
-        throw new Error("session_ask requires a question.");
+        throw new Error("session_recall requires a question.");
       }
 
       if (!isExactSessionId(sessionId)) {
         throw new Error(
-          "session_ask requires an exact session UUID. Use autocomplete or session_search to find it.",
+          "session_recall requires an exact session UUID. Use autocomplete or session_search to find it.",
         );
       }
 
       // Unfinished children may not have reached the index yet.
       if (await deps.shouldMessageSubagent?.(sessionId)) {
         throw new Error(
-          "That session is your unfinished subagent. Use session_send_message to ask it directly.",
+          "That session is your unfinished subagent. Use subagent_send to ask it directly.",
         );
       }
 
-      const resolvedTarget = resolveSessionAskTarget(sessionId, indexPath);
+      const resolvedTarget = resolveSessionRecallTarget(sessionId, indexPath);
       if (!resolvedTarget.resolved) {
         throw new Error(resolvedTarget.error ?? "Unable to resolve session id.");
       }
 
       const startingAnswer = getStartingSessionAnswer(resolvedTarget.resolved.sessionPath);
       if (startingAnswer) {
-        const details: SessionAskResultDetails = {
+        const details: SessionRecallResultDetails = {
           answer: startingAnswer,
           relevantFiles: [],
           sessionId: resolvedTarget.resolved.sessionId,
@@ -106,7 +105,7 @@ export function installAsk(
             {
               type: "text",
               text: [
-                formatSessionAskHeader(
+                formatSessionRecallHeader(
                   resolvedTarget.resolved.sessionId,
                   resolvedTarget.resolved.sessionName,
                   question,
@@ -116,11 +115,11 @@ export function installAsk(
             },
           ],
           details,
-          structuredContent: formatSessionAskOutput(details),
+          structuredContent: formatSessionRecallOutput(details),
         };
       }
 
-      const progressDetails: SessionAskProgressDetails = {
+      const progressDetails: SessionRecallProgressDetails = {
         question,
         sessionId: resolvedTarget.resolved.sessionId,
         sessionName: resolvedTarget.resolved.sessionName,
@@ -135,7 +134,7 @@ export function installAsk(
         content: [
           {
             type: "text",
-            text: formatSessionAskHeader(
+            text: formatSessionRecallHeader(
               resolvedTarget.resolved.sessionId,
               resolvedTarget.resolved.sessionName,
               question,
@@ -146,13 +145,13 @@ export function installAsk(
       });
 
       const modelRuntime = deps.getModelRuntime(ctx.modelRegistry);
-      const agentResult = await runSessionAskAgent({
+      const agentResult = await runSessionRecallAgent({
         ctx,
         modelRuntime,
         target: resolvedTarget.resolved,
         question,
         indexPath,
-        askSettings: settings.ask,
+        recallSettings: settings.recall,
         thinkingLevel: pi.getThinkingLevel(),
         signal,
       });
@@ -160,7 +159,7 @@ export function installAsk(
       const answer = agentResult?.answer || "Could not determine an answer from the session.";
       const relevantFiles = agentResult?.relevantFiles ?? [];
 
-      const details: SessionAskResultDetails = {
+      const details: SessionRecallResultDetails = {
         answer,
         ...(agentResult?.debugSessionPath
           ? { debugSessionPath: agentResult.debugSessionPath }
@@ -176,20 +175,21 @@ export function installAsk(
           {
             type: "text",
             text: [
-              formatSessionAskHeader(
+              formatSessionRecallHeader(
                 resolvedTarget.resolved.sessionId,
                 resolvedTarget.resolved.sessionName,
                 question,
               ),
-              formatSessionAskAnswer(answer, relevantFiles, agentResult?.debugSessionPath),
+              formatSessionRecallAnswer(answer, relevantFiles, agentResult?.debugSessionPath),
             ].join("\n\n"),
           },
         ],
         details,
-        structuredContent: formatSessionAskOutput(details),
+        structuredContent: formatSessionRecallOutput(details),
       };
     },
-    renderResult: renderSessionAskResult,
+    renderCall: renderToolNameCall("session_recall"),
+    renderResult: renderSessionRecallResult,
   });
 }
 
@@ -204,7 +204,7 @@ function getStartingSessionAnswer(sessionPath: string): string | undefined {
   return undefined;
 }
 
-function resolveSessionAskTarget(
+function resolveSessionRecallTarget(
   sessionId: string,
   indexPath: string,
 ): {
@@ -225,16 +225,20 @@ function resolveSessionAskTarget(
   }
 }
 
-function formatSessionAskOutput(details: SessionAskResultDetails): SessionAskOutput {
+function formatSessionRecallOutput(details: SessionRecallResultDetails): SessionRecallOutput {
   return {
-    sessionId: details.sessionId,
-    sessionName: details.sessionName,
+    session_id: details.sessionId,
+    session_name: details.sessionName,
     answer: details.answer,
-    relevantFiles: details.relevantFiles,
+    relevant_files: details.relevantFiles,
   };
 }
 
-function formatSessionAskHeader(sessionId: string, sessionName: string, question: string): string {
+function formatSessionRecallHeader(
+  sessionId: string,
+  sessionName: string,
+  question: string,
+): string {
   return [
     `session: ${sessionId}`,
     `title: ${sessionName || "[unnamed]"}`,
@@ -242,9 +246,9 @@ function formatSessionAskHeader(sessionId: string, sessionName: string, question
   ].join("\n");
 }
 
-function formatSessionAskAnswer(
+function formatSessionRecallAnswer(
   answer: string,
-  relevantFiles: SessionAskRelevantFile[],
+  relevantFiles: SessionRecallRelevantFile[],
   debugSessionPath: string | undefined,
 ): string {
   const lines = [answer || "No answer generated."];

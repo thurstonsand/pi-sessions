@@ -1,14 +1,16 @@
 import { normalizeOptionalText } from "../shared/text.ts";
-import type { SessionAskResultDetails } from "./tool-contract.ts";
+import type { SessionRecallResultDetails } from "./tool-contract.ts";
 
-export interface SessionAskViewModel {
+export interface SessionRecallViewModel {
   sessionId: string;
   sessionName?: string | undefined;
   question: string;
   answer: string;
 }
 
-export function buildSessionAskView(details: SessionAskResultDetails): SessionAskViewModel {
+export function buildSessionRecallView(
+  details: SessionRecallResultDetails,
+): SessionRecallViewModel {
   return {
     sessionId: details.sessionId.trim(),
     sessionName: normalizeOptionalText(details.sessionName),

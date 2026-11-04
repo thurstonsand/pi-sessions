@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSessionAskPresentation } from "../extensions/session-ask/presenter.ts";
+import { buildSessionRecallPresentation } from "../extensions/session-recall/presenter.ts";
 
 const theme = {
   bold: (text: string) => text,
@@ -7,10 +7,10 @@ const theme = {
   bg: (_token: string, text: string) => text,
 };
 
-describe("session-ask presenter", () => {
+describe("session-recall presenter", () => {
   it("maps the view model into generic expandable content", () => {
     expect(
-      buildSessionAskPresentation(
+      buildSessionRecallPresentation(
         {
           answer: "Answer.",
           question: "Question?",

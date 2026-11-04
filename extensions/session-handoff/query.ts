@@ -265,7 +265,7 @@ function getBestTextSnippet(result: SearchSessionResult): string | undefined {
 function getSessionTitle(result: SearchSessionResult): string {
   return (
     normalizeDisplayText(result.sessionName) ??
-    normalizeDisplayText(result.handoffGoal) ??
+    normalizeDisplayText(result.handoffBriefing) ??
     normalizeDisplayText(result.firstUserPrompt) ??
     normalizeDisplayText(stripSearchSnippetMarkers(getBestTextSnippet(result))) ??
     shortenSessionId(result.sessionId)

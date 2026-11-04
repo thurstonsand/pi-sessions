@@ -11,7 +11,7 @@ const childId = "87654321-1234-1234-1234-123456789abc";
 const request = {
   target: childId,
   body: "Provide more detail.",
-  requestResponse: true,
+  reportBack: true,
   sourceToolCallId: "tool-1",
 };
 
@@ -217,8 +217,8 @@ function launchEntry() {
       childSessionId: childId,
       childSessionFile: "/tmp/child.jsonl",
       title: "Child",
-      goal: "Work",
-      requestResponse: true,
+      briefing: "Work",
+      reportBack: true,
       model: "openai/gpt-5.4",
       cwd: "/repo",
       resumeCommand: "pi --resume child",

@@ -5,7 +5,7 @@ export interface IncomingMessageViewModel {
   sourceSessionId: string;
   sourceSessionName?: string | undefined;
   relation?: string | undefined;
-  requestResponse: boolean;
+  reportBack: boolean;
   body: string;
 }
 
@@ -14,7 +14,7 @@ export function buildIncomingMessageView(received: ReceivedMessageEntry): Incomi
     sourceSessionId: received.source.sessionId,
     sourceSessionName: normalizeOptionalText(received.source.sessionName),
     relation: received.relation,
-    requestResponse: received.requestResponse === true,
+    reportBack: received.reportBack === true,
     body: received.body,
   };
 }

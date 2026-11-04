@@ -39,7 +39,7 @@ import { formatHandoffError } from "./ui.ts";
 
 const SESSION_TOKEN_PROMPT_SECTION = "pi_sessions_session_token";
 const SESSION_TOKEN_PROMPT =
-  "When the user references @session:<uuid>, treat it as a session token. If you call session_ask, pass only the UUID value, not the @session: prefix.";
+  "When the user references @session:<uuid>, treat it as a session token. If you call session_recall, pass only the UUID value, not the @session: prefix.";
 
 interface HandoffToolRendererState {
   callComponent?: HandoffToolComponent | undefined;
@@ -90,14 +90,13 @@ export function installHandoff(
         offersAgents ? agentProfiles.profiles : [],
       ),
       parameters: Type.Object({
-        goal: Type.String({
+        briefing: Type.String({
           description:
-            "Self-contained briefing that explains the objective, relevant context, constraints, and expected result.",
+            "The child's first message, self-contained: the objective, relevant context, constraints, and what done means.",
         }),
         title: Type.String({
           maxLength: MAX_HANDOFF_TITLE_LENGTH,
-          description:
-            "Short display title for the child session, 64 characters or less. Summarize the mission; do not repeat the full goal.",
+          description: "Short display title for the child session, 64 characters or less.",
         }),
         ...(name === "session_handoff" ? { launch: buildHandoffLaunchSchema(launchTargets) } : {}),
         cwd: Type.Optional(
@@ -105,9 +104,8 @@ export function installHandoff(
             description: "Optional target working directory (defaults to current).",
           }),
         ),
-        requestResponse: Type.Boolean({
-          description:
-            "Whether the child session should report completion/results of its task back to this session.",
+        report_back: Type.Boolean({
+          description: "Whether the child session reports back to this session when done.",
         }),
         provider: Type.Optional(
           Type.String({
@@ -119,7 +117,7 @@ export function installHandoff(
             description: "Model id for the child session.",
           }),
         ),
-        thinkingLevel: Type.Optional(
+        thinking_level: Type.Optional(
           Type.Union(
             THINKING_LEVELS.map((level) => Type.Literal(level)),
             {
@@ -134,7 +132,7 @@ export function installHandoff(
               agent: Type.Optional(
                 Type.String({
                   description:
-                    "Agent profile to run the subagent as. The profile adds instructions to the subagent's system prompt and may set its model and thinking level; explicit provider/model and thinkingLevel take precedence.",
+                    "Agent profile to run the subagent as. The profile adds instructions to the subagent's system prompt and may set its model and thinking level; explicit provider/model and thinking_level take precedence.",
                 }),
               ),
             }

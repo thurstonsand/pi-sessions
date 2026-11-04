@@ -7,7 +7,7 @@ export interface HandoffToolViewModel {
   toolName: string;
   launch?: string | undefined;
   title?: string | undefined;
-  goal?: string | undefined;
+  briefing?: string | undefined;
   provider?: string | undefined;
   model?: string | undefined;
   thinkingLevel?: ThinkingLevel | undefined;
@@ -22,13 +22,13 @@ export function buildHandoffToolView(
   const record = isRecord(args) ? args : {};
   const provider = normalizeOptionalText(result?.provider) ?? readString(record.provider);
   const model = normalizeOptionalText(result?.modelName) ?? readString(record.model);
-  const thinkingLevel = result?.thinkingLevel ?? readThinkingLevel(record.thinkingLevel);
+  const thinkingLevel = result?.thinkingLevel ?? readThinkingLevel(record.thinking_level);
   return {
     toolName,
     launch:
       toolName === "subagent_launch" ? "subagent" : (readString(record.launch) ?? result?.launch),
     title: readString(record.title) ?? result?.title,
-    goal: readString(record.goal),
+    briefing: readString(record.briefing),
     ...(provider ? { provider } : {}),
     ...(model ? { model } : {}),
     ...(thinkingLevel ? { thinkingLevel } : {}),

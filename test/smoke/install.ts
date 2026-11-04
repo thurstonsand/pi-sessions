@@ -38,7 +38,7 @@ export default function install(pi: ExtensionAPI): void {
       return fauxAssistantMessage(
         fauxToolCall("create_handoff_context", {
           summary: "Credential-free smoke task. Report SMOKE_REPORT to the parent.",
-          relevantFiles: [],
+          relevant_files: [],
         }),
       );
     }

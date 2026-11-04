@@ -873,7 +873,7 @@ function subagent(
     ownerTitle: "Board refinement",
     ownerIsCurrentSession: true,
     title,
-    goal: "Do the work",
+    briefing: "Do the work",
     model: "openai/gpt-5.6-sol:high",
     cwd: "/repo",
     resumeCommand: `pi --session-id '${sessionId}'`,

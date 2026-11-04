@@ -4,14 +4,14 @@ import type { SendMessageToolDetails } from "./message-contracts.ts";
 export interface SendMessageRenderArgs {
   session?: string | undefined;
   message?: string | undefined;
-  requestResponse?: boolean | undefined;
+  report_back?: boolean | undefined;
 }
 
 export interface SendingMessageViewModel {
   status: "sending";
   targetSessionId?: string | undefined;
   relation?: string | undefined;
-  requestResponse: boolean;
+  reportBack: boolean;
   body: string;
 }
 
@@ -20,7 +20,7 @@ export interface DeliveredMessageViewModel {
   targetSessionId: string;
   targetSessionName?: string | undefined;
   relation?: string | undefined;
-  requestResponse: boolean;
+  reportBack: boolean;
   body: string;
 }
 
@@ -34,7 +34,7 @@ export function buildSendingMessageView(
     status: "sending",
     targetSessionId: normalizeOptionalText(args?.session),
     relation,
-    requestResponse: args?.requestResponse === true,
+    reportBack: args?.report_back === true,
     body: args?.message ?? "",
   };
 }
@@ -48,7 +48,7 @@ export function buildDeliveredMessageView(
     targetSessionId: details.target.sessionId,
     targetSessionName: normalizeOptionalText(details.target.sessionName),
     relation: details.relation,
-    requestResponse: args?.requestResponse === true,
+    reportBack: args?.report_back === true,
     body: args?.message?.trim() ?? "",
   };
 }

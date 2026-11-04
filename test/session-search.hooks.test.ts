@@ -258,7 +258,7 @@ describe("session-search hooks", () => {
         customType: "pi-sessions.handoff",
         data: {
           origin: "handoff",
-          goal: "Finish the handoff",
+          briefing: "Finish the handoff",
           title: "Implement autocomplete",
           initial_prompt: "Finish the handoff",
           launch: "deferred",
@@ -274,13 +274,13 @@ describe("session-search hooks", () => {
     const indexedDb = openIndexDatabase(indexPath, { create: false });
     const childRow = indexedDb
       .prepare(
-        `SELECT parent_session_path as parentSessionPath, parent_session_id as parentSessionId, session_origin as sessionOrigin, handoff_goal as handoffGoal FROM sessions WHERE session_id = ?`,
+        `SELECT parent_session_path as parentSessionPath, parent_session_id as parentSessionId, session_origin as sessionOrigin, handoff_briefing as handoffBriefing FROM sessions WHERE session_id = ?`,
       )
       .get("child-session") as {
       parentSessionPath?: string;
       parentSessionId?: string;
       sessionOrigin?: string;
-      handoffGoal?: string;
+      handoffBriefing?: string;
     };
     indexedDb.close();
 
@@ -288,7 +288,7 @@ describe("session-search hooks", () => {
       parentSessionPath: parentPath,
       parentSessionId: "parent-session",
       sessionOrigin: "handoff",
-      handoffGoal: "Finish the handoff",
+      handoffBriefing: "Finish the handoff",
     });
   });
 

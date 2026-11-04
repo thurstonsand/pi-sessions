@@ -29,7 +29,7 @@ const SESSION_LINEAGE_QUERY_ROW_SCHEMA = Type.Object({
   parentSessionPath: NULLABLE_STRING_SCHEMA,
   parentSessionId: NULLABLE_STRING_SCHEMA,
   sessionOrigin: Type.Union([SESSION_ORIGIN_SCHEMA, Type.Null()]),
-  handoffGoal: NULLABLE_STRING_SCHEMA,
+  handoffBriefing: NULLABLE_STRING_SCHEMA,
 });
 
 const SESSION_RELATED_QUERY_ROW_SCHEMA = Type.Intersect([
@@ -64,7 +64,7 @@ function sessionLineageColumns(alias?: string): string {
     `${prefix}parent_session_path as parentSessionPath`,
     `${prefix}parent_session_id as parentSessionId`,
     `${prefix}session_origin as sessionOrigin`,
-    `${prefix}handoff_goal as handoffGoal`,
+    `${prefix}handoff_briefing as handoffBriefing`,
   ].join(",\n          ");
 }
 
@@ -82,7 +82,7 @@ function buildSessionLineageRow(
     parentSessionPath: row.parentSessionPath ?? undefined,
     parentSessionId: row.parentSessionId ?? undefined,
     sessionOrigin: row.sessionOrigin ?? undefined,
-    handoffGoal: row.handoffGoal ?? undefined,
+    handoffBriefing: row.handoffBriefing ?? undefined,
   };
 }
 

@@ -1,6 +1,5 @@
 import { type ExtensionAPI, SessionManager } from "@earendil-works/pi-coding-agent";
 import { HostRegistry } from "./hosts/registry.ts";
-import { installAsk } from "./session-ask/install.ts";
 import { installAutoTitle } from "./session-auto-title/install.ts";
 import { installHandoff } from "./session-handoff/install.ts";
 import { installHooks } from "./session-hooks/install.ts";
@@ -9,6 +8,7 @@ import { createPeerDirectory, createSubagentDirectory } from "./session-messagin
 import { installMessaging } from "./session-messaging/install.ts";
 import { MessageRouter } from "./session-messaging/message-router.ts";
 import { installDirectoryTools } from "./session-messaging/pi/install.ts";
+import { installRecall } from "./session-recall/install.ts";
 import { installSearch } from "./session-search/install.ts";
 import type { SessionLifecycle } from "./shared/composition.ts";
 import { type HerdrSession, resolveHerdrSession } from "./shared/herdr.ts";
@@ -100,9 +100,9 @@ export default function piSessions(pi: ExtensionAPI): void {
       installSearch(pi, { settings, index, claimsRecall: () => hosts.claimsRecall() }),
     );
   }
-  if (settings.features.ask) {
+  if (settings.features.recall) {
     recallTools.push(
-      installAsk(pi, {
+      installRecall(pi, {
         settings,
         index,
         claimsRecall: () => hosts.claimsRecall(),

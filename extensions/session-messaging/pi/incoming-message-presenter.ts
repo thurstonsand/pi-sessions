@@ -9,10 +9,9 @@ export function buildIncomingMessagePresentation(
   const source = model.sourceSessionName
     ? `${model.sourceSessionName} (${model.sourceSessionId})`
     : model.sourceSessionId;
-  const metadata = [
-    model.relation,
-    model.requestResponse ? "response requested" : undefined,
-  ].filter((item): item is string => Boolean(item));
+  const metadata = [model.relation, model.reportBack ? "report back" : undefined].filter(
+    (item): item is string => Boolean(item),
+  );
   const metadataHint = metadata.length > 0 ? ` (${metadata.join(", ")})` : "";
 
   return {

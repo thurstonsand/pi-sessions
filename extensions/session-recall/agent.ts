@@ -14,36 +14,36 @@ import {
   searchSessionChunks,
   withSessionIndex,
 } from "../shared/session-index/index.ts";
-import { type AskSettings, getDefaultSessionAskRunsDir } from "../shared/settings.ts";
+import { getDefaultSessionRecallRunsDir, type RecallSettings } from "../shared/settings.ts";
 import {
   buildSessionMap,
   buildSessionMetadata,
   findBranchesForEntry,
   findSpanForEntry,
   loadSessionNavigationData,
+  type RecallReadResult,
+  type RecallSearchHitBranch,
+  type RecallSearchHitSpan,
   readEntriesFromEntry,
   readProjectAgentsMd,
   type SessionNavigationData,
-  type SessionReadResult,
-  type SessionSearchHitBranch,
-  type SessionSearchHitSpan,
 } from "./navigate.ts";
 
-const SEARCH_SESSION_TOOL_NAME = "session_search";
-const SESSION_READ_TOOL_NAME = "session_read";
+const RECALL_SEARCH_TOOL_NAME = "recall_search";
+const RECALL_READ_TOOL_NAME = "recall_read";
 const PROVIDE_RESULTS_TOOL_NAME = "provide_results";
-const SESSION_ASK_AGENT_TOOLS = [
+const SESSION_RECALL_AGENT_TOOLS = [
   "read",
   "grep",
   "find",
   "ls",
-  SEARCH_SESSION_TOOL_NAME,
-  SESSION_READ_TOOL_NAME,
+  RECALL_SEARCH_TOOL_NAME,
+  RECALL_READ_TOOL_NAME,
   PROVIDE_RESULTS_TOOL_NAME,
 ];
-const MAX_SESSION_ASK_ATTEMPTS = 3;
+const MAX_SESSION_RECALL_ATTEMPTS = 3;
 
-const SESSION_ASK_NAVIGATION_SYSTEM_PROMPT = `You are an evidence-first session analyst. Your job is to inspect one Pi session, gather the relevant context from its spans and entries, and answer the question below only after verifying the original evidence.
+const SESSION_RECALL_NAVIGATION_SYSTEM_PROMPT = `You are an evidence-first session analyst. Your job is to inspect one Pi session, gather the relevant context from its spans and entries, and answer the question below only after verifying the original evidence.
 
 Rules:
 - Do not stop at the first relevant hit. Check newer messages that revise, supersede, revert, or contradict it.
@@ -52,7 +52,7 @@ Rules:
 - Compaction summaries are navigation aids, not answer sources. Use original entries for exact requirements, decisions, commands, and outcomes whenever they exist.
 - Call provide_results exactly once with the answer.`;
 
-const SEARCH_SESSION_PARAMETERS = Type.Object({
+const RECALL_SEARCH_PARAMETERS = Type.Object({
   query: Type.String({
     description:
       "Use plain adjacent terms for normal search within the target session. Supports quoted phrases, AND/OR/NOT, parentheses, and -term negation when matching needs to be stricter.",
@@ -60,19 +60,19 @@ const SEARCH_SESSION_PARAMETERS = Type.Object({
   limit: Type.Optional(Type.Number({ description: "Maximum hits to return." })),
 });
 
-const SESSION_READ_PARAMETERS = Type.Object({
-  entryId: Type.String({ description: "Entry id to start from." }),
-  pathTarget: Type.Optional(
+const RECALL_READ_PARAMETERS = Type.Object({
+  entry_id: Type.String({ description: "Entry id to start from." }),
+  to: Type.Optional(
     Type.String({
-      description: "Returns entries from `entryId` through this entryId along that path.",
+      description: "Returns entries from `entry_id` through this entry id along that path.",
     }),
   ),
-  before: Type.Optional(Type.Number({ description: "Entries before entryId to include." })),
-  after: Type.Optional(Type.Number({ description: "Entries after entryId to include." })),
-  body: Type.Optional(
-    Type.Union([Type.Literal("preview"), Type.Literal("full")], {
+  before: Type.Optional(Type.Number({ description: "Entries before entry_id to include." })),
+  after: Type.Optional(Type.Number({ description: "Entries after entry_id to include." })),
+  tool_output: Type.Optional(
+    Type.Union([Type.Literal("trimmed"), Type.Literal("whole")], {
       description:
-        '"preview" (default) truncates tool calls, enabling safer larger-range queries. When a particular entry is of interest, read a targeted, small range with "full" to get the entire entry.',
+        '"trimmed" (default) cuts tool calls and their results short, enabling safer larger-range queries. When a particular entry is of interest, read a targeted, small range with "whole" to get the entire entry.',
     }),
   ),
 });
@@ -81,7 +81,7 @@ const PROVIDE_RESULTS_PARAMETERS = Type.Object({
   answer: Type.String({
     description: "The final answer to return to the caller, in markdown.",
   }),
-  relevantFiles: Type.Optional(
+  relevant_files: Type.Optional(
     Type.Array(
       Type.Object({
         path: Type.String({
@@ -95,67 +95,67 @@ const PROVIDE_RESULTS_PARAMETERS = Type.Object({
   ),
 });
 
-type SearchSessionParams = Static<typeof SEARCH_SESSION_PARAMETERS>;
-type SessionReadParams = Static<typeof SESSION_READ_PARAMETERS>;
+type RecallSearchParams = Static<typeof RECALL_SEARCH_PARAMETERS>;
+type RecallReadParams = Static<typeof RECALL_READ_PARAMETERS>;
 type ProvideResultsArgs = Static<typeof PROVIDE_RESULTS_PARAMETERS>;
 
-interface SearchSessionToolDetails {
-  hits: SessionAskSearchHit[];
+interface RecallSearchToolDetails {
+  hits: SessionRecallSearchHit[];
   searchUnavailable: boolean;
 }
 
-interface SessionAskSearchHit {
+interface SessionRecallSearchHit {
   entryId: string;
   sourceKind: string;
   timestamp: string;
   size: number;
   snippet: string;
-  branch: SessionSearchHitBranch[];
-  span?: SessionSearchHitSpan | undefined;
+  branch: RecallSearchHitBranch[];
+  span?: RecallSearchHitSpan | undefined;
 }
 
-export interface SessionAskAgentResult {
+export interface SessionRecallAgentResult {
   answer: string;
   relevantFiles: Array<{ path: string; reason: string }>;
   debugSessionPath?: string | undefined;
 }
 
-export async function runSessionAskAgent(params: {
+export async function runSessionRecallAgent(params: {
   ctx: ExtensionContext;
   modelRuntime: ModelRuntime;
   target: SessionLineageRow;
   question: string;
   indexPath: string;
-  askSettings: AskSettings | undefined;
+  recallSettings: RecallSettings | undefined;
   thinkingLevel: ThinkingLevel | undefined;
   signal?: AbortSignal | undefined;
-}): Promise<SessionAskAgentResult | undefined> {
+}): Promise<SessionRecallAgentResult | undefined> {
   params.signal?.throwIfAborted();
   const navigationData = loadSessionNavigationData(params.target.sessionPath);
-  const configured = params.askSettings?.model
+  const configured = params.recallSettings?.model
     ? resolveAuthenticatedModel({
         modelRuntime: params.modelRuntime,
-        modelPattern: params.askSettings.model,
+        modelPattern: params.recallSettings.model,
       })
     : undefined;
   const model = (configured?.ok ? configured.model : undefined) ?? params.ctx.model;
   if (!model) {
-    throw new Error("No active model is available for session_ask.");
+    throw new Error("No active model is available for session_recall.");
   }
   const configuredThinkingLevel = configured?.ok ? configured.thinkingLevel : undefined;
 
   let capturedArguments: ProvideResultsArgs | undefined;
-  const searchSessionTool = defineTool({
-    name: SEARCH_SESSION_TOOL_NAME,
+  const recallSearchTool = defineTool({
+    name: RECALL_SEARCH_TOOL_NAME,
     label: "Search target session",
     description: "Search the target session and return ranked hits.",
     promptSnippet: "Search target session",
     promptGuidelines: [
       "Results are sorted best-first by relevance.",
-      "Use returned entryId values with session_read to inspect full session context.",
+      "Pass a hit's entry id as recall_read's entry_id to inspect full session context.",
     ],
-    parameters: SEARCH_SESSION_PARAMETERS,
-    execute: async (_toolCallId, toolParams: SearchSessionParams) => {
+    parameters: RECALL_SEARCH_PARAMETERS,
+    execute: async (_toolCallId, toolParams: RecallSearchParams) => {
       const hits = withSessionIndex(params.indexPath, { mode: "read", required: false }, ({ db }) =>
         searchSessionChunks(db, {
           sessionIds: [params.target.sessionId],
@@ -165,16 +165,16 @@ export async function runSessionAskAgent(params: {
       );
 
       if (!hits) {
-        const noHits: SessionAskSearchHit[] = [];
+        const noHits: SessionRecallSearchHit[] = [];
         const searchUnavailable: boolean = true;
         return {
           content: [
             {
               type: "text" as const,
-              text: "Session search is unavailable because the session index could not be opened. Navigate with the Session Map and session_read instead.",
+              text: "Session search is unavailable because the session index could not be opened. Navigate with the Session Map and recall_read instead.",
             },
           ],
-          details: { hits: noHits, searchUnavailable } as SearchSessionToolDetails,
+          details: { hits: noHits, searchUnavailable } as RecallSearchToolDetails,
         };
       }
 
@@ -192,42 +192,42 @@ export async function runSessionAskAgent(params: {
         content: [
           {
             type: "text" as const,
-            text: formatSearchSessionHits(formattedHits),
+            text: formatRecallSearchHits(formattedHits),
           },
         ],
         details: {
           hits: formattedHits,
           searchUnavailable: false as boolean,
-        } as SearchSessionToolDetails,
+        } as RecallSearchToolDetails,
       };
     },
   });
 
-  const sessionReadTool = defineTool({
-    name: SESSION_READ_TOOL_NAME,
+  const recallReadTool = defineTool({
+    name: RECALL_READ_TOOL_NAME,
     label: "Read target session entries",
     description: "Read full entry content from the target session, starting at an entry id.",
     promptSnippet: "Read target session entries",
     promptGuidelines: [
-      "Use either pathTarget or before/after; they are mutually exclusive.",
-      "Read an entire span by using the span's end id as the pathTarget.",
-      "Read across spans by using a later connected span's end id as the pathTarget.",
-      "Combine before and/or after for local context around a specific entryId; must stay within the containing span.",
+      "Use either to or before/after; they are mutually exclusive.",
+      "Read an entire span by passing the span's end id as to.",
+      "Read across spans by passing a later connected span's end id as to.",
+      "Combine before and/or after for local context around a specific entry_id; must stay within the containing span.",
     ],
-    parameters: SESSION_READ_PARAMETERS,
-    execute: async (_toolCallId, toolParams: SessionReadParams) => {
+    parameters: RECALL_READ_PARAMETERS,
+    execute: async (_toolCallId, toolParams: RecallReadParams) => {
       const readResult = readEntriesFromEntry(navigationData, {
-        entryId: toolParams.entryId,
+        entryId: toolParams.entry_id,
         before: toolParams.before,
         after: toolParams.after,
-        pathTargetEntryId: toolParams.pathTarget,
-        body: toolParams.body,
+        toEntryId: toolParams.to,
+        toolOutput: toolParams.tool_output,
       });
       return {
         content: [
           {
             type: "text" as const,
-            text: formatSessionReadResult(readResult),
+            text: formatRecallReadResult(readResult),
           },
         ],
         details: readResult,
@@ -237,11 +237,11 @@ export async function runSessionAskAgent(params: {
 
   const provideResultsTool = defineTool({
     name: PROVIDE_RESULTS_TOOL_NAME,
-    label: "Provide session ask result",
-    description: "Return the final answer for session_ask.",
-    promptSnippet: "Provide session ask result",
+    label: "Provide session recall result",
+    description: "Return the final answer for session_recall.",
+    promptSnippet: "Provide session recall result",
     promptGuidelines: [
-      "Call provide_results exactly once when you are ready to answer. It is the final tool call and ends the session_ask subagent turn.",
+      "Call provide_results exactly once when you are ready to answer. It is the final tool call and ends the session_recall subagent turn.",
     ],
     parameters: PROVIDE_RESULTS_PARAMETERS,
     execute: async (_toolCallId, toolParams: ProvideResultsArgs) => {
@@ -266,18 +266,18 @@ export async function runSessionAskAgent(params: {
     noExtensions: true,
     noPromptTemplates: true,
     noSkills: true,
-    appendSystemPromptOverride: (base) => [...base, SESSION_ASK_NAVIGATION_SYSTEM_PROMPT],
+    appendSystemPromptOverride: (base) => [...base, SESSION_RECALL_NAVIGATION_SYSTEM_PROMPT],
   });
   params.signal?.throwIfAborted();
   await resourceLoader.reload();
   params.signal?.throwIfAborted();
 
   const thinkingLevel =
-    params.askSettings?.thinkingLevel ?? configuredThinkingLevel ?? params.thinkingLevel;
-  const sessionManager = params.askSettings?.persistRuns
-    ? SessionManager.create(cwd, getDefaultSessionAskRunsDir())
+    params.recallSettings?.thinkingLevel ?? configuredThinkingLevel ?? params.thinkingLevel;
+  const sessionManager = params.recallSettings?.persistRuns
+    ? SessionManager.create(cwd, getDefaultSessionRecallRunsDir())
     : SessionManager.inMemory(cwd);
-  const debugSessionPath = params.askSettings?.persistRuns
+  const debugSessionPath = params.recallSettings?.persistRuns
     ? sessionManager.getSessionFile()
     : undefined;
   const { session } = await createAgentSession({
@@ -285,8 +285,8 @@ export async function runSessionAskAgent(params: {
     model,
     modelRuntime: params.modelRuntime,
     ...(thinkingLevel ? { thinkingLevel } : {}),
-    tools: SESSION_ASK_AGENT_TOOLS,
-    customTools: [searchSessionTool, sessionReadTool, provideResultsTool],
+    tools: SESSION_RECALL_AGENT_TOOLS,
+    customTools: [recallSearchTool, recallReadTool, provideResultsTool],
     resourceLoader,
     sessionManager,
   });
@@ -303,7 +303,7 @@ export async function runSessionAskAgent(params: {
       startNestedAbort();
     }
 
-    for (let attempt = 1; attempt <= MAX_SESSION_ASK_ATTEMPTS; attempt += 1) {
+    for (let attempt = 1; attempt <= MAX_SESSION_RECALL_ATTEMPTS; attempt += 1) {
       params.signal?.throwIfAborted();
       const prompt =
         attempt === 1
@@ -329,7 +329,7 @@ export async function runSessionAskAgent(params: {
 
   return {
     answer: capturedArguments.answer.trim(),
-    relevantFiles: capturedArguments.relevantFiles ?? [],
+    relevantFiles: capturedArguments.relevant_files ?? [],
     ...(debugSessionPath ? { debugSessionPath } : {}),
   };
 }
@@ -360,7 +360,7 @@ ${agentsMd}
 ${question}`;
 }
 
-function formatSearchSessionHits(hits: SessionAskSearchHit[]): string {
+function formatRecallSearchHits(hits: SessionRecallSearchHit[]): string {
   if (hits.length === 0) {
     return "No matching entries found.";
   }
@@ -383,7 +383,7 @@ function formatSearchSessionHits(hits: SessionAskSearchHit[]): string {
     .join("\n\n");
 }
 
-function formatSearchHitSpan(span: SessionSearchHitSpan | undefined): string {
+function formatSearchHitSpan(span: RecallSearchHitSpan | undefined): string {
   if (!span) {
     return "none";
   }
@@ -391,14 +391,14 @@ function formatSearchHitSpan(span: SessionSearchHitSpan | undefined): string {
   return `(${span.startsAtEntryId}, ${span.endsAtEntryId})${span.isActive ? " on_active_branch" : ""}; before ${span.entriesBefore}; after ${span.entriesAfter}`;
 }
 
-function formatSessionReadResult(result: SessionReadResult): string {
+function formatRecallReadResult(result: RecallReadResult): string {
   const sections = result.entries.map((entry) =>
     [
       `### ${entry.entryId}`,
       `type: ${entry.type}`,
       `timestamp: ${entry.timestamp}`,
-      `path_target: ${entry.pathTargetEntryId}`,
-      `body: ${entry.body}`,
+      `to: ${entry.toEntryId}`,
+      `tool_output: ${entry.toolOutput}`,
       `size: ${entry.size}`,
       entry.truncated ? "truncated: true" : "truncated: false",
       "",
@@ -408,7 +408,7 @@ function formatSessionReadResult(result: SessionReadResult): string {
 
   if (result.nextEntryId) {
     sections.push(
-      `Next page: call session_read with entryId ${result.nextEntryId} and pathTarget ${result.pathTargetEntryId}.`,
+      `Next page: call recall_read with entry_id ${result.nextEntryId} and to ${result.toEntryId}.`,
     );
   }
 

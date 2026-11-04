@@ -11,14 +11,14 @@ const theme = {
 } as never;
 
 const args = {
-  goal: "Inspect the index recovery path and report concrete failure modes.",
+  briefing: "Inspect the index recovery path and report concrete failure modes.",
   title: "Index recovery audit",
   launch: "deferred",
   cwd: "/repo/app",
   provider: "openai",
   model: "gpt-5.4",
-  thinkingLevel: "high",
-  requestResponse: true,
+  thinking_level: "high",
+  report_back: true,
 };
 
 const details: HandoffLaunchReceipt = {
@@ -53,20 +53,20 @@ describe("session_handoff tool renderer", () => {
     expect(lines.slice(0, 3)).toEqual([
       "session_handoff […] …",
       "provider …  ·  model …  ·  thinking …",
-      "goal …",
+      "briefing …",
     ]);
   });
 
   it("tolerates malformed and progressively streamed arguments", () => {
     expect(render("garbage", undefined, false)).toContain("session_handoff");
-    expect(render({ goal: 42, launch: {} }, undefined, false)).toContain("goal …");
-    const lines = render({ launch: "subagent", goal: "Fix the ind" }, undefined, false)
+    expect(render({ briefing: 42, launch: {} }, undefined, false)).toContain("briefing …");
+    const lines = render({ launch: "subagent", briefing: "Fix the ind" }, undefined, false)
       .split("\n")
       .map((line) => line.trimEnd());
     expect(lines.slice(0, 3)).toEqual([
       "session_handoff [subagent] …",
       "provider …  ·  model …  ·  thinking …",
-      "goal Fix the ind",
+      "briefing Fix the ind",
     ]);
   });
 
@@ -80,7 +80,7 @@ describe("session_handoff tool renderer", () => {
 
   it("renders a compact completed card", () => {
     const rendered = render(args, details, false);
-    expect(rendered).toContain("goal Inspect the index recovery path");
+    expect(rendered).toContain("briefing Inspect the index recovery path");
     expect(rendered).toContain("resume command · copied to clipboard");
     expect(rendered).toContain("pi --session-id 'child-1'");
     expect(rendered).toContain("provider openai  ·  model GPT 5.4  ·  thinking high");
@@ -88,16 +88,16 @@ describe("session_handoff tool renderer", () => {
     expect(rendered).not.toContain("model openai/gpt-5.4:high");
   });
 
-  it("keeps the collapsed goal to one row followed by an expansion hint", () => {
+  it("keeps the collapsed briefing to one row followed by an expansion hint", () => {
     const rendered = render(args, details, false, 40);
     const lines = rendered.split("\n");
-    const goalIndex = lines.findIndex((line) => line.startsWith("goal "));
-    expect(visibleWidth(lines[goalIndex] ?? "")).toBe(40);
+    const briefingIndex = lines.findIndex((line) => line.startsWith("briefing "));
+    expect(visibleWidth(lines[briefingIndex] ?? "")).toBe(40);
     expect(rendered).toContain("3 more lines, 6 total");
     expect(rendered).not.toContain("...");
   });
 
-  it("adds full goal and result metadata when expanded", () => {
+  it("adds full briefing and result metadata when expanded", () => {
     const rendered = render(args, details, true);
     expect(rendered).toContain("session child-1");
     expect(rendered).toContain("provider openai  ·  model GPT 5.4  ·  thinking high");

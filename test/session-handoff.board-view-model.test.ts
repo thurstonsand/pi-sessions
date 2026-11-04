@@ -119,7 +119,7 @@ describe("handoff board view model", () => {
       ownerTitle: "Board refinement",
       ownerIsCurrentSession: true,
       title: "Worker",
-      goal: "Inspect the protocol",
+      briefing: "Inspect the protocol",
       model: "openai/gpt-5.6-sol:high",
       cwd: "/repo",
       resumeCommand: "pi --session-id worker",
@@ -135,7 +135,7 @@ describe("handoff board view model", () => {
       { label: "Session", value: "worker" },
       { label: "Model", value: "openai/gpt-5.6-sol:high" },
       { label: "Owner", value: "this session" },
-      { label: "Goal", value: "Inspect the protocol" },
+      { label: "Briefing", value: "Inspect the protocol" },
     ]);
   });
 

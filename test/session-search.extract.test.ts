@@ -274,8 +274,8 @@ describe("extractSessionRecord", () => {
           childSessionId: "subagent-session",
           childSessionFile: childPath,
           title: "Subagent",
-          goal: "Investigate",
-          requestResponse: true,
+          briefing: "Investigate",
+          reportBack: true,
           cwd: "/repo/app",
           resumeCommand: "resume",
           depth: 1,
@@ -324,7 +324,7 @@ describe("extractSessionRecord", () => {
         customType: "pi-sessions.handoff",
         data: {
           origin: "handoff",
-          goal: "Continue phase 3",
+          briefing: "Continue phase 3",
           title: "Implement autocomplete",
           initial_prompt: "Continue phase 3",
           launch: "deferred",
@@ -338,7 +338,7 @@ describe("extractSessionRecord", () => {
       parentSessionPath: parentPath,
       parentSessionId: "parent-session",
       sessionOrigin: "handoff",
-      handoffGoal: "Continue phase 3",
+      handoffBriefing: "Continue phase 3",
     });
   });
 });

@@ -15,11 +15,11 @@ function pendingBootstrapEntry() {
     customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
     data: createChildGeneratedHandoffBootstrap({
       sessionId: "child-1",
-      goal: "Finish phase 1",
+      briefing: "Finish phase 1",
       title: "Implement autocomplete",
       parentSessionFile: "/tmp/parent.jsonl",
       sourceLeafId: "source-leaf",
-      requestResponse: false,
+      reportBack: false,
       bootstrapMode: "review",
       launch: "deferred",
     }),
@@ -93,7 +93,7 @@ test("delivery before the session is ready records the receipt and injects it on
     target: { sessionId: "child-1" },
     sentAt: "2026-10-08T00:00:00.000Z",
     receivedAt: "2026-10-08T00:00:00.000Z",
-    requestResponse: true,
+    reportBack: true,
   };
 
   runtime.deliver(received);
@@ -114,7 +114,7 @@ test("incoming cancellation aborts the target runtime before acceptance", () => 
   expect(abort).toHaveBeenCalledOnce();
 });
 
-test("session_cancel reports accepted live cancellation", async () => {
+test("session_cancel_turn reports accepted live cancellation", async () => {
   const cancelSession = vi.fn(async () => ({
     kind: "transport" as const,
     delivered: true as const,
@@ -123,7 +123,7 @@ test("session_cancel reports accepted live cancellation", async () => {
     relation: "sibling" as const,
   }));
   const tool = createSessionCancelTool({ cancelSession } as never, {
-    name: "session_cancel",
+    name: "session_cancel_turn",
     wording: { description: "Cancel", promptSnippet: "Cancel", promptGuidelines: [] },
   });
 
@@ -153,7 +153,7 @@ test("session_cancel reports accepted live cancellation", async () => {
   });
 });
 
-test("session_cancel reports managed teardown honestly", async () => {
+test("session_cancel_turn reports managed teardown honestly", async () => {
   const tool = createSessionCancelTool(
     {
       cancelSession: vi.fn(async () => ({
@@ -193,7 +193,7 @@ test("session_cancel reports managed teardown honestly", async () => {
   });
 });
 
-test("session_cancel rejects an unknown managed state", async () => {
+test("session_cancel_turn rejects an unknown managed state", async () => {
   const tool = createSessionCancelTool(
     {
       cancelSession: vi.fn(async () => ({
@@ -214,7 +214,7 @@ test("session_cancel rejects an unknown managed state", async () => {
   ).rejects.toThrow('Could not confirm cancellation of subagent "Child".\nsession child-session');
 });
 
-test("session_cancel rejects dead targets", async () => {
+test("session_cancel_turn rejects dead targets", async () => {
   const tool = createSessionCancelTool(
     {
       cancelSession: vi.fn(async () => ({
@@ -226,7 +226,7 @@ test("session_cancel rejects dead targets", async () => {
       })),
     } as never,
     {
-      name: "session_cancel",
+      name: "session_cancel_turn",
       wording: { description: "Cancel", promptSnippet: "Cancel", promptGuidelines: [] },
     },
   );

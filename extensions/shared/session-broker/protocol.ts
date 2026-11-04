@@ -44,7 +44,7 @@ export const TASK_REPORT_SCHEMA = Type.Object({
       description: "Supporting material for the report.",
     }),
   ),
-  nextSteps: Type.Optional(
+  next_steps: Type.Optional(
     Type.Array(Type.String(), {
       description:
         "Optional concrete actions that would extend or build on the state of the work. If blocked or incomplete, call out specifically what is causing the early return.",
@@ -56,7 +56,7 @@ const OUTBOUND_MESSAGE_ENVELOPE_SCHEMA = Type.Object({
   kind: Type.Literal("message"),
   messageId: Type.String(),
   body: Type.String(),
-  requestResponse: Type.Optional(Type.Boolean()),
+  reportBack: Type.Optional(Type.Boolean()),
   sentAt: Type.String(),
   sourceToolCallId: Type.Optional(Type.String()),
 });
@@ -86,7 +86,7 @@ export const SESSION_MESSAGE_ENVELOPE_SCHEMA = Type.Object({
   source: Type.String(),
   target: Type.String(),
   body: Type.String(),
-  requestResponse: Type.Optional(Type.Boolean()),
+  reportBack: Type.Optional(Type.Boolean()),
   sentAt: Type.String(),
   sourceToolCallId: Type.Optional(Type.String()),
 });

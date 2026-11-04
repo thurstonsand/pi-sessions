@@ -32,15 +32,15 @@ export interface HandoffLaunchTargetPreparation {
   childSessionId: string;
   parentSessionId: string;
   parentSessionFile: string;
-  requestResponse: boolean;
+  reportBack: boolean;
 }
 
 export interface HandoffLaunchTargetInput {
   prepared: PreparedHandoff;
   parentSessionId: string;
   title: string;
-  goal: string;
-  requestResponse: boolean;
+  briefing: string;
+  reportBack: boolean;
   model: string;
   cwd: string;
 }
@@ -67,7 +67,7 @@ export interface HandoffLaunchTarget {
   describeSubagentChild?(input: {
     childSessionId: string;
     ownerSessionId: string;
-    requestResponse: boolean;
+    reportBack: boolean;
     agent: HandoffSubagentAgent | undefined;
   }): HandoffSubagent;
   prepareChild(input: HandoffLaunchTargetPreparation): void;

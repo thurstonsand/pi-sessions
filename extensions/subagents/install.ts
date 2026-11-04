@@ -14,15 +14,14 @@ import type { SessionLifecycle } from "../shared/composition.ts";
 import type { HerdrSession } from "../shared/herdr.ts";
 import type { CompactionThresholdSettings, SessionSettings } from "../shared/settings.ts";
 import { isTmuxInstalled } from "../shared/tmux.ts";
-import { safeParseTypeBoxValue } from "../shared/typebox.ts";
 import { SubagentCancellationRouter, type SubagentCancelResult } from "./cancel.ts";
 import { createSubagentContextLimit } from "./context-limit.ts";
 import { createSubagentLaunchTarget, type SubagentLaunchState } from "./launch-target.ts";
 import {
   hasSubagentLaunchEntries,
+  parseSubagentReportMessage,
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
   SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
-  SUBAGENT_REPORT_MESSAGE_SCHEMA,
   SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
 } from "./ledger.ts";
 import { openReconcileSession, type ReconcileResult, SubagentReconciler } from "./reconcile.ts";
@@ -165,7 +164,7 @@ export function installSubagents(
     if (message.role !== "custom" || message.customType !== SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE) {
       return;
     }
-    const report = safeParseTypeBoxValue(SUBAGENT_REPORT_MESSAGE_SCHEMA, message.details);
+    const report = parseSubagentReportMessage(message.details);
     if (report && report.writerSessionId === current?.parent.sessionId) {
       reconciler.noteReportDelivered(report.reportId);
     }

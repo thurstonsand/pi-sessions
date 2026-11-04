@@ -36,7 +36,7 @@ describe("shared send tool", () => {
         {
           target: "worker",
           body: "Taking the parser.",
-          requestResponse: undefined,
+          reportBack: undefined,
           sourceToolCallId: "call-1",
         },
         {},

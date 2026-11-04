@@ -64,7 +64,7 @@ const SESSION_FILE_SETTINGS_SCHEMA = Type.Object({
       persistRuns: Type.Optional(Type.Boolean()),
     }),
   ),
-  ask: Type.Optional(
+  recall: Type.Optional(
     Type.Object({
       enable: Type.Optional(Type.Boolean()),
       model: Type.Optional(Type.String()),
@@ -95,7 +95,7 @@ export interface AutoTitleSettings extends AgentModelSettings {
   persistRuns: boolean;
 }
 
-export interface AskSettings extends AgentModelSettings {
+export interface RecallSettings extends AgentModelSettings {
   persistRuns: boolean;
 }
 
@@ -115,7 +115,7 @@ export interface FeatureToggles {
   subagents: boolean;
   handoff: boolean;
   search: boolean;
-  ask: boolean;
+  recall: boolean;
   autoTitle: boolean;
   hooks: boolean;
 }
@@ -134,7 +134,7 @@ export interface SessionSettings {
     path: string;
   };
   autoTitle: AutoTitleSettings;
-  ask: AskSettings;
+  recall: RecallSettings;
 }
 
 type SessionFileSettings = Static<typeof SESSION_FILE_SETTINGS_SCHEMA>;
@@ -151,8 +151,8 @@ export function getDefaultIndexPath(): string {
   return path.join(getDefaultIndexDir(), "index.sqlite");
 }
 
-export function getDefaultSessionAskRunsDir(): string {
-  return path.join(getDefaultIndexDir(), "session-ask");
+export function getDefaultSessionRecallRunsDir(): string {
+  return path.join(getDefaultIndexDir(), "session-recall");
 }
 
 export function getDefaultHandoffRunsDir(): string {
@@ -254,7 +254,7 @@ function resolveFeatureToggles(value: SessionFileSettings): FeatureToggles {
     subagents: value.subagents?.enable ?? true,
     handoff: value.handoff?.enable ?? true,
     search: value.search?.enable ?? true,
-    ask: value.ask?.enable ?? true,
+    recall: value.recall?.enable ?? true,
     autoTitle: value.autoTitle?.enable ?? true,
     hooks: value.hooks?.enable ?? true,
   };
@@ -301,9 +301,9 @@ function resolveSessionSettings(fileSettings: SessionFileSettings): SessionSetti
       prompt: normalizeAutoTitlePrompt(fileSettings.autoTitle?.prompt),
       persistRuns: fileSettings.autoTitle?.persistRuns ?? false,
     },
-    ask: {
-      ...resolveAgentModelSettings(fileSettings.ask),
-      persistRuns: fileSettings.ask?.persistRuns ?? false,
+    recall: {
+      ...resolveAgentModelSettings(fileSettings.recall),
+      persistRuns: fileSettings.recall?.persistRuns ?? false,
     },
   };
 }

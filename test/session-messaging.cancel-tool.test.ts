@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createSessionCancelTool } from "../extensions/session-messaging/pi/tools.ts";
 
 describe("shared cancel tool", () => {
-  it.each(["session_cancel", "subagent_cancel"])(
+  it.each(["session_cancel_turn", "subagent_cancel"])(
     "cancels through %s and protects a dynamically resolved parent",
     async (name) => {
       let parent: string | undefined;

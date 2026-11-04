@@ -125,23 +125,23 @@ describe("session_search tool", () => {
       createToolContext(cwd),
     );
     const text = (result.content[0] as { text: string }).text;
-    const modelOutput = JSON.parse(text) as { results: Array<{ sessionId: string; cwd: string }> };
+    const modelOutput = JSON.parse(text) as { results: Array<{ session_id: string; cwd: string }> };
 
     expect(modelOutput.results).toMatchObject([
-      { sessionId: "session-2", cwd: "/repo/app" },
-      { sessionId: "session-1", cwd: "/repo/app" },
+      { session_id: "session-2", cwd: "/repo/app" },
+      { session_id: "session-1", cwd: "/repo/app" },
     ]);
     expect(tool.outputSchema).toBe(SESSION_SEARCH_OUTPUT_SCHEMA);
     expect(Value.Check(SESSION_SEARCH_OUTPUT_SCHEMA, result.structuredContent)).toBe(true);
     expect(result.structuredContent).toEqual({
       results: [
         expect.objectContaining({
-          sessionId: "session-2",
-          sessionName: "Second title",
-          sessionOrigin: "handoff",
-          parentSessionId: "session-1",
+          session_id: "session-2",
+          session_name: "Second title",
+          session_origin: "handoff",
+          parent_session_id: "session-1",
         }),
-        expect.objectContaining({ sessionId: "session-1" }),
+        expect.objectContaining({ session_id: "session-1" }),
       ],
     });
     expect(tool.annotations).toEqual({ readOnlyHint: true, openWorldHint: false });
@@ -166,6 +166,8 @@ describe("session_search tool", () => {
     component.setExpanded(true);
     const rendered = stripAnsi(component.render(120).join("\n"));
 
+    expect(rendered.trimStart().split("\n")[0]?.trim()).toBe("session_search");
+    expect(rendered.match(/cwd: \/repo/g)).toHaveLength(1);
     expect(rendered).toContain("1. Second title");
     expect(rendered).toContain("2. Visible title");
     expect(rendered).not.toContain("sessionPath");
@@ -229,10 +231,10 @@ describe("session_search tool", () => {
     expect(modelOutput.results[0]?.snippet).toBe("search hit");
     expect(modelOutput.results[0]?.evidence).toContainEqual({
       kind: "text",
-      sourceKind: "assistant_text",
+      source_kind: "assistant_text",
       snippet: "search hit",
       score: expect.any(Number),
-      entryId: "entry-matched",
+      entry_id: "entry-matched",
     });
     expect(text).not.toContain(SEARCH_SNIPPET_MATCH_START);
     expect(text).not.toContain(SEARCH_SNIPPET_MATCH_END);

@@ -36,17 +36,17 @@ export interface SessionSearchToolDetails {
 export const SESSION_SEARCH_OUTPUT_SCHEMA = Type.Object({
   results: Type.Array(
     Type.Object({
-      sessionId: Type.String(),
-      sessionName: Type.String(),
+      session_id: Type.String(),
+      session_name: Type.String(),
       cwd: Type.String(),
-      startedAt: Type.String(),
-      modifiedAt: Type.String(),
-      messageCount: Type.Number(),
+      started_at: Type.String(),
+      modified_at: Type.String(),
+      message_count: Type.Number(),
       snippet: Type.String(),
-      hitCount: Type.Number(),
-      sessionOrigin: Type.Optional(SESSION_ORIGIN_SCHEMA),
+      hit_count: Type.Number(),
+      session_origin: Type.Optional(SESSION_ORIGIN_SCHEMA),
       relation: Type.Optional(SESSION_LINEAGE_RELATION_SCHEMA),
-      parentSessionId: Type.Optional(Type.String()),
+      parent_session_id: Type.Optional(Type.String()),
     }),
   ),
 });

@@ -24,7 +24,7 @@ export interface SubagentRosterEntry {
   ownerTitle: string;
   ownerIsCurrentSession: boolean;
   title: string;
-  goal: string;
+  briefing: string;
   model?: string | undefined;
   cwd: string;
   resumeCommand: string;
@@ -129,7 +129,7 @@ export class TranscriptSubagentRoster implements SubagentRoster {
         ownerTitle: child.ownerTitle,
         ownerIsCurrentSession: child.ownerIsCurrentSession,
         title: child.launch.title,
-        goal: child.launch.goal,
+        briefing: child.launch.briefing,
         ...(child.launch.model ? { model: child.launch.model } : {}),
         cwd: child.launch.cwd,
         resumeCommand: child.launch.resumeCommand,

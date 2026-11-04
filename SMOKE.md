@@ -13,7 +13,7 @@ The smoke lane requires tmux and a `pi` CLI matching the installed development d
 
 It runs standalone and with an independent v2 fake host extension. The claiming host variant verifies peer tools are absent while subagent launch/list/send/cancel remain available. A third variant registers host-owned peer tools at extension load, proving the overlapping names do not cause Pi's hard extension conflict and the host's tools remain active. All variants launch/list a worker, receive reports, wake it on follow-up, and cancel it after completion. Standalone also verifies live peer discovery and delivery. The fake host imports no pi-sessions code.
 
-All variants start without an index. Four additional recovery cases start two Pis together with search and turn-time hooks disabled: fresh creation, an older schema, a newer schema, and a forced publication failure. They verify one atomic publication, reachable-session metadata, a persistent reload warning with byte-for-byte preservation of the newer database, and shared backoff instead of repeated builds.
+All variants start without an index. Four additional recovery cases start two Pis together with search and turn-time hooks disabled: fresh creation, an older schema, a newer schema, and a forced publication failure. They verify one atomic publication, listed-session metadata, a persistent reload warning with byte-for-byte preservation of the newer database, and shared backoff instead of repeated builds.
 
 Each run has a disposable home, agent directory, index, broker directory, and private tmux server. Its settings pin this checkout's package path; parent, peer, and resumed child assert the loaded extension's source path. It does not rewrite global Pi settings or alter production resume commands. Shell configuration, other extensions, and provider credentials are not inherited. Auto-title is disabled.
 
@@ -85,12 +85,12 @@ Expected:
 - evidence includes snippets from indexed session text
 - snippet markers are rendered for matched terms
 
-## 4. Verify reachable session discovery
+## 4. Verify live session discovery
 
 Open two Pi sessions with `pi-sessions` loaded. In one session, prompt Pi to call:
 
 ```text
-Use session_reachable. Return session ids, titles, cwd, state, and relation only.
+Use session_list. Return session ids, titles, cwd, state, and relation only.
 ```
 
 Expected:
@@ -99,14 +99,14 @@ Expected:
 - the current session is absent
 - titles and cwd come from the session index; a live session missing from the index is still returned as a bare id
 
-With a subagent running, call `subagent_list` with `scope: "branch"` and expect worker rows with `state`, `depth`, and goal. `session_reachable` has no scope parameter.
+With a subagent running, call `subagent_list` with `scope: "branch"` and expect worker rows with `state`, `depth`, and briefing. `session_list` has no scope parameter.
 
 ## 5. Verify follow-up analysis
 
 Take one returned session id and ask:
 
 ```text
-Use session_ask with session "<session-uuid>" and answer what decisions were made.
+Use session_recall with session "<session-uuid>" and answer what decisions were made.
 ```
 
 Expected:
@@ -292,7 +292,7 @@ Resume the parent with its resume command. Expected:
 
 - the suspended worker restores in a fresh window (auto-restore of suspended, not interrupted)
 - if a worker finished while the parent was closed, its report is recovered and injected with `provenance: recovered`
-- a `requestResponse` worker that settled without reporting produces exactly one reminder, then a closure record if it settles reportless again; the board surfaces it as `interrupted`-grade detail
+- a `report_back` worker that settled without reporting produces exactly one reminder, then a closure record if it settles reportless again; the board surfaces it as `interrupted`-grade detail
 
 ### Follow-up on a completed worker
 

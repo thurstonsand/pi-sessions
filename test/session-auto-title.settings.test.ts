@@ -33,7 +33,7 @@ describe("pi-sessions auto-title settings", () => {
     expect(settings.autoTitle.model).toBeUndefined();
     expect(settings.autoTitle.prompt).toBe(DEFAULT_AUTO_TITLE_PROMPT);
     expect(settings.autoTitle.persistRuns).toBe(false);
-    expect(settings.ask.persistRuns).toBe(false);
+    expect(settings.recall.persistRuns).toBe(false);
     expect(settings.handoff.persistRuns).toBe(false);
     expect(settings.features.subagents).toBe(true);
     expect(settings.handoff.deferred.enable).toBe(true);
@@ -99,7 +99,7 @@ describe("pi-sessions auto-title settings", () => {
     expect(settings.handoff.persistRuns).toBe(true);
   });
 
-  it("reads explicit ask settings from global settings", () => {
+  it("reads explicit recall settings from global settings", () => {
     const agentDir = testFs.createTempDir();
     process.env.PI_CODING_AGENT_DIR = agentDir;
 
@@ -108,7 +108,7 @@ describe("pi-sessions auto-title settings", () => {
       `${JSON.stringify(
         {
           sessions: {
-            ask: {
+            recall: {
               model: "anthropic/claude-sonnet-4-5",
               thinkingLevel: "xhigh",
               persistRuns: true,
@@ -122,9 +122,9 @@ describe("pi-sessions auto-title settings", () => {
     );
 
     const settings = loadSettings();
-    expect(settings.ask.model).toBe("anthropic/claude-sonnet-4-5");
-    expect(settings.ask.thinkingLevel).toBe("xhigh");
-    expect(settings.ask.persistRuns).toBe(true);
+    expect(settings.recall.model).toBe("anthropic/claude-sonnet-4-5");
+    expect(settings.recall.thinkingLevel).toBe("xhigh");
+    expect(settings.recall.persistRuns).toBe(true);
   });
 
   it("merges project settings over global settings", () => {

@@ -1,5 +1,6 @@
 import type { SessionEntry } from "@earendil-works/pi-coding-agent";
 import { type Static, Type } from "typebox";
+import { upgradeLegacyEntry } from "../shared/legacy-entry.ts";
 import { TASK_REPORT_SCHEMA } from "../shared/session-broker/protocol.ts";
 import { safeParseTypeBoxValue } from "../shared/typebox.ts";
 
@@ -18,8 +19,8 @@ export const SUBAGENT_LAUNCHED_SCHEMA = Type.Object({
   childSessionId: Type.String(),
   childSessionFile: Type.String(),
   title: Type.String(),
-  goal: Type.String(),
-  requestResponse: Type.Boolean(),
+  briefing: Type.String(),
+  reportBack: Type.Boolean(),
   model: Type.Optional(Type.String()),
   cwd: Type.String(),
   resumeCommand: Type.String(),
@@ -73,6 +74,18 @@ export type SubagentReportReceived = Static<typeof SUBAGENT_REPORT_RECEIVED_SCHE
 export type SubagentReportMessage = Static<typeof SUBAGENT_REPORT_MESSAGE_SCHEMA>;
 export type SubagentClosed = Static<typeof SUBAGENT_CLOSED_SCHEMA>;
 
+export function parseSubagentLaunched(value: unknown): SubagentLaunched | undefined {
+  return safeParseTypeBoxValue(SUBAGENT_LAUNCHED_SCHEMA, upgradeLegacyEntry(value));
+}
+
+export function parseSubagentReport(value: unknown): SubagentReport | undefined {
+  return safeParseTypeBoxValue(SUBAGENT_REPORT_SCHEMA, upgradeLegacyEntry(value));
+}
+
+export function parseSubagentReportMessage(value: unknown): SubagentReportMessage | undefined {
+  return safeParseTypeBoxValue(SUBAGENT_REPORT_MESSAGE_SCHEMA, upgradeLegacyEntry(value));
+}
+
 export interface ChildSubagentLifecycle {
   reports: readonly SubagentReport[];
   closed: SubagentClosed | undefined;
@@ -124,7 +137,7 @@ export function collectParentLedger(
   for (const entry of branch) {
     if (entry.type === "custom_message") {
       if (entry.customType === SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE) {
-        const report = safeParseTypeBoxValue(SUBAGENT_REPORT_MESSAGE_SCHEMA, entry.details);
+        const report = parseSubagentReportMessage(entry.details);
         if (report?.writerSessionId === ownerSessionId) {
           deliveredReportIds.add(report.reportId);
         }
@@ -139,7 +152,7 @@ export function collectParentLedger(
     }
 
     if (entry.customType === SUBAGENT_LAUNCHED_CUSTOM_TYPE) {
-      const launch = safeParseTypeBoxValue(SUBAGENT_LAUNCHED_SCHEMA, entry.data);
+      const launch = parseSubagentLaunched(entry.data);
       if (!launch) {
         continue;
       }
@@ -204,7 +217,7 @@ export function getChildSubagentLifecycle(branch: readonly SessionEntry[]): Chil
       continue;
     }
     if (entry.customType === SUBAGENT_REPORT_CUSTOM_TYPE) {
-      const report = safeParseTypeBoxValue(SUBAGENT_REPORT_SCHEMA, entry.data);
+      const report = parseSubagentReport(entry.data);
       if (report) {
         reports.set(report.reportId, report);
       }

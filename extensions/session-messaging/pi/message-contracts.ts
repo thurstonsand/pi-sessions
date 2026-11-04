@@ -1,4 +1,6 @@
 import { type Static, Type } from "typebox";
+import { upgradeLegacyEntry } from "../../shared/legacy-entry.ts";
+import { safeParseTypeBoxValue } from "../../shared/typebox.ts";
 
 const RECEIVED_MESSAGE_ENDPOINT_SCHEMA = Type.Object({
   sessionId: Type.String(),
@@ -9,11 +11,10 @@ const RECEIVED_MESSAGE_ENDPOINT_SCHEMA = Type.Object({
 export const SEND_MESSAGE_PARAMS = Type.Object({
   session: Type.String({ description: "Pi session UUID." }),
   message: Type.String({
-    description: "Message to send to the target session.",
+    description: "Self-contained: the recipient doesn't see this conversation.",
   }),
-  requestResponse: Type.Boolean({
-    description:
-      "Whether the target session should respond with completion/results back to this session.",
+  report_back: Type.Boolean({
+    description: "Whether the recipient should reply to you.",
   }),
 });
 
@@ -53,7 +54,7 @@ export const RECEIVED_MESSAGE_ENTRY_SCHEMA = Type.Object({
   body: Type.String(),
   sentAt: Type.String(),
   receivedAt: Type.String(),
-  requestResponse: Type.Optional(Type.Boolean()),
+  reportBack: Type.Optional(Type.Boolean()),
   sourceToolCallId: Type.Optional(Type.String()),
   relation: Type.Optional(Type.String()),
 });
@@ -64,3 +65,7 @@ export type CancelSessionParams = Static<typeof CANCEL_SESSION_PARAMS>;
 export type CancelSessionToolDetails = Static<typeof CANCEL_SESSION_TOOL_DETAILS_SCHEMA>;
 export type ReceivedMessageEndpoint = Static<typeof RECEIVED_MESSAGE_ENDPOINT_SCHEMA>;
 export type ReceivedMessageEntry = Static<typeof RECEIVED_MESSAGE_ENTRY_SCHEMA>;
+
+export function parseReceivedMessageEntry(value: unknown): ReceivedMessageEntry | undefined {
+  return safeParseTypeBoxValue(RECEIVED_MESSAGE_ENTRY_SCHEMA, upgradeLegacyEntry(value));
+}

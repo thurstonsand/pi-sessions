@@ -125,8 +125,8 @@ describe("subagent installation", () => {
         prepared: { sessionId: childId, sessionFile: "/tmp/child.jsonl", resumeCommand: "resume" },
         parentSessionId: parentId,
         title: "Inspect target",
-        goal: "Inspect it",
-        requestResponse: true,
+        briefing: "Inspect it",
+        reportBack: true,
         model: "openai/gpt-5.4:high",
         cwd: "/repo",
       }),
@@ -731,14 +731,14 @@ describe("subagent installation", () => {
     { boundary: "owned-subagent poll", reportCount: 2 },
   ])("$reportCount recovered reports during $boundary", ({ boundary, reportCount }) => {
     it.each([
-      { name: "fire-and-forget", requestResponse: false, reported: false, reminded: false },
-      { name: "already reported", requestResponse: true, reported: true, reminded: false },
-      { name: "no report", requestResponse: true, reported: false, reminded: false },
-      { name: "already reminded", requestResponse: true, reported: false, reminded: true },
+      { name: "fire-and-forget", reportBack: false, reported: false, reminded: false },
+      { name: "already reported", reportBack: true, reported: true, reminded: false },
+      { name: "no report", reportBack: true, reported: false, reminded: false },
+      { name: "already reminded", reportBack: true, reported: false, reminded: true },
     ])("lets a $name child process the recovered report before settling", async (scenario) => {
       vi.useFakeTimers();
       let grandchildRunning = boundary === "owned-subagent poll";
-      const entries = childEntriesWithGrandchild(scenario.requestResponse);
+      const entries = childEntriesWithGrandchild(scenario.reportBack);
       const launch = entries.at(-1) as { data: { childSessionFile: string } };
       const { pi, handlers } = createPi({
         tmuxInstalled: true,
@@ -835,7 +835,7 @@ describe("subagent installation", () => {
         await handlers.get("agent_start")?.({}, ctx);
         await handlers.get("message_end")?.({ message: { role: "custom", ...recovered } }, ctx);
         entries.push({ type: "custom_message", ...recovered });
-        if (scenario.requestResponse) {
+        if (scenario.reportBack) {
           entries.push({
             type: "custom",
             customType: SUBAGENT_REPORT_CUSTOM_TYPE,
@@ -1155,8 +1155,8 @@ function launchEntry() {
       childSessionId: childId,
       childSessionFile: "/tmp/child.jsonl",
       title: "Child",
-      goal: "Work",
-      requestResponse: true,
+      briefing: "Work",
+      reportBack: true,
       model: "openai/gpt-5.4",
       cwd: "/repo",
       resumeCommand: "resume",
@@ -1175,7 +1175,7 @@ function cancelEntry() {
   };
 }
 
-function childEntriesWithGrandchild(requestResponse = true): unknown[] {
+function childEntriesWithGrandchild(reportBack = true): unknown[] {
   const root = testFs.createTempDir();
   const grandchildPath = testFs.writeJsonlFile(root, "grandchild.jsonl", [
     {
@@ -1193,7 +1193,7 @@ function childEntriesWithGrandchild(requestResponse = true): unknown[] {
       data: { reason: "no_report_after_reminder" },
     },
   ]);
-  const entries = childEntries(1, requestResponse);
+  const entries = childEntries(1, reportBack);
   entries.push({
     type: "custom",
     id: "grandchild-launch",
@@ -1205,8 +1205,8 @@ function childEntriesWithGrandchild(requestResponse = true): unknown[] {
       childSessionId: grandchildId,
       childSessionFile: grandchildPath,
       title: "Grandchild",
-      goal: "Work",
-      requestResponse: true,
+      briefing: "Work",
+      reportBack: true,
       cwd: "/repo",
       resumeCommand: "resume",
       depth: 2,
@@ -1215,7 +1215,7 @@ function childEntriesWithGrandchild(requestResponse = true): unknown[] {
   return entries;
 }
 
-function pendingChildEntries(depth: number, requestResponse: boolean): unknown[] {
+function pendingChildEntries(depth: number, reportBack: boolean): unknown[] {
   return [
     {
       type: "custom",
@@ -1226,25 +1226,25 @@ function pendingChildEntries(depth: number, requestResponse: boolean): unknown[]
       data: {
         mode: "generate",
         sessionId: childId,
-        goal: "Work",
+        briefing: "Work",
         title: "Child",
         parentSessionFile: "/tmp/parent.jsonl",
         sourceLeafId: "source-leaf",
-        requestResponse,
+        reportBack,
         bootstrapMode: "automatic",
         launch: "subagent",
         subagent: {
           childSessionId: childId,
           ownerSessionId: parentId,
           depth,
-          requestResponse,
+          reportBack,
         },
       },
     },
   ];
 }
 
-function childEntries(depth: number, requestResponse = true): unknown[] {
+function childEntries(depth: number, reportBack = true): unknown[] {
   const root = testFs.createTempDir();
   const parentPath = join(root, "parent.jsonl");
   const childPath = join(root, "child.jsonl");
@@ -1262,11 +1262,11 @@ function childEntries(depth: number, requestResponse = true): unknown[] {
         ...launchEntry().data,
         childSessionFile: childPath,
         depth,
-        requestResponse,
+        reportBack,
       },
     },
   ]);
-  const [bootstrap] = pendingChildEntries(depth, requestResponse);
+  const [bootstrap] = pendingChildEntries(depth, reportBack);
   const entries: unknown[] = [
     bootstrap,
     {
@@ -1277,7 +1277,7 @@ function childEntries(depth: number, requestResponse = true): unknown[] {
       customType: HANDOFF_METADATA_CUSTOM_TYPE,
       data: {
         origin: "handoff",
-        goal: "Work",
+        briefing: "Work",
         title: "Child",
         initial_prompt: "Work",
         launch: "subagent",

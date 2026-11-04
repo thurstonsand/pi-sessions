@@ -221,7 +221,7 @@ describe("rebuildSessionIndex", () => {
         customType: "pi-sessions.handoff",
         data: {
           origin: "handoff",
-          goal: "Finish the split",
+          briefing: "Finish the split",
           title: "Implement autocomplete",
           initial_prompt: "Finish the split",
           launch: "deferred",
@@ -236,13 +236,13 @@ describe("rebuildSessionIndex", () => {
     const db = openIndexDatabase(indexPath, { create: false });
     const childRow = db
       .prepare(
-        `SELECT parent_session_path as parentSessionPath, parent_session_id as parentSessionId, session_origin as sessionOrigin, handoff_goal as handoffGoal FROM sessions WHERE session_id = ?`,
+        `SELECT parent_session_path as parentSessionPath, parent_session_id as parentSessionId, session_origin as sessionOrigin, handoff_briefing as handoffBriefing FROM sessions WHERE session_id = ?`,
       )
       .get("child-session") as {
       parentSessionPath?: string;
       parentSessionId?: string;
       sessionOrigin?: string;
-      handoffGoal?: string;
+      handoffBriefing?: string;
     };
     db.close();
 
@@ -250,7 +250,7 @@ describe("rebuildSessionIndex", () => {
       parentSessionPath: parentPath,
       parentSessionId: "parent-session",
       sessionOrigin: "handoff",
-      handoffGoal: "Finish the split",
+      handoffBriefing: "Finish the split",
     });
   });
 

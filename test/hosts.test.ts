@@ -3,15 +3,15 @@ import { createEventBus } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it, vi } from "vitest";
 import type { HostRegistrationRequest } from "../extensions/hosts/contract.ts";
 import { HostRegistry } from "../extensions/hosts/registry.ts";
-import { installAsk } from "../extensions/session-ask/install.ts";
 import type { SessionDirectory } from "../extensions/session-messaging/directory.ts";
 import { installDirectoryTools } from "../extensions/session-messaging/pi/install.ts";
+import { installRecall } from "../extensions/session-recall/install.ts";
 import { installSearch } from "../extensions/session-search/install.ts";
 import { loadSettings } from "../extensions/shared/settings.ts";
 import { createFakeExtensionApi } from "./test-helpers.ts";
 
 describe("recall claims", () => {
-  it.each(["search", "ask"] as const)(
+  it.each(["search", "recall"] as const)(
     "defers %s, preserves host tools, guards retained definitions and restores standalone recall",
     async (kind) => {
       const pi = createFakeExtensionApi();
@@ -32,7 +32,7 @@ describe("recall claims", () => {
         claimsRecall: () => claimed,
         getModelRuntime: () => ({}) as never,
       };
-      const installed = kind === "search" ? installSearch(pi, deps) : installAsk(pi, deps);
+      const installed = kind === "search" ? installSearch(pi, deps) : installRecall(pi, deps);
       expect(definitions).toHaveLength(0);
       installed.refresh();
       expect(definitions).toHaveLength(0);
@@ -84,7 +84,7 @@ describe("recall claims", () => {
 describe("peer claims", () => {
   it("leaves host tools intact, deactivates retained peer definitions and restores standalone tools", async () => {
     const pi = createFakeExtensionApi();
-    let active = ["session_reachable", "session_send_message", "session_cancel", "session_launch"];
+    let active = ["session_list", "session_send_message", "session_cancel_turn", "session_launch"];
     let claimed = true;
     const definitions = new Map<string, ToolDefinition>();
     vi.mocked(pi.getActiveTools).mockImplementation(() => active);
@@ -114,8 +114,8 @@ describe("peer claims", () => {
     expect([...definitions.keys()]).toEqual(["subagent_list", "subagent_send", "subagent_cancel"]);
     claimed = false;
     installed.refresh();
-    expect(active).toContain("session_reachable");
-    const peer = definitions.get("session_reachable");
+    expect(active).toContain("session_list");
+    const peer = definitions.get("session_list");
     if (!peer) throw new Error("Standalone peer tool was not registered.");
     expect((await peer.execute("list", {}, undefined, undefined, {} as never)).details).toEqual({
       scope: "user",
@@ -123,14 +123,14 @@ describe("peer claims", () => {
     });
     claimed = true;
     installed.refresh();
-    expect(active).not.toContain("session_reachable");
+    expect(active).not.toContain("session_list");
     expect(active).toContain("subagent_list");
     await expect(peer.execute("list", {}, undefined, undefined, {} as never)).rejects.toThrow(
       "current host",
     );
     claimed = false;
     installed.refresh();
-    expect(active).toContain("session_reachable");
+    expect(active).toContain("session_list");
   });
 
   it("freezes synchronous registration and rediscovers on every session", () => {

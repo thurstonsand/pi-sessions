@@ -389,7 +389,7 @@ it("finishes startup recovery after session shutdown without touching the expire
     path.join(root, "settings.json"),
     JSON.stringify({
       sessions: Object.fromEntries(
-        ["messaging", "subagents", "handoff", "search", "ask", "autoTitle"].map((feature) => [
+        ["messaging", "subagents", "handoff", "search", "recall", "autoTitle"].map((feature) => [
           feature,
           { enable: false },
         ]),

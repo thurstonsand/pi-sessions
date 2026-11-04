@@ -1,12 +1,11 @@
 import type { MessageRenderer } from "@earendil-works/pi-coding-agent";
 import { Box, Text } from "@earendil-works/pi-tui";
-import { safeParseTypeBoxValue } from "../shared/typebox.ts";
-import { SUBAGENT_REPORT_MESSAGE_SCHEMA } from "./ledger.ts";
+import { parseSubagentReportMessage } from "./ledger.ts";
 import { presentSubagentReportMessage } from "./report-message-presenter.ts";
 import { buildSubagentReportMessageView } from "./report-message-view-model.ts";
 
 export const renderSubagentReportMessage: MessageRenderer = (message, options, theme) => {
-  const details = safeParseTypeBoxValue(SUBAGENT_REPORT_MESSAGE_SCHEMA, message.details);
+  const details = parseSubagentReportMessage(message.details);
   if (!details) {
     return undefined;
   }

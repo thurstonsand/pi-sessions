@@ -35,6 +35,7 @@ Pi loads extension code directly from TypeScript source. Only the detached messa
 - Do not change production types to make tests easier; mock the real type instead.
 - Treat the SQLite index as a read-layer cache; anything durable must be stored within the session file directly
 - Never be afraid to break backwards compatibility if it serves to better solve the current goal
+- Name tools and args for the call you want the model to make; the name outweighs its description. snake_case for both.
 
 ## Gotchas
 
@@ -50,7 +51,7 @@ Pi loads extension code directly from TypeScript source. Only the detached messa
 - **Composition root**: `extensions/pi-sessions.ts`; feature-toggle and dependency-wiring logic. Should be the only place where `session_start`/`session_shutdown` subscription exists.
 - **Shared ports** at `extensions/shared/composition.ts`.
 - **Session search**: `extensions/session-search/install.ts`; result rendering at `extensions/session-search/renderer.ts`; core logic at `extensions/session-search/` and `extensions/shared/session-index/`.
-- **Session ask**: `extensions/session-ask/install.ts`; navigation agent logic at `extensions/session-ask/`; retrieval support at `extensions/shared/session-index/`.
+- **Session recall**: `extensions/session-recall/install.ts`; navigation agent logic at `extensions/session-recall/`; retrieval support at `extensions/shared/session-index/`.
 - **Session index**: `extensions/session-index/install.ts`; recovery and reconciliation at `extensions/shared/session-index/recovery.ts`.
 - **Session hooks**: `extensions/session-hooks/install.ts`; incremental sync at `extensions/shared/session-index/sync.ts`. Startup/switch sync runs independently of feature toggles.
 - **Session handoff**: `extensions/session-handoff/install.ts`; core logic at `extensions/session-handoff/`.

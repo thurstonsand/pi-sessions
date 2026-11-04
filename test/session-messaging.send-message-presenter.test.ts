@@ -16,13 +16,13 @@ describe("send-message presenter", () => {
           targetSessionId: "target-1",
           targetSessionName: "Target Session",
           relation: "child",
-          requestResponse: true,
+          reportBack: true,
           body: "Message body.",
         },
         theme,
       ),
     ).toEqual({
-      header: "session_send_message delivered to Target Session (child, response requested)",
+      header: "session_send_message delivered to Target Session (child, report back)",
       expandedMetadata: ["session target-1"],
       body: { text: "Message body.", collapsedRows: 3 },
     });

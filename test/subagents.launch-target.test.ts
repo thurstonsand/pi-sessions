@@ -32,21 +32,21 @@ describe("subagent launch target", () => {
       target.describeSubagentChild?.({
         childSessionId: "child-session",
         ownerSessionId: parentId,
-        requestResponse: true,
+        reportBack: true,
         agent: undefined,
       }),
     ).toEqual({
       childSessionId: "child-session",
       ownerSessionId: parentId,
       depth: 1,
-      requestResponse: true,
+      reportBack: true,
     });
     target.prepareChild({
       manager: {} as never,
       childSessionId: "child-session",
       parentSessionId: parentId,
       parentSessionFile: "/tmp/parent.jsonl",
-      requestResponse: true,
+      reportBack: true,
     });
 
     await expect(
@@ -58,8 +58,8 @@ describe("subagent launch target", () => {
         },
         parentSessionId: parentId,
         title: "Inspect target",
-        goal: "Inspect it",
-        requestResponse: true,
+        briefing: "Inspect it",
+        reportBack: true,
         model: "openai/gpt-5.4:high",
         cwd: "/repo",
       }),
@@ -71,7 +71,7 @@ describe("subagent launch target", () => {
         writerSessionId: parentId,
         childSessionId: "child-session",
         childSessionFile: "/tmp/child.jsonl",
-        requestResponse: true,
+        reportBack: true,
         depth: 1,
       }),
     );
@@ -97,8 +97,8 @@ describe("subagent launch target", () => {
         prepared: { sessionId: "child", sessionFile: "/tmp/c", resumeCommand: "resume" },
         parentSessionId: parentId,
         title: "Child",
-        goal: "Work",
-        requestResponse: true,
+        briefing: "Work",
+        reportBack: true,
         model: "openai/gpt-5.4",
         cwd: "/repo",
       }),

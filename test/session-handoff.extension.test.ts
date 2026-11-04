@@ -120,7 +120,7 @@ describe("session handoff extension", () => {
     expect(event.systemPromptOptions.sections).toEqual({
       other_extension: "Current instructions",
       pi_sessions_session_token:
-        "When the user references @session:<uuid>, treat it as a session token. If you call session_ask, pass only the UUID value, not the @session: prefix.",
+        "When the user references @session:<uuid>, treat it as a session token. If you call session_recall, pass only the UUID value, not the @session: prefix.",
     });
     expect(event.systemPrompt).toBe("Base prompt");
   });
@@ -311,12 +311,12 @@ describe("session handoff extension", () => {
       describeSubagentChild: (input: {
         childSessionId: string;
         ownerSessionId: string;
-        requestResponse: boolean;
+        reportBack: boolean;
       }) => ({
         childSessionId: input.childSessionId,
         ownerSessionId: input.ownerSessionId,
         depth: 1,
-        requestResponse: input.requestResponse,
+        reportBack: input.reportBack,
       }),
       approveProjectTrust: true,
       prepareChild: vi.fn(),
@@ -328,10 +328,10 @@ describe("session handoff extension", () => {
     installHandoffAndWire(installHandoff, pi, [target]);
 
     const result = await runTool(pi, handlers, {
-      goal: "Investigate it",
+      briefing: "Investigate it",
       title: "Investigate",
       launch: "subagent",
-      requestResponse: true,
+      report_back: true,
     });
 
     const definition = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
@@ -340,13 +340,13 @@ describe("session handoff extension", () => {
     expect(promptGuidelines(definition)).toContain(
       "Use subagent_launch for a concrete, bounded task that can proceed independently while useful work continues in the current session.",
     );
-    expect(launch).toHaveBeenCalledWith(expect.objectContaining({ requestResponse: true }));
+    expect(launch).toHaveBeenCalledWith(expect.objectContaining({ reportBack: true }));
     const preparation = mockPrepareHandoffLaunch.mock.calls.at(-1)?.[0] as {
       buildBootstrap: (sessionId: string) => { launch: string; subagent: unknown };
     };
     const bootstrap = preparation.buildBootstrap("child-session-999");
     expect(bootstrap).toMatchObject({
-      requestResponse: true,
+      reportBack: true,
       bootstrapMode: "automatic",
       launch: "subagent",
     });
@@ -354,10 +354,11 @@ describe("session handoff extension", () => {
       childSessionId: "child-session-999",
       ownerSessionId: "tool-session",
       depth: 1,
-      requestResponse: true,
+      reportBack: true,
     });
     expect(result.details).toMatchObject({ launch: "subagent", backend: "tmux" });
-    expect(result.content[0]?.text).toContain('"requestResponse": true');
+    expect(result.content[0]?.text).toContain('"report_back": true');
+    expect(result.content[0]?.text).toContain('"session_id": "child-session-999"');
   });
 
   it("offers agent profiles on subagent_launch and launches the child as one", async () => {
@@ -380,7 +381,7 @@ describe("session handoff extension", () => {
     const result = await runTool(
       pi,
       handlers,
-      { goal: "Review the plan", title: "Review", requestResponse: true, agent: "oracle" },
+      { briefing: "Review the plan", title: "Review", report_back: true, agent: "oracle" },
       { availableModels: PROFILE_MODELS },
     );
 
@@ -393,7 +394,7 @@ describe("session handoff extension", () => {
     expect(promptGuidelines(peer).join("\n")).not.toContain("oracle");
     expect(subagent?.parameters.properties).toHaveProperty("agent");
     expect(promptGuidelines(subagent).slice(-2)).toEqual([
-      "Set agent to run a subagent as one of the agent profiles below when its description fits the task; the profile supplies the model, so leave provider, model, and thinkingLevel unset unless the user asks otherwise.",
+      "Set agent to run a subagent as one of the agent profiles below when its description fits the task; the profile supplies the model, so leave provider, model, and thinking_level unset unless the user asks otherwise.",
       'Agent profile "oracle": Read-only second opinion on a plan or diff.',
     ]);
 
@@ -432,9 +433,9 @@ describe("session handoff extension", () => {
       pi,
       handlers,
       {
-        goal: "Review the plan",
+        briefing: "Review the plan",
         title: "Review",
-        requestResponse: true,
+        report_back: true,
         agent: "oracle",
         provider: "openai",
         model: "gpt-5.4",
@@ -464,7 +465,7 @@ describe("session handoff extension", () => {
       runTool(
         pi,
         handlers,
-        { goal: "Review", title: "Review", requestResponse: true, agent: "oracle" },
+        { briefing: "Review", title: "Review", report_back: true, agent: "oracle" },
         { availableModels: PROFILE_MODELS, scopedModels: [{ model: PROFILE_MODELS[0] }] },
       ),
     ).rejects.toThrow(
@@ -484,10 +485,10 @@ describe("session handoff extension", () => {
 
     await expect(
       runTool(pi, handlers, {
-        goal: "Review",
+        briefing: "Review",
         title: "Review",
         launch: "deferred",
-        requestResponse: false,
+        report_back: false,
         agent: "oracle",
       }),
     ).rejects.toThrow("Agent profiles apply only to subagent launches.");
@@ -501,7 +502,7 @@ describe("session handoff extension", () => {
 
     await expect(
       runTool(pi, handlers, {
-        goal: "Investigate it",
+        briefing: "Investigate it",
         title: "x".repeat(65),
         launch: "deferred",
       }),
@@ -520,7 +521,7 @@ describe("session handoff extension", () => {
 
     await expect(
       runTool(pi, handlers, {
-        goal: "Investigate it",
+        briefing: "Investigate it",
         title: "😀".repeat(64),
         launch: "deferred",
       }),
@@ -536,7 +537,7 @@ describe("session handoff extension", () => {
     installHandoffAndWire(installHandoff, pi);
 
     const result = await runTool(pi, handlers, {
-      goal: "Do it",
+      briefing: "Do it",
       title: "Do it now",
       launch: "deferred",
     });
@@ -566,7 +567,7 @@ describe("session handoff extension", () => {
     installHandoffAndWire(installHandoff, pi);
 
     const result = await runTool(pi, handlers, {
-      goal: "Do it",
+      briefing: "Do it",
       title: "Do it now",
       launch: "right",
     });
@@ -589,7 +590,7 @@ describe("session handoff extension", () => {
     installHandoffAndWire(installHandoff, pi);
 
     const result = await runTool(pi, handlers, {
-      goal: "Do it",
+      briefing: "Do it",
       title: "Do it now",
       launch: "right",
     });
@@ -610,7 +611,7 @@ describe("session handoff extension", () => {
         pi,
         handlers,
         {
-          goal: "Do it",
+          briefing: "Do it",
           title: "Do it now",
           launch: "deferred",
           provider: "ghost",
@@ -638,7 +639,7 @@ describe("session handoff extension", () => {
         pi,
         handlers,
         {
-          goal: "Do it",
+          briefing: "Do it",
           title: "Do it now",
           launch: "deferred",
           provider: "metered",
@@ -684,7 +685,7 @@ describe("session handoff extension", () => {
         pi,
         handlers,
         {
-          goal: "Do it",
+          briefing: "Do it",
           title: "Do it now",
           launch: "deferred",
           provider: "metered",
@@ -765,13 +766,13 @@ function createSubagentTarget() {
     describeSubagentChild: (input: {
       childSessionId: string;
       ownerSessionId: string;
-      requestResponse: boolean;
+      reportBack: boolean;
       agent: { name: string; instructions: string } | undefined;
     }) => ({
       childSessionId: input.childSessionId,
       ownerSessionId: input.ownerSessionId,
       depth: 1,
-      requestResponse: input.requestResponse,
+      reportBack: input.reportBack,
       ...(input.agent ? { agent: input.agent } : {}),
     }),
     prepareChild: vi.fn(),
@@ -937,11 +938,11 @@ function pendingGeneratedBootstrapEntry(bootstrapMode: "review" | "automatic") {
     customType: HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
     data: createChildGeneratedHandoffBootstrap({
       sessionId: "child-session-123",
-      goal: "Finish phase 1",
+      briefing: "Finish phase 1",
       title: "Implement autocomplete",
       parentSessionFile: "/tmp/missing-parent.jsonl",
       sourceLeafId: "source-leaf",
-      requestResponse: false,
+      reportBack: false,
       bootstrapMode,
       launch: "deferred",
     }),

@@ -42,7 +42,7 @@ function report(status: "done" | "blocked" | "incomplete" = "done") {
       { reference: "test/example.test.ts", description: "Coverage" },
       { reference: "npm run typecheck" },
     ],
-    nextSteps: ["Review the diff."],
+    next_steps: ["Review the diff."],
     provenance: "live",
   };
 }

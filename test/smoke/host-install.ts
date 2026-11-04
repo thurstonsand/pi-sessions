@@ -7,9 +7,9 @@ export default function install(pi: ExtensionAPI): void {
   if (process.env.SMOKE_HOST_TOOLS) {
     // These names intentionally collide with the old load-time registrations.
     for (const name of [
-      "session_reachable",
+      "session_list",
       "session_send_message",
-      "session_cancel",
+      "session_cancel_turn",
       "session_launch",
     ]) {
       pi.registerTool({

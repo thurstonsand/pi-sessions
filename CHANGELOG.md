@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-04
+
 ### Changed
 
 - Model-facing tools and arguments are renamed for the call they make, all in snake_case, with no tool or argument aliases:

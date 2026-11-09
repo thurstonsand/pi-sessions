@@ -1,6 +1,8 @@
 min_version = "2026.10.4"
 
 [settings]
+# Every tool, and every package mise locks under it, waits 3 days after release, like Renovate.
+minimum_release_age = "3d"
 experimental = true
 
 [hooks]

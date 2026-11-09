@@ -25,6 +25,8 @@ CI runs this lane after the routine check and uploads its artifacts. The scripte
 
 A Windows CI job runs the unit tests and `mise run smoke:herdr` against Herdr's Windows build, where the socket API is a named pipe and workers launch through Git Bash. The Pi and tmux lane does not run on Windows.
 
+The manual **Windows stress** workflow repeats the full unit suite at a selected revision, retaining every run's JSON results and failing if any repetition fails. It compares system-temp and runner-temp fixtures on separate Windows runners and logs SQLite commit latency on both drives. Start it with `gh workflow run windows-stress.yml -f ref=main -f repetitions=10`; repetitions are independent runs, not retries that hide failures.
+
 ## Repeatable benchmarks
 
 ```sh

@@ -64,11 +64,11 @@ description = "Verify the committed broker build matches its source"
 depends = ["build:broker"]
 run = "git diff --exit-code -- dist"
 
-# Renovate supports only Node 24 (its engines say ^24.11), while the repo develops on 26. Its tasks
-# run under MISE_ENV=renovate, whose mise.renovate.toml overlays Node 24 and adds Renovate, so mise
-# both installs and runs it on 24: re2, Renovate's native regex engine, is built for the Node that
-# installs it and refuses to load in another, leaving validation on JavaScript RegExp with only a
-# warning. `mise x` also puts that Node ahead of a Homebrew one already on PATH.
+# Renovate's tasks run under MISE_ENV=renovate, whose mise.renovate.toml overlays Renovate and the
+# Node it supports, so its install stays out of every bootstrap and mise both installs and runs it
+# on that Node: re2, Renovate's native regex engine, is built for the Node that installs it and
+# refuses to load in another, leaving validation on JavaScript RegExp with only a warning. `mise x`
+# also puts that Node ahead of a Homebrew one already on PATH.
 [tasks.renovate]
 description = "Run Renovate"
 run = "MISE_ENV=renovate mise x -- renovate"

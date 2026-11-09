@@ -1,6 +1,6 @@
 # Renovate's own toolset, overlaid on mise.toml by its tasks (see lint:renovate in mise.toml).
 [tools]
-node = "24"
+node = "26"
 "npm:renovate" = { version = "44.221.6", allow_builds = [
   "re2",
 ], trust_policy_excludes = [

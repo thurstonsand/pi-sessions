@@ -65,12 +65,6 @@
       "enabled": false
     },
     {
-      "description": "Renovate supports only Node 24 (its engines say ^24.11), so the toolset its own tasks run in stays there while the repo moves on",
-      "matchFileNames": ["mise.renovate.toml"],
-      "matchPackageNames": ["node"],
-      "allowedVersions": "<25"
-    },
-    {
       "description": "Pi releases land as soon as they ship. Extensions run inside whatever pi the user has installed, so our types and smoke tests must track the newest release rather than wait out the npm release-age gate. Bumping raises the package.json floor too, so the declared range names the pi we actually build against.",
       "matchPackageNames": ["@earendil-works/**"],
       "minimumReleaseAge": null,

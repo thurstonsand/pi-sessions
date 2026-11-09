@@ -771,12 +771,9 @@ const { DatabaseSync } = require("node:sqlite");
 const db = new DatabaseSync(workerData.dbPath);
 db.exec("PRAGMA busy_timeout = 0");
 db.exec("BEGIN IMMEDIATE");
-db.prepare(
-  "INSERT INTO metadata(key, value) VALUES ('lock-holder', '1') ON CONFLICT(key) DO UPDATE SET value = '1'",
-).run();
 parentPort.postMessage("locked");
 setTimeout(() => {
-  db.exec("COMMIT");
+  // Closing releases the reserved write lock without competing with readers for COMMIT.
   db.close();
 }, workerData.holdMs);
 `;

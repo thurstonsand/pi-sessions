@@ -23,9 +23,9 @@ Artifacts live under `.mise/smoke/<run>/`: RPC events and stderr, worker pane te
 
 CI runs this lane after the routine check and uploads its artifacts. The scripted provider verifies integration mechanics, not generated briefing quality, real provider authentication, auto-title, or interactive mouse behavior; those remain in the manual lane below.
 
-A Windows CI job runs the unit tests and `mise run smoke:herdr` against Herdr's Windows build, where the socket API is a named pipe and workers launch through Git Bash. The Pi and tmux lane does not run on Windows.
+A Windows CI job runs the unit tests and `mise run smoke:herdr` against Herdr's Windows build, where the socket API is a named pipe and workers launch through Git Bash. The Pi and tmux lane does not run on Windows. Windows jobs put `TEMP` and `TMP` on the runner's temporary drive: SQLite journal flushes on the system drive are slow enough to exhaust test deadlines under concurrent load.
 
-The manual **Windows stress** workflow repeats the full unit suite at a selected revision, retaining every run's JSON results and failing if any repetition fails. It compares system-temp and runner-temp fixtures on separate Windows runners and logs SQLite commit latency on both drives. Start it with `gh workflow run windows-stress.yml -f ref=main -f repetitions=10`; repetitions are independent runs, not retries that hide failures.
+The manual **Windows stress** workflow repeats the full unit suite at a selected revision on three independent Windows runners, retaining every run's JSON results and failing if any repetition fails. Start it with `gh workflow run windows-stress.yml -f ref=main -f repetitions=10` for 30 suite runs; repetitions are independent runs, not retries that hide failures. It uses the same temporary drive as regular CI, with unchanged test timeouts and SQLite durability settings.
 
 ## Repeatable benchmarks
 

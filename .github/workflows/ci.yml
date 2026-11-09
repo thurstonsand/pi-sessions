@@ -59,6 +59,12 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
+      # System temp is on C:, where SQLite journal flushes stall under concurrent tests.
+      - name: Use runner temporary drive
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 

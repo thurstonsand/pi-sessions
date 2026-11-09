@@ -17,14 +17,19 @@ permissions:
 
 jobs:
   test:
-    name: Windows (${{ matrix.temp }})
+    name: Windows (${{ matrix.sample }})
     runs-on: windows-latest
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        temp: [system, runner]
+        sample: [1, 2, 3]
     steps:
+      - name: Use runner temporary drive
+        run: |
+          "TEMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+          "TMP=$env:RUNNER_TEMP" >> $env:GITHUB_ENV
+
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -39,56 +44,32 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Compare SQLite commit latency
-        run: |
-          @'
-          const { DatabaseSync } = require('node:sqlite');
-          const { mkdtempSync, rmSync } = require('node:fs');
-          const { join } = require('node:path');
-          for (const root of [require('node:os').tmpdir(), process.env.RUNNER_TEMP]) {
-            const dir = mkdtempSync(join(root, 'sqlite-probe-'));
-            const db = new DatabaseSync(join(dir, 'index.sqlite'));
-            db.exec('PRAGMA synchronous = NORMAL; CREATE TABLE probe (value INTEGER)');
-            const times = [];
-            for (let i = 0; i < 100; i++) {
-              const start = performance.now();
-              db.exec('INSERT INTO probe VALUES (1)');
-              times.push(performance.now() - start);
-            }
-            times.sort((a, b) => a - b);
-            console.log(JSON.stringify({ root, medianMs: times[50], p95Ms: times[95], maxMs: times[99] }));
-            db.close();
-            rmSync(dir, { recursive: true });
-          }
-          '@ | node
-
       - name: Build broker
         run: mise run build:broker
 
       - name: Repeat full suite
         env:
           REPETITIONS: ${{ inputs.repetitions }}
-          TEST_TEMP: ${{ matrix.temp }}
         run: |
-          if ($env:TEST_TEMP -eq 'runner') {
-            $env:TEMP = $env:RUNNER_TEMP
-            $env:TMP = $env:RUNNER_TEMP
+          $repetitions = [int]$env:REPETITIONS
+          if ($repetitions -lt 1 -or $repetitions -gt 30) {
+            throw 'Repetitions must be between 1 and 30'
           }
           New-Item -ItemType Directory -Force .vitest | Out-Null
           $failures = 0
-          for ($i = 1; $i -le [int]$env:REPETITIONS; $i++) {
+          for ($i = 1; $i -le $repetitions; $i++) {
             Write-Output "::group::Full suite $i"
             npx vitest run --reporter=default --reporter=json --outputFile=".vitest/run-$i.json"
             if ($LASTEXITCODE -ne 0) { $failures++ }
             Write-Output '::endgroup::'
           }
-          Write-Output "$failures failing runs of $env:REPETITIONS"
+          Write-Output "$failures failing runs of $repetitions"
           if ($failures -ne 0) { exit 1 }
 
       - name: Test results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: windows-${{ matrix.temp }}
+          name: windows-${{ matrix.sample }}
           path: .vitest/
           include-hidden-files: true

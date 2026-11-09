@@ -10,6 +10,8 @@ Pi reads both: for git and npm installs alike, it compares `package.json`'s vers
 
 `mise run release X.Y.Z` cuts a release, and pushing its `vX.Y.Z` tag starts `.github/workflows/release.yml`. That workflow first checks that the tag, `package.json` and the changelog's newest section name the same version, then runs CI, packs the package and publishes it with the `latest` dist-tag and provenance through npm Trusted Publishing (OIDC). CI never commits. There is no manual `npm publish`.
 
+Versions follow semantic versioning: a release with any new feature (an `Added` entry), a raised floor (a higher minimum Pi, Node, OS, or other dependency version), or anything breaking is at least minor, and breaking is major from 1.0 on; patch is only for fixes and dependency updates.
+
 ## Release flow
 
 1. Collect the release notes under `## [Unreleased]` in `CHANGELOG.md`, push them to `main`, and wait for CI to pass.

@@ -69,6 +69,12 @@
       "matchPackageNames": ["@earendil-works/**"],
       "minimumReleaseAge": null,
       "rangeStrategy": "bump"
+    },
+    {
+      "description": "Pi's docs/packages.md has a package declare the packages Pi provides as peerDependencies at \"*\", so it loads in whichever Pi hosts it. Renovate leaves those peers alone; the devDependencies carry the Pi the package is built against.",
+      "matchPackageNames": ["@earendil-works/**", "typebox"],
+      "matchDepTypes": ["peerDependencies"],
+      "enabled": false
     }
   ]
 }

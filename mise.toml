@@ -1,4 +1,4 @@
-min_version = "2026.10.4"
+min_version = "2026.11.1"
 
 [settings]
 # Every tool, and every package mise locks under it, waits 3 days after release, like Renovate.

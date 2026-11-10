@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- `sessions.autoTitle.model` accepts `current`, `session`, or `default` to title with the session's own model instead of naming a catalog model. It follows a model switch within the session.
+
 ## [0.23.0] - 2026-11-04
 
 ### Changed

@@ -47,6 +47,35 @@ describe("session auto-title model resolution", () => {
     });
   });
 
+  it("uses the session's own model when the setting names it", () => {
+    const currentModel = createModel("llama-swap", "local-llama");
+    const fallbackModel = createModel("openai-codex", "gpt-5.6-luna");
+
+    for (const pattern of ["current", "session", "default"]) {
+      expect(
+        resolveModel({ currentModel, availableModels: [fallbackModel] }, pattern),
+      ).toMatchObject({ model: currentModel, source: "current" });
+    }
+  });
+
+  it("accepts a session model word in any case, with surrounding spaces", () => {
+    const currentModel = createModel("llama-swap", "local-llama");
+
+    expect(resolveModel({ currentModel }, "  Current  ")).toMatchObject({
+      model: currentModel,
+      source: "current",
+    });
+  });
+
+  it("walks the internal fallback list when the setting names the session model and none is current", () => {
+    const fallbackModel = createModel("openai-codex", "gpt-5.6-luna");
+
+    expect(resolveModel({ availableModels: [fallbackModel] }, "current")).toMatchObject({
+      model: fallbackModel,
+      source: "fallback",
+    });
+  });
+
   it("prefers the first available internal fallback", () => {
     const lunaModel = createModel("openai-codex", "gpt-5.6-luna");
     const anthropicModel = createModel("anthropic", "claude-haiku-4-5");

@@ -11,6 +11,16 @@ const DEFAULT_AUTO_TITLE_FALLBACK_MODELS: readonly ExactModelReference[] = [
   { provider: "google", modelId: "gemini-flash-lite-latest" },
 ] as const;
 
+/**
+ * Settings words that name the session's own model instead of a catalog model.
+ * Pi hands the extension the session's current model, so this follows a model switch too.
+ */
+const SESSION_MODEL_PATTERNS: readonly string[] = ["current", "session", "default"];
+
+function namesSessionModel(modelPattern: string): boolean {
+  return SESSION_MODEL_PATTERNS.includes(modelPattern.trim().toLowerCase());
+}
+
 export type AutoTitleModelSource = "configured" | "fallback" | "current";
 
 export interface AutoTitleModelResolution {
@@ -24,7 +34,9 @@ export function resolveAutoTitleModel(
   currentModel: Model<Api> | undefined,
   configuredModel: string | undefined,
 ): AutoTitleModelResolution | undefined {
-  if (configuredModel) {
+  const sessionModelRequested = configuredModel !== undefined && namesSessionModel(configuredModel);
+
+  if (configuredModel && !sessionModelRequested) {
     const configured = resolveAuthenticatedModel({
       modelRuntime,
       modelPattern: configuredModel,
@@ -36,6 +48,13 @@ export function resolveAutoTitleModel(
         thinkingLevel: configured.thinkingLevel,
       };
     }
+  }
+
+  if (sessionModelRequested && currentModel) {
+    return {
+      model: currentModel,
+      source: "current",
+    };
   }
 
   const availableModels = modelRuntime.getAvailableSnapshot();

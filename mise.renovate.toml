@@ -3,7 +3,7 @@
 node = "26"
 # Renovate relocks this tool with mise in safe mode, which ignores mise.toml's [settings], so its
 # 3-day wait is repeated here, where safe mode still reads it.
-"npm:renovate" = { version = "44.221.6", minimum_release_age = "3d", allow_builds = [
+"npm:renovate" = { version = "44.222.0", minimum_release_age = "3d", allow_builds = [
   "re2",
 ], trust_policy_excludes = [
   "@yarnpkg/libzip@3.2.2",

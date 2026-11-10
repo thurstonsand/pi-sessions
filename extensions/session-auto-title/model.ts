@@ -29,6 +29,14 @@ export interface AutoTitleModelResolution {
   thinkingLevel?: ThinkingLevel | undefined;
 }
 
+/**
+ * Pick the model that writes a session title.
+ *
+ * The `sessions.autoTitle.model` setting wins when it names an available model, where
+ * `current`, `session` and `default` name the session's own model. Otherwise the internal
+ * fallback list is tried in order, and the session's model serves as the last resort.
+ * Returns undefined when nothing resolves.
+ */
 export function resolveAutoTitleModel(
   modelRuntime: ModelRuntime,
   currentModel: Model<Api> | undefined,

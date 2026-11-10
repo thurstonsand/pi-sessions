@@ -312,7 +312,7 @@ Note that generating titles for all sessions can take some time, and will hit yo
   - `anthropic/claude-haiku-4-5`
   - `google/gemini-flash-lite-latest`
   - your currently configured model
-- to title with the session's own model instead of naming a catalog model, set `model` to `current`; `session` and `default` are aliases. It follows a model switch within the session, and falls back to the list above when the session has no model.
+- to title with the session's current model instead of naming a catalog model, set `model` to `current`; `session` and `default` are aliases. It follows a model switch within the session, and falls back to the list above when the session has no model. In `folder` and `all` scopes, the model comes from the session running the command.
 
 To change auto-titling settings, edit `~/.pi/agent/settings.json`:
 

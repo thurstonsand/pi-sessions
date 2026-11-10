@@ -6,7 +6,7 @@
 
 ### Added
 
-- `sessions.autoTitle.model` accepts `current`, `session`, or `default` to title with the session's own model instead of naming a catalog model. It follows a model switch within the session.
+- `sessions.autoTitle.model` accepts `current`, `session`, or `default` to title with the session's current model instead of naming a catalog model. It follows a model switch within the session. In `folder` and `all` scopes, the model comes from the session running the command.
 
 ## [0.23.0] - 2026-11-04
 

@@ -290,7 +290,7 @@ export function installSubagents(
       if (!runtime && !warnedNoWorkerBackend) {
         warnedNoWorkerBackend = true;
         ctx.ui.notify(
-          "Subagents are disabled: tmux is not installed and Pi is not running in Herdr. Install tmux or run Pi in Herdr to use them, or set sessions.subagents.enable to false to hide this warning.",
+          "Subagents are disabled: did not detect tmux or herdr. Install tmux or run in herdr to use subagents, or set sessions.subagents.enable = false to hide this warning",
           "warning",
         );
       }

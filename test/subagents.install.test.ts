@@ -78,72 +78,94 @@ describe("subagent installation", () => {
     expect(handle.getLaunchTargets()).toEqual([]);
   });
 
-  it("does not offer launch when tmux is unavailable", async () => {
-    const { pi } = createPi({ tmuxInstalled: false });
+  it("disables workers quietly when neither tmux nor Herdr is available", async () => {
+    vi.useFakeTimers();
+    const { pi, handlers } = createPi({ tmuxInstalled: false });
     const handle = installSubagents(pi as never, createDeps(2));
+    const ctx = createContext(childId, childEntriesWithGrandchild());
 
-    await handle.onSessionStart?.(
-      { type: "session_start", reason: "startup" },
-      createContext(parentId, []) as never,
-    );
+    await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
     expect(handle.getLaunchTargets()).toEqual([]);
-  });
-
-  it("launches workers as Herdr panes when the session runs in Herdr, even without tmux", async () => {
-    const { pi } = createPi({ tmuxInstalled: false });
-    const ownerPane = { pane_id: "w1:p1", workspace_id: "w1", tab_id: "w1:t1", focused: true };
-    const request = vi.fn(async (method: string, _params: Record<string, unknown>) => {
-      switch (method) {
-        case "pane.list":
-          return { type: "pane_list", panes: [ownerPane] };
-        case "pane.get":
-          return { type: "pane_info", pane: ownerPane };
-        case "layout.apply":
-          return { type: "layout_apply", layout: { tab_id: "w1:t2", root: { pane_id: "w1:p2" } } };
-        default:
-          return { type: "ok" };
-      }
+    await handlers.get("agent_settled")?.({}, ctx);
+    await handlers.get("session_tree")?.({}, ctx);
+    await expect(handle.roster.resolve("branch")).resolves.toMatchObject({
+      entries: [{ sessionId: grandchildId }],
     });
-    const herdr = { paneId: "w1:p1", client: { request } };
-    const handle = installSubagents(
-      pi as never,
-      {
-        ...(createDeps(2) as object),
-        getHerdr: () => herdr,
-      } as never,
+    await expect(handle.waker.wake(grandchildId)).rejects.toThrow(
+      "Subagent workers need tmux or Herdr, and neither is available.",
     );
+    await vi.advanceTimersByTimeAsync(10_000);
+    await handle.onSessionShutdown?.({ type: "session_shutdown", reason: "quit" }, ctx as never);
 
-    await handle.onSessionStart?.(
-      { type: "session_start", reason: "startup" },
-      createContext(parentId, []) as never,
-    );
-    const [target] = handle.getLaunchTargets();
-
-    expect(target?.description).toContain("detached Herdr worker");
-    await expect(
-      target?.launch({
-        prepared: { sessionId: childId, sessionFile: "/tmp/child.jsonl", resumeCommand: "resume" },
-        parentSessionId: parentId,
-        title: "Inspect target",
-        briefing: "Inspect it",
-        reportBack: true,
-        model: "openai/gpt-5.4:high",
-        cwd: "/repo",
-      }),
-    ).resolves.toEqual({ success: true, backend: "Herdr" });
-    expect(request).toHaveBeenCalledWith(
-      "layout.apply",
-      expect.objectContaining({ workspace_id: "w1", focus: false }),
-    );
-    expect(request).toHaveBeenCalledWith(
-      "pane.report_metadata",
-      expect.objectContaining({
-        pane_id: "w1:p2",
-        tokens: { pi_owner_session_id: parentId, pi_session_id: childId },
-      }),
-    );
-    expect(pi.exec).not.toHaveBeenCalledWith("tmux", expect.anything(), expect.anything());
+    expect(ctx.ui.notify).not.toHaveBeenCalled();
+    expect(pi.exec.mock.calls.map(([, args]) => args[0])).toEqual(["-V"]);
   });
+
+  it.each([false, true])(
+    "launches workers as Herdr panes when the session runs in Herdr (tmux installed: %s)",
+    async (tmuxInstalled) => {
+      const { pi } = createPi({ tmuxInstalled });
+      const ownerPane = { pane_id: "w1:p1", workspace_id: "w1", tab_id: "w1:t1", focused: true };
+      const request = vi.fn(async (method: string, _params: Record<string, unknown>) => {
+        switch (method) {
+          case "pane.list":
+            return { type: "pane_list", panes: [ownerPane] };
+          case "pane.get":
+            return { type: "pane_info", pane: ownerPane };
+          case "layout.apply":
+            return {
+              type: "layout_apply",
+              layout: { tab_id: "w1:t2", root: { pane_id: "w1:p2" } },
+            };
+          default:
+            return { type: "ok" };
+        }
+      });
+      const herdr = { paneId: "w1:p1", client: { request } };
+      const handle = installSubagents(
+        pi as never,
+        {
+          ...(createDeps(2) as object),
+          getHerdr: () => herdr,
+        } as never,
+      );
+
+      await handle.onSessionStart?.(
+        { type: "session_start", reason: "startup" },
+        createContext(parentId, []) as never,
+      );
+      const [target] = handle.getLaunchTargets();
+
+      expect(target?.description).toContain("detached Herdr worker");
+      await expect(
+        target?.launch({
+          prepared: {
+            sessionId: childId,
+            sessionFile: "/tmp/child.jsonl",
+            resumeCommand: "resume",
+          },
+          parentSessionId: parentId,
+          title: "Inspect target",
+          briefing: "Inspect it",
+          reportBack: true,
+          model: "openai/gpt-5.4:high",
+          cwd: "/repo",
+        }),
+      ).resolves.toEqual({ success: true, backend: "Herdr" });
+      expect(request).toHaveBeenCalledWith(
+        "layout.apply",
+        expect.objectContaining({ workspace_id: "w1", focus: false }),
+      );
+      expect(request).toHaveBeenCalledWith(
+        "pane.report_metadata",
+        expect.objectContaining({
+          pane_id: "w1:p2",
+          tokens: { pi_owner_session_id: parentId, pi_session_id: childId },
+        }),
+      );
+      expect(pi.exec).not.toHaveBeenCalledWith("tmux", expect.anything(), expect.anything());
+    },
+  );
 
   it("persists an incoming report before making it model-visible", async () => {
     const order: string[] = [];
@@ -1084,8 +1106,9 @@ function createPi(options: {
       },
     ),
     exec: vi.fn(async (_command: string, args: string[]) => {
-      if (args[0] === "-V") {
-        return { code: options.tmuxInstalled ? 0 : 1, stdout: "", stderr: "" };
+      if (!options.tmuxInstalled) {
+        // Pi's exec reports a missing binary as a failed run rather than throwing.
+        return { code: 1, stdout: "", stderr: "spawn tmux ENOENT" };
       }
       if (args[0] === "list-clients") {
         const attached = attachedResponses.shift() ?? false;
@@ -1126,6 +1149,7 @@ function createContext(sessionId: string, entries: unknown[]) {
     cwd: "/repo",
     sessionManager: {
       getSessionId: () => sessionId,
+      getSessionName: () => undefined,
       getBranch: () => entries,
       getEntries: () => entries,
       getHeader: () => {

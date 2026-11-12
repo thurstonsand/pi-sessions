@@ -12,6 +12,10 @@
 
 - `/title folder` and `/title pi` resolve the title model per stored session, so a stored session's last resort is its own model rather than the model of the session running the command.
 
+### Fixed
+
+- Without tmux and outside Herdr, such as in Git Bash on Windows, sessions no longer report `Subagent lifecycle failed: Failed to list windows with tmux: spawn tmux ENOENT` at every start and exit, and `subagent_list` no longer fails the same way ([#69](https://github.com/thurstonsand/pi-sessions/issues/69)). Subagent launch stays unavailable there; waking an existing subagent says it needs tmux or Herdr.
+
 ## [0.23.0] - 2026-11-04
 
 ### Changed

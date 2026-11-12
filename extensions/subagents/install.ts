@@ -44,6 +44,7 @@ import { SubagentWaker } from "./wake.ts";
 import {
   createHerdrWorkerRuntime,
   createTmuxWorkerRuntime,
+  UNAVAILABLE_WORKER_RUNTIME,
   type WorkerRuntime,
 } from "./worker-runtime.ts";
 
@@ -276,6 +277,11 @@ export function installSubagents(
       const sessionStartBranch = sessionManager.getBranch();
       const identity = findSelfSubagentIdentity(sessionId, sessionStartBranch);
       const herdr = deps.getHerdr();
+      const runtime = herdr
+        ? createHerdrWorkerRuntime(herdr)
+        : (await isTmuxInstalled(pi, ctx.cwd))
+          ? createTmuxWorkerRuntime(pi)
+          : undefined;
       const parent: ParentSessionState = {
         sessionId,
         getSessionName: () => sessionManager.getSessionName(),
@@ -287,8 +293,8 @@ export function installSubagents(
         shutdown: ctx.shutdown,
         epoch,
         launchState: { sessionId, depth: identity?.depth ?? 0, epoch },
-        runtime: herdr ? createHerdrWorkerRuntime(herdr) : createTmuxWorkerRuntime(pi),
-        canLaunchWorkers: herdr !== undefined || (await isTmuxInstalled(pi, ctx.cwd)),
+        runtime: runtime ?? UNAVAILABLE_WORKER_RUNTIME,
+        canLaunchWorkers: runtime !== undefined,
         reportError: (error) => notifySubagentFailure(ctx.ui, error),
       };
       reconciler.beginSession();

@@ -70,6 +70,18 @@ export function createTmuxWorkerRuntime(
   };
 }
 
+/** Neither tmux nor Herdr is available, so no worker window can exist. */
+export const UNAVAILABLE_WORKER_RUNTIME: WorkerRuntime = {
+  name: "unavailable",
+  list: async () => [],
+  async create() {
+    throw new Error("Subagent workers need tmux or Herdr, and neither is available.");
+  },
+  stop: async () => true,
+  stopAll: async () => true,
+  isWatched: async () => false,
+};
+
 export function createHerdrWorkerRuntime(session: HerdrSession): WorkerRuntime {
   return {
     name: "Herdr",

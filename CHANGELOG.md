@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.23.1] - 2026-11-12
+
 ### Added
 
 - `sessions.autoTitle.model: "session"` titles each session with its own model and never falls back to the hosted defaults ([#67](https://github.com/thurstonsand/pi-sessions/issues/67)).

@@ -6,6 +6,7 @@ import type {
   SessionInfo,
 } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import type { ExactModelReference } from "../shared/model.ts";
 import type { RetitleMode, RetitleScope } from "./command.ts";
 import { buildAutoTitleContext } from "./context.ts";
 import type { AutoTitleTriggerPlan, SessionAutoTitleController } from "./controller.ts";
@@ -27,6 +28,11 @@ export interface RetitleScopeScan {
   totalCount: number;
   untitledCount: number;
 }
+
+/** Resolves the title model for a stored session from the model that session last ran. */
+export type StoredSessionTitleModel = (
+  sessionModel: ExactModelReference | undefined,
+) => Model<Api> | undefined;
 
 export interface BulkRetitleResult {
   attempted: number;
@@ -55,6 +61,7 @@ export async function runBulkRetitle(
   controller: SessionAutoTitleController,
   ctx: ExtensionCommandContext,
   model: Model<Api> | undefined,
+  storedTitleModel: StoredSessionTitleModel,
   scan: RetitleScopeScan,
   mode: RetitleMode,
   getSessionEpoch: () => number,
@@ -66,11 +73,6 @@ export async function runBulkRetitle(
     unchanged: 0,
     failed: 0,
   };
-
-  if (!model) {
-    result.failed = getEligibleSessions(scan.sessions, mode).length;
-    return result;
-  }
 
   const currentSessionFile = ctx.sessionManager.getSessionFile();
   const eligibleSessions = getEligibleSessions(scan.sessions, mode);
@@ -93,7 +95,12 @@ export async function runBulkRetitle(
       continue;
     }
 
-    const outcome = await retitleStoredSession(ctx.modelRegistry, model, session.path, generation);
+    const outcome = await retitleStoredSession(
+      ctx.modelRegistry,
+      storedTitleModel,
+      session.path,
+      generation,
+    );
     result[outcome] += 1;
   }
 
@@ -256,11 +263,15 @@ export function persistAutoTitleState(
 
 async function retitleStoredSession(
   modelRegistry: ExtensionContext["modelRegistry"],
-  model: Model<Api>,
+  storedTitleModel: StoredSessionTitleModel,
   sessionPath: string,
   generation: AutoTitleGeneration,
 ): Promise<"retitled" | "unchanged" | "failed"> {
   const sessionManager = SessionManager.open(sessionPath);
+  const model = storedTitleModel(sessionManager.buildSessionContext().model ?? undefined);
+  if (!model) {
+    return "failed";
+  }
   const currentTitle = sessionManager.getSessionName();
   const titleContext = buildAutoTitleContext(
     sessionManager.getEntries(),

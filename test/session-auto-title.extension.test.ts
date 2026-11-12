@@ -1,6 +1,11 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionSettings } from "../extensions/shared/settings.ts";
-import { createFakeModelRegistry, createFakeModelRuntime } from "./test-helpers.ts";
+import {
+  createFakeModelRegistry,
+  createFakeModelRuntime,
+  createTestFilesystem,
+} from "./test-helpers.ts";
 
 const { completeSimpleMock, loadSettingsMock } = vi.hoisted(() => ({
   completeSimpleMock: vi.fn(),
@@ -10,6 +15,18 @@ const { completeSimpleMock, loadSettingsMock } = vi.hoisted(() => ({
 vi.mock("../extensions/shared/settings.ts", () => ({
   loadSettings: loadSettingsMock,
 }));
+
+const testFs = createTestFilesystem("pi-sessions-auto-title-extension-");
+const originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+
+afterEach(() => {
+  if (originalAgentDir === undefined) {
+    delete process.env.PI_CODING_AGENT_DIR;
+  } else {
+    process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+  }
+  testFs.cleanup();
+});
 
 beforeEach(() => {
   vi.resetModules();
@@ -52,6 +69,41 @@ describe("session auto-title extension", () => {
     expect(completeSimpleMock).toHaveBeenCalledTimes(1);
     expect(completeSimpleMock.mock.calls[0]?.[0]).toEqual(currentModel);
     expect(pi.setSessionName).toHaveBeenCalledWith("Resolved Title");
+  });
+
+  it("titles each stored session in a folder with its own model when set to session", async () => {
+    process.env.PI_CODING_AGENT_DIR = testFs.createTempDir();
+    const cwd = testFs.createTempDir();
+    const localModel = { provider: "llama-swap", id: "local-llama" };
+    const hostedModel = { provider: "anthropic", id: "claude-opus-4-5" };
+    writeStoredSession(cwd, localModel, "Tune the local model");
+    writeStoredSession(cwd, { provider: "ollama", id: "uninstalled" }, "Try a removed model");
+    loadSettingsMock.mockReturnValue({
+      autoTitle: { ...loadSettingsMock().autoTitle, model: "session" },
+    });
+
+    const { installAutoTitle } = await import("../extensions/session-auto-title/install.ts");
+    const { commands, pi } = createExtensionApi();
+    installAutoTitle(pi as never, buildDeps());
+    const ctx = {
+      ...createRetitleContext({
+        availableModels: [hostedModel, localModel],
+        currentModel: hostedModel,
+      }),
+      cwd,
+    };
+    completeSimpleMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "Local Title" }],
+    });
+
+    await commands.get("title")?.("folder -f", ctx as never);
+
+    expect(completeSimpleMock.mock.calls.map((call) => call[0])).toEqual([localModel]);
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "Retitled 1/2 sessions in this folder · 1 failed",
+      "warning",
+    );
   });
 
   it("sends the titled session's id so session-routed providers accept the request", async () => {
@@ -372,6 +424,29 @@ describe("session auto-title extension", () => {
     );
   });
 });
+
+function writeStoredSession(cwd: string, model: { provider: string; id: string }, prompt: string) {
+  const sessionManager = SessionManager.create(cwd);
+  sessionManager.appendModelChange(model.provider, model.id);
+  sessionManager.appendMessage({ role: "user", content: prompt, timestamp: 1 });
+  sessionManager.appendMessage({
+    role: "assistant",
+    content: [{ type: "text", text: "Done" }],
+    api: "openai-completions",
+    provider: model.provider,
+    model: model.id,
+    usage: {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      totalTokens: 0,
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+    },
+    stopReason: "stop",
+    timestamp: 2,
+  });
+}
 
 function createRuntime(ctx: {
   modelRegistry: {

@@ -6,6 +6,7 @@ import type {
   TurnEndEvent,
 } from "@earendil-works/pi-coding-agent";
 import type { SessionLifecycle } from "../shared/composition.ts";
+import { findModelByReference } from "../shared/model.ts";
 import type { ModelRuntimeProvider } from "../shared/model-runtime.ts";
 import { isTuiMode } from "../shared/pi-mode.ts";
 import type { SessionSettings } from "../shared/settings.ts";
@@ -24,6 +25,7 @@ import {
   persistAutoTitleState,
   runBulkRetitle,
   runRetitlePlan,
+  type StoredSessionTitleModel,
 } from "./retitle.ts";
 import { showRetitleWizard } from "./wizard.ts";
 
@@ -68,6 +70,12 @@ export function installAutoTitle(
 
         const modelRuntime = getModelRuntime(ctx.modelRegistry);
         const resolution = resolveAutoTitleModel(modelRuntime, ctx.model, settings.autoTitle.model);
+        const storedTitleModel: StoredSessionTitleModel = (sessionModel) =>
+          resolveAutoTitleModel(
+            modelRuntime,
+            sessionModel && findModelByReference(modelRuntime.getAvailableSnapshot(), sessionModel),
+            settings.autoTitle.model,
+          )?.model;
         return handleTitleInvocation(
           pi,
           {
@@ -82,6 +90,7 @@ export function installAutoTitle(
           },
           ctx,
           resolution?.model,
+          storedTitleModel,
           invocation,
           buildGeneration(resolution),
         );
@@ -145,6 +154,7 @@ async function handleTitleInvocation(
   state: TitleRunState,
   ctx: ExtensionCommandContext,
   model: Model<Api> | undefined,
+  storedTitleModel: StoredSessionTitleModel,
   invocation: RetitleCommandInvocation,
   generation: AutoTitleGeneration,
 ): Promise<RetitleCommandOutcome> {
@@ -173,7 +183,15 @@ async function handleTitleInvocation(
       return retitleCurrentSession();
     }
 
-    return showRetitleWizard(pi, state.controller, ctx, model, state.getSessionEpoch, generation);
+    return showRetitleWizard(
+      pi,
+      state.controller,
+      ctx,
+      model,
+      storedTitleModel,
+      state.getSessionEpoch,
+      generation,
+    );
   }
 
   if (invocation.scope === "this") {
@@ -181,12 +199,21 @@ async function handleTitleInvocation(
   }
 
   if (isTuiMode(ctx) && !invocation.force) {
-    return showRetitleWizard(pi, state.controller, ctx, model, state.getSessionEpoch, generation, {
-      initialInvocation: {
-        scope: invocation.scope,
-        mode: invocation.mode ?? "backfill",
+    return showRetitleWizard(
+      pi,
+      state.controller,
+      ctx,
+      model,
+      storedTitleModel,
+      state.getSessionEpoch,
+      generation,
+      {
+        initialInvocation: {
+          scope: invocation.scope,
+          mode: invocation.mode ?? "backfill",
+        },
       },
-    });
+    );
   }
 
   const scan = await buildRetitleScopeScan(ctx, invocation.scope);
@@ -197,6 +224,7 @@ async function handleTitleInvocation(
       state.controller,
       ctx,
       model,
+      storedTitleModel,
       scan,
       mode,
       state.getSessionEpoch,

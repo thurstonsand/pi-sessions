@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### Added
+
+- `sessions.autoTitle.model: "session"` titles each session with its own model and never falls back to the hosted defaults ([#67](https://github.com/thurstonsand/pi-sessions/issues/67)).
+
+### Changed
+
+- `/title folder` and `/title pi` resolve the title model per stored session, so a stored session's last resort is its own model rather than the model of the session running the command.
+
 ## [0.23.0] - 2026-11-04
 
 ### Changed

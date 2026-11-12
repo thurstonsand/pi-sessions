@@ -64,6 +64,7 @@ function setup() {
     } as never,
     ctx as never,
     undefined,
+    () => undefined,
     () => 0,
     {} as never,
   );

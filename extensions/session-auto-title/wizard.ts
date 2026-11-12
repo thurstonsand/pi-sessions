@@ -21,6 +21,7 @@ import {
   type RetitleScopeScan,
   runBulkRetitle,
   runRetitlePlan,
+  type StoredSessionTitleModel,
 } from "./retitle.ts";
 
 interface RetitleWizardOptions {
@@ -56,6 +57,7 @@ export async function showRetitleWizard(
   controller: SessionAutoTitleController,
   ctx: ExtensionCommandContext,
   model: Model<Api> | undefined,
+  storedTitleModel: StoredSessionTitleModel,
   getSessionEpoch: () => number,
   generation: AutoTitleGeneration,
   options?: RetitleWizardOptions,
@@ -69,6 +71,7 @@ export async function showRetitleWizard(
         controller,
         ctx,
         model,
+        storedTitleModel,
         getSessionEpoch,
         generation,
         done,
@@ -108,6 +111,7 @@ class RetitleWizardPanel implements Focusable {
     private readonly controller: SessionAutoTitleController,
     private readonly ctx: ExtensionCommandContext,
     private readonly model: Model<Api> | undefined,
+    private readonly storedTitleModel: StoredSessionTitleModel,
     private readonly getSessionEpoch: () => number,
     private readonly generation: AutoTitleGeneration,
     private readonly done: (result: RetitleCommandOutcome) => void,
@@ -337,6 +341,7 @@ class RetitleWizardPanel implements Focusable {
       this.controller,
       this.ctx,
       this.model,
+      this.storedTitleModel,
       scan,
       mode,
       this.getSessionEpoch,

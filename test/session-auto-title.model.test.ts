@@ -47,6 +47,16 @@ describe("session auto-title model resolution", () => {
     });
   });
 
+  it("titles with the session's model, and never a fallback, when set to session", () => {
+    const sessionModel = createModel("llama-swap", "local-llama");
+    const fallbackModel = createModel("openai-codex", "gpt-5.6-luna");
+
+    expect(
+      resolveModel({ currentModel: sessionModel, availableModels: [fallbackModel] }, "session"),
+    ).toMatchObject({ model: sessionModel });
+    expect(resolveModel({ availableModels: [fallbackModel] }, "session")).toBeUndefined();
+  });
+
   it("prefers the first available internal fallback", () => {
     const lunaModel = createModel("openai-codex", "gpt-5.6-luna");
     const anthropicModel = createModel("anthropic", "claude-haiku-4-5");

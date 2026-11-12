@@ -24,6 +24,11 @@ export function resolveAutoTitleModel(
   currentModel: Model<Api> | undefined,
   configuredModel: string | undefined,
 ): AutoTitleModelResolution | undefined {
+  // "session" keeps titling on the provider the session chose, so it never reaches the fallbacks.
+  if (configuredModel === "session") {
+    return currentModel && { model: currentModel, source: "current" };
+  }
+
   if (configuredModel) {
     const configured = resolveAuthenticatedModel({
       modelRuntime,

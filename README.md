@@ -312,6 +312,7 @@ Note that generating titles for all sessions can take some time, and will hit yo
   - `anthropic/claude-haiku-4-5`
   - `google/gemini-flash-lite-latest`
   - your currently configured model
+- set `model` to `session` to title every session with its own model, so titles never leave the provider a session chose. When that model isn't available, titling fails rather than reaching for the list above.
 
 To change auto-titling settings, edit `~/.pi/agent/settings.json`:
 

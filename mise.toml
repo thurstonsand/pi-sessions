@@ -9,7 +9,7 @@ experimental = true
 enter = "mise bootstrap --yes --quiet"
 
 [tools]
-hk = "2.11.1"
+hk = "2.12.0"
 # hk's check and fix hooks run jactionlint, which runs shellcheck over every `run:` script
 "aqua:jdx/jactionlint" = "2.5.0"
 node = "26"

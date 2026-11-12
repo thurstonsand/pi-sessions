@@ -67,7 +67,12 @@ export default function piSessions(pi: ExtensionAPI): void {
           getParentSessionId: () => subagents?.getParentSessionId(),
         }),
         ...(subagents && messageRouter
-          ? { subagents: createSubagentDirectory(subagents, messageRouter, messaging, index.path) }
+          ? {
+              subagents: {
+                directory: createSubagentDirectory(subagents, messageRouter, messaging, index.path),
+                isAvailable: () => subagents.hasWorkerBackend(),
+              },
+            }
           : {}),
         claimsPeers: () => hosts.claimsPeers(),
       })

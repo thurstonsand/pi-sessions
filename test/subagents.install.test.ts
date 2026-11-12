@@ -66,6 +66,7 @@ describe("subagent installation", () => {
       createContext(parentId, []) as never,
     );
     expect(handle.getLaunchTargets().map((target) => target.value)).toEqual(["subagent"]);
+    expect(handle.hasWorkerBackend()).toBe(true);
 
     handle.onSessionShutdown?.(
       { type: "session_shutdown", reason: "reload" },
@@ -78,7 +79,7 @@ describe("subagent installation", () => {
     expect(handle.getLaunchTargets()).toEqual([]);
   });
 
-  it("disables workers quietly when neither tmux nor Herdr is available", async () => {
+  it("disables workers with one warning when neither tmux nor Herdr is available", async () => {
     vi.useFakeTimers();
     const { pi, handlers } = createPi({ tmuxInstalled: false });
     const handle = installSubagents(pi as never, createDeps(2));
@@ -96,9 +97,16 @@ describe("subagent installation", () => {
     );
     await vi.advanceTimersByTimeAsync(10_000);
     await handle.onSessionShutdown?.({ type: "session_shutdown", reason: "quit" }, ctx as never);
+    await handle.onSessionStart?.({ type: "session_start", reason: "new" }, ctx as never);
 
-    expect(ctx.ui.notify).not.toHaveBeenCalled();
-    expect(pi.exec.mock.calls.map(([, args]) => args[0])).toEqual(["-V"]);
+    expect(handle.hasWorkerBackend()).toBe(false);
+    expect(ctx.ui.notify.mock.calls).toEqual([
+      [
+        "Subagents are disabled: tmux is not installed and Pi is not running in Herdr. Install tmux or run Pi in Herdr to use them, or set sessions.subagents.enable to false to hide this warning.",
+        "warning",
+      ],
+    ]);
+    expect(pi.exec.mock.calls.map(([, args]) => args[0])).toEqual(["-V", "-V"]);
   });
 
   it.each([false, true])(
@@ -130,11 +138,12 @@ describe("subagent installation", () => {
         } as never,
       );
 
-      await handle.onSessionStart?.(
-        { type: "session_start", reason: "startup" },
-        createContext(parentId, []) as never,
-      );
+      const ctx = createContext(parentId, []);
+      await handle.onSessionStart?.({ type: "session_start", reason: "startup" }, ctx as never);
       const [target] = handle.getLaunchTargets();
+
+      expect(handle.hasWorkerBackend()).toBe(true);
+      expect(ctx.ui.notify).not.toHaveBeenCalled();
 
       expect(target?.description).toContain("detached Herdr worker");
       await expect(

@@ -71,6 +71,8 @@ export interface SubagentsHandle extends SessionLifecycle {
   roster: SubagentRoster;
   waker: SessionWaker;
   getLaunchTargets(): readonly HandoffLaunchTarget[];
+  /** False when the current session has neither a Herdr pane nor tmux to run workers in. */
+  hasWorkerBackend(): boolean;
   sendMessage(request: SendMessageRequest): Promise<SendMessageResult>;
   cancelSession(sessionId: string): Promise<SubagentCancelResult>;
   shouldMessageSubagent(sessionId: string): Promise<boolean>;
@@ -92,6 +94,7 @@ export function installSubagents(
 
   let epoch = 0;
   let current: CurrentSubagentSession | undefined;
+  let warnedNoWorkerBackend = false;
   const contextLimit = createSubagentContextLimit(
     deps.settings.subagents.contextLimit,
     deps.readCompactionSettings,
@@ -269,6 +272,7 @@ export function installSubagents(
       }
       return [createSubagentLaunchTarget(pi, parent.launchState, parent.runtime, isCurrentSession)];
     },
+    hasWorkerBackend: () => current?.parent.canLaunchWorkers ?? false,
     async onSessionStart(_event, ctx) {
       settledChildLifecycle.cancel();
       epoch += 1;
@@ -282,6 +286,14 @@ export function installSubagents(
         : (await isTmuxInstalled(pi, ctx.cwd))
           ? createTmuxWorkerRuntime(pi)
           : undefined;
+      // Once per extension load: every new, resumed, or forked session would otherwise repeat it.
+      if (!runtime && !warnedNoWorkerBackend) {
+        warnedNoWorkerBackend = true;
+        ctx.ui.notify(
+          "Subagents are disabled: tmux is not installed and Pi is not running in Herdr. Install tmux or run Pi in Herdr to use them, or set sessions.subagents.enable to false to hide this warning.",
+          "warning",
+        );
+      }
       const parent: ParentSessionState = {
         sessionId,
         getSessionName: () => sessionManager.getSessionName(),

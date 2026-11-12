@@ -14,7 +14,7 @@
 
 ### Fixed
 
-- Without tmux and outside Herdr, such as in Git Bash on Windows, sessions no longer report `Subagent lifecycle failed: Failed to list windows with tmux: spawn tmux ENOENT` at every start and exit, and `subagent_list` no longer fails the same way ([#69](https://github.com/thurstonsand/pi-sessions/issues/69)). Subagent launch stays unavailable there; waking an existing subagent says it needs tmux or Herdr.
+- Without tmux and outside Herdr, such as in Git Bash on Windows, sessions no longer report `Subagent lifecycle failed: Failed to list windows with tmux: spawn tmux ENOENT` at every start and exit ([#69](https://github.com/thurstonsand/pi-sessions/issues/69)). Subagents are disabled there instead: `subagent_launch`, `subagent_list`, `subagent_send`, and `subagent_cancel` are hidden, and Pi shows one warning when it starts. Set `sessions.subagents.enable` to `false` to silence it.
 
 ## [0.23.0] - 2026-11-04
 

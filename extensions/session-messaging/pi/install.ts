@@ -7,7 +7,7 @@ export function installDirectoryTools(
   pi: ExtensionAPI,
   deps: {
     peers: SessionDirectory;
-    subagents?: SessionDirectory;
+    subagents?: { directory: SessionDirectory; isAvailable(): boolean };
     claimsPeers(): boolean;
   },
 ): { refresh(): void } {
@@ -62,7 +62,7 @@ export function installDirectoryTools(
       pi.setActiveTools([...new Set([...pi.getActiveTools(), ...ownedPeerNames])]);
     }
     if (deps.subagents) {
-      const tools = createDirectoryTools(deps.subagents, {
+      const tools = createDirectoryTools(deps.subagents.directory, {
         list: {
           name: "subagent_list",
           description: "List owned subagents in the branch or tree.",
@@ -93,8 +93,13 @@ export function installDirectoryTools(
             : [],
         },
       });
-      for (const tool of tools) pi.registerTool(tool);
-      pi.setActiveTools([...new Set([...pi.getActiveTools(), ...tools.map((tool) => tool.name)])]);
+      const names = tools.map((tool) => tool.name);
+      if (deps.subagents.isAvailable()) {
+        for (const tool of tools) pi.registerTool(tool);
+        pi.setActiveTools([...new Set([...pi.getActiveTools(), ...names])]);
+      } else {
+        pi.setActiveTools(pi.getActiveTools().filter((name) => !names.includes(name)));
+      }
     }
   };
   pi.on("session_tree", refresh);

@@ -105,7 +105,7 @@ describe("peer claims", () => {
     };
     const installed = installDirectoryTools(pi, {
       peers: directory,
-      subagents: directory,
+      subagents: { directory, isAvailable: () => true },
       claimsPeers: () => claimed,
     });
     expect(definitions.size).toBe(0);
@@ -130,6 +130,48 @@ describe("peer claims", () => {
     );
     claimed = false;
     installed.refresh();
+    expect(active).toContain("session_list");
+  });
+
+  it("offers subagent tools only while a worker backend is available", () => {
+    const pi = createFakeExtensionApi();
+    let active = ["read", "subagent_list"];
+    let available = false;
+    const registered: string[] = [];
+    vi.mocked(pi.getActiveTools).mockImplementation(() => active);
+    vi.mocked(pi.setActiveTools).mockImplementation((tools) => {
+      active = tools;
+    });
+    vi.mocked(pi.registerTool).mockImplementation((tool) => {
+      registered.push(tool.name);
+    });
+    const directory: SessionDirectory = {
+      list: async () => [],
+      resolve: vi.fn(),
+      send: vi.fn(),
+      cancel: vi.fn(),
+      wake: vi.fn(),
+      getRelationTo: () => undefined,
+      getParentSessionId: () => undefined,
+    };
+    const installed = installDirectoryTools(pi, {
+      peers: directory,
+      subagents: { directory, isAvailable: () => available },
+      claimsPeers: () => false,
+    });
+    const subagentTools = ["subagent_list", "subagent_send", "subagent_cancel"];
+
+    installed.refresh();
+    expect(active).toEqual(["read", "session_list", "session_send_message", "session_cancel_turn"]);
+    expect(registered).not.toContain("subagent_list");
+
+    available = true;
+    installed.refresh();
+    expect(active).toEqual(expect.arrayContaining(subagentTools));
+
+    available = false;
+    installed.refresh();
+    expect(active.filter((name) => subagentTools.includes(name))).toEqual([]);
     expect(active).toContain("session_list");
   });
 

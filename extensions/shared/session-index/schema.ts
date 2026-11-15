@@ -75,21 +75,6 @@ export function initializeSchema(db: SessionIndexDatabase): void {
     CREATE INDEX IF NOT EXISTS session_repo_roots_root_idx ON session_repo_roots(repo_root);
     CREATE INDEX IF NOT EXISTS session_repo_roots_basename_idx ON session_repo_roots(repo_basename);
 
-    CREATE TABLE IF NOT EXISTS session_lineage_relations (
-      session_id TEXT NOT NULL,
-      related_session_id TEXT NOT NULL,
-      relation TEXT NOT NULL,
-      distance INTEGER NOT NULL,
-      PRIMARY KEY (session_id, related_session_id),
-      FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE,
-      FOREIGN KEY (related_session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS session_lineage_relations_related_idx
-      ON session_lineage_relations(related_session_id);
-    CREATE INDEX IF NOT EXISTS session_lineage_relations_relation_idx
-      ON session_lineage_relations(session_id, relation, distance);
-
     CREATE TABLE IF NOT EXISTS session_text_chunks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL,

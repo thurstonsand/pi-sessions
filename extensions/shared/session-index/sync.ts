@@ -16,7 +16,6 @@ import {
   getSessionRowByPath,
   insertSessionFileTouch,
   insertTextChunk,
-  refreshSessionLineageRelationsFor,
   type SessionIndexDatabase,
   type SessionLineageRow,
   type SessionOrigin,
@@ -215,13 +214,6 @@ function applyFullSync(
   const sessionRow = mergeSessionLineage(extracted, existingSession, sessionOrigin);
   clearSessionIndexedData(db, extracted.sessionId);
   upsertSession(db, sessionRow, "hook");
-  if (shouldRefreshLineageRelations(existingSession, sessionRow)) {
-    refreshSessionLineageRelationsFor(db, [
-      extracted.sessionId,
-      existingSession?.parentSessionId,
-      sessionRow.parentSessionId,
-    ]);
-  }
 
   for (const chunk of extracted.chunks) {
     insertTextChunk(db, { sessionId: extracted.sessionId, ...chunk });
@@ -242,7 +234,7 @@ function applyTailSync(
   sessionOrigin?: SessionOrigin,
 ): boolean {
   // A lineage entry can arrive after the initial header sync. Re-read the header to
-  // preserve its precedence and rebuild lineage through the normal full-sync path.
+  // preserve its precedence and record the parent through the normal full-sync path.
   if (tail.scan.lineage) return false;
 
   const scan = tail.scan;
@@ -377,19 +369,4 @@ function resolveSessionOrigin(
   }
 
   return extracted ?? existing;
-}
-
-function shouldRefreshLineageRelations(
-  existing: SessionLineageRow | undefined,
-  next: ExtractedSessionRecord,
-): boolean {
-  if (!existing) {
-    return true;
-  }
-
-  return (
-    existing.sessionPath !== next.sessionPath ||
-    existing.parentSessionPath !== next.parentSessionPath ||
-    existing.parentSessionId !== next.parentSessionId
-  );
 }

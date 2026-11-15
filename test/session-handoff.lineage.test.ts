@@ -3,15 +3,11 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { extractSessionRecord } from "../extensions/session-search/extract.ts";
 import {
-  getAncestorSessions,
-  getChildSessions,
+  getLineageRelationMap,
   getLineageSessions,
-  getParentSession,
-  getSiblingSessions,
   initializeSchema,
   insertSession,
   openIndexDatabase,
-  rebuildSessionLineageRelations,
 } from "../extensions/shared/session-index/index.ts";
 import { createSessionHookController } from "../extensions/shared/session-index/sync.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
@@ -45,7 +41,7 @@ describe("session handoff lineage", () => {
     expect(await hooks.handleTurnEnd(child)).toBe(true);
     const indexed = openIndexDatabase(dbPath);
     try {
-      expect(getParentSession(indexed, "child")?.sessionId).toBe("parent");
+      expect(getLineageRelationMap(indexed, "child").get("parent")).toBe("parent");
     } finally {
       indexed.close();
     }
@@ -173,20 +169,22 @@ describe("session handoff lineage", () => {
       "full_reindex",
     );
 
-    rebuildSessionLineageRelations(db);
-
-    const parent = getParentSession(db, "grandchild");
-    const ancestors = getAncestorSessions(db, "grandchild");
-    const children = getChildSessions(db, "root");
-    const siblings = getSiblingSessions(db, "child-a");
+    const idsFor = (sessionId: string, relation: string) =>
+      getLineageSessions(db, sessionId)
+        .filter((session) => session.relation === relation)
+        .map((session) => session.sessionId);
+    const parent = idsFor("grandchild", "parent");
+    const ancestors = idsFor("grandchild", "ancestor");
+    const children = idsFor("root", "child");
+    const siblings = idsFor("child-a", "sibling");
     const lineage = getLineageSessions(db, "grandchild");
 
     db.close();
 
-    expect(parent?.sessionId).toBe("child-a");
-    expect(ancestors.map((session) => session.sessionId)).toEqual(["child-a", "root"]);
-    expect(children.map((session) => session.sessionId)).toEqual(["child-b", "child-a"]);
-    expect(siblings.map((session) => session.sessionId)).toEqual(["child-b"]);
+    expect(parent).toEqual(["child-a"]);
+    expect(ancestors).toEqual(["root"]);
+    expect(children).toEqual(["child-b", "child-a"]);
+    expect(siblings).toEqual(["child-b"]);
     expect(lineage[0]).toMatchObject({
       sessionId: "grandchild",
       relation: "self",

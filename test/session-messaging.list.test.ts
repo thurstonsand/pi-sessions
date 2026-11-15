@@ -31,7 +31,6 @@ import {
   initializeSchema,
   insertSession,
   openIndexDatabase,
-  rebuildSessionLineageRelations,
   setMetadata,
 } from "../extensions/shared/session-index/index.ts";
 import type { SubagentsHandle } from "../extensions/subagents/install.ts";
@@ -117,7 +116,6 @@ describe("session_list tool", () => {
         sessionName: "Someone else's worker",
         sessionOrigin: "subagent",
       });
-      rebuildSessionLineageRelations(db);
     });
 
     const tool = createSessionListTool(

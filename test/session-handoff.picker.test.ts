@@ -20,7 +20,6 @@ import {
   insertSession,
   insertTextChunk,
   openIndexDatabase,
-  rebuildSessionLineageRelations,
 } from "../extensions/shared/session-index/index.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
@@ -714,8 +713,6 @@ function createTitleMatchPickerDb(): string {
       sourceKind: "session_name",
       text: "Selector session title",
     });
-
-    rebuildSessionLineageRelations(db);
   });
   db.close();
   return dbPath;
@@ -899,8 +896,6 @@ function createPickerDb(): string {
       },
       "full_reindex",
     );
-
-    rebuildSessionLineageRelations(db);
   });
   db.close();
   return dbPath;

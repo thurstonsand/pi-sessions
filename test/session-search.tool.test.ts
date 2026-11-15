@@ -22,7 +22,6 @@ import {
   insertSession,
   insertTextChunk,
   openIndexDatabase,
-  rebuildSessionLineageRelations,
   setMetadata,
 } from "../extensions/shared/session-index/index.ts";
 import { loadSettings } from "../extensions/shared/settings.ts";
@@ -325,7 +324,6 @@ describe("session_search tool", () => {
       sourceKind: "assistant_text",
       text: "autocomplete parser",
     });
-    rebuildSessionLineageRelations(db);
     db.close();
 
     const tool = registerSessionSearchTool();

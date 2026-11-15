@@ -3,6 +3,7 @@ import path from "node:path";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+  getLineageRelationMap,
   initializeSchema,
   openIndexDatabase,
   searchSessions,
@@ -286,15 +287,11 @@ describe("rebuildSessionIndex", () => {
     const child = db
       .prepare(`SELECT parent_session_id as parentSessionId FROM sessions WHERE session_id = ?`)
       .get("indexed-child");
-    const relations = db
-      .prepare(
-        `SELECT related_session_id as relatedSessionId FROM session_lineage_relations WHERE session_id = ?`,
-      )
-      .all("indexed-child");
+    const relations = getLineageRelationMap(db, "indexed-child");
     db.close();
 
     expect(child).toEqual({ parentSessionId: "excluded-parent" });
-    expect(relations).toEqual([{ relatedSessionId: "indexed-child" }]);
+    expect([...relations]).toEqual([["indexed-child", "self"]]);
   });
 
   it("replaces a valid index in place, so connections opened before the rebuild see it", async () => {

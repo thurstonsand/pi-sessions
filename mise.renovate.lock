@@ -44,3 +44,6 @@ specifiers = ["44.222.1"]
 [tools."npm:renovate".options]
 allow_builds = '["re2"]'
 trust_policy_excludes = '["@yarnpkg/libzip@3.2.2"]'
+
+[tools."npm:renovate".provenance]
+repository = "github.com/renovatebot/renovate"

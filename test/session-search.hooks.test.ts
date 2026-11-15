@@ -3,13 +3,17 @@ import path from "node:path";
 import { Worker } from "node:worker_threads";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  getLineageRelationMap,
   getMetadata,
   initializeSchema,
   openIndexDatabase,
   searchSessions,
   setMetadata,
 } from "../extensions/shared/session-index/index.ts";
-import { createSessionHookController } from "../extensions/shared/session-index/sync.ts";
+import {
+  createSessionHookController,
+  syncSessionFileWithDb,
+} from "../extensions/shared/session-index/sync.ts";
 import { createTestFilesystem } from "./test-helpers.ts";
 
 const testFs = createTestFilesystem("pi-sessions-hooks-");
@@ -660,70 +664,46 @@ describe("session-search hooks", () => {
     expect(sessionName.name).toBe("Renamed by auto-title");
   });
 
-  it("refreshes lineage for the affected family only", async () => {
+  it("indexes a new child with the same writes whether it has no siblings or many", () => {
     const root = testFs.createTempDir();
-    const indexPath = path.join(root, "index.sqlite");
-    const cwd = "/repo/app";
-
-    const db = openIndexDatabase(indexPath, { create: true });
+    const db = openIndexDatabase(path.join(root, "index.sqlite"), { create: true });
     initializeSchema(db);
-    setMetadata(db, "indexed_at", "2026-03-22T00:00:00.000Z");
-    db.close();
 
-    const writeSession = (name: string, id: string, parentSession?: string) =>
-      testFs.writeJsonlFile(root, name, [
+    const writeSession = (id: string, parentSession?: string) =>
+      testFs.writeJsonlFile(root, `${id}.jsonl`, [
         {
           type: "session",
           id,
           timestamp: "2026-03-22T00:00:00.000Z",
-          cwd,
+          cwd: "/repo/app",
           ...(parentSession ? { parentSession } : {}),
         },
       ]);
+    const totalChanges = () =>
+      (db.prepare("SELECT total_changes() AS count").get() as { count: number }).count;
+    const rowsWrittenToIndex = (sessionPath: string) => {
+      const before = totalChanges();
+      expect(syncSessionFileWithDb(db, sessionPath, "turn_end")).toBe(true);
+      return totalChanges() - before;
+    };
 
-    const famAParent = writeSession("fam-a-parent.jsonl", "fam-a-parent");
-    const famAChild = writeSession("fam-a-child.jsonl", "fam-a-child", famAParent);
-    const famBParent = writeSession("fam-b-parent.jsonl", "fam-b-parent");
-    const famBChild = writeSession("fam-b-child.jsonl", "fam-b-child", famBParent);
+    const loneParent = writeSession("lone-parent");
+    rowsWrittenToIndex(loneParent);
+    const onlyChildRows = rowsWrittenToIndex(writeSession("only-child", loneParent));
 
-    const controller = createSessionHookController({ indexPath });
-    for (const sessionPath of [famAParent, famAChild, famBParent, famBChild]) {
-      expect(await controller.handleTurnEnd(sessionPath)).toBe(true);
+    const busyParent = writeSession("busy-parent");
+    rowsWrittenToIndex(busyParent);
+    for (let index = 0; index < 50; index += 1) {
+      rowsWrittenToIndex(writeSession(`sibling-${index}`, busyParent));
     }
+    const newestChildRows = rowsWrittenToIndex(writeSession("newest-child", busyParent));
+    const oldestSiblingRelations = getLineageRelationMap(db, "sibling-0");
+    db.close();
 
-    const beforeDb = openIndexDatabase(indexPath, { create: false });
-    const famBRowids = beforeDb
-      .prepare(
-        `SELECT rowid FROM session_lineage_relations WHERE session_id IN ('fam-b-parent', 'fam-b-child') ORDER BY rowid`,
-      )
-      .all() as Array<{ rowid: number }>;
-    beforeDb.close();
-    expect(famBRowids.length).toBeGreaterThan(0);
-
-    const famAGrandchild = writeSession("fam-a-grandchild.jsonl", "fam-a-grandchild", famAChild);
-    expect(await controller.handleTurnEnd(famAGrandchild)).toBe(true);
-
-    const afterDb = openIndexDatabase(indexPath, { create: false });
-    // A scoped refresh leaves family B's rows physically untouched; a global
-    // rebuild reinserts them under new rowids.
-    const famBRowidsAfter = afterDb
-      .prepare(
-        `SELECT rowid FROM session_lineage_relations WHERE session_id IN ('fam-b-parent', 'fam-b-child') ORDER BY rowid`,
-      )
-      .all() as Array<{ rowid: number }>;
-    const grandchildRelations = afterDb
-      .prepare(
-        `SELECT related_session_id as relatedId, relation FROM session_lineage_relations WHERE session_id = 'fam-a-grandchild' ORDER BY related_session_id`,
-      )
-      .all() as Array<{ relatedId: string; relation: string }>;
-    afterDb.close();
-
-    expect(famBRowidsAfter).toEqual(famBRowids);
-    expect(grandchildRelations).toEqual([
-      { relatedId: "fam-a-child", relation: "parent" },
-      { relatedId: "fam-a-grandchild", relation: "self" },
-      { relatedId: "fam-a-parent", relation: "ancestor" },
-    ]);
+    expect(newestChildRows).toBe(onlyChildRows);
+    expect(oldestSiblingRelations.get("busy-parent")).toBe("parent");
+    expect(oldestSiblingRelations.get("newest-child")).toBe("sibling");
+    expect(oldestSiblingRelations.size).toBe(52);
   });
 
   it("searches session ids without storing session-id FTS chunks after a hook sync", async () => {

@@ -217,8 +217,9 @@ test("service enriches incoming receipts from the session index", async () => {
 
   const { SessionMessagingService } = await import("../extensions/session-messaging/pi/service.ts");
   const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
-  const { initializeSchema, insertSession, openIndexDatabase, rebuildSessionLineageRelations } =
-    await import("../extensions/shared/session-index/index.ts");
+  const { initializeSchema, insertSession, openIndexDatabase } = await import(
+    "../extensions/shared/session-index/index.ts"
+  );
 
   const indexPath = join(cleanupDir, "receipt-enrichment.sqlite");
   const sourceId = "receipt-source-session";
@@ -258,7 +259,6 @@ test("service enriches incoming receipts from the session index", async () => {
     },
     "full_reindex",
   );
-  rebuildSessionLineageRelations(db);
   db.close();
 
   const receivedMessages: unknown[] = [];

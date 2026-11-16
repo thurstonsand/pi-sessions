@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- The session messaging broker now resolves its directory through pi's agent dir, honoring `PI_CODING_AGENT_DIR` instead of always assuming `~/.pi/agent`.
+
 ## [0.23.2] - 2026-11-15
 
 ### Changed

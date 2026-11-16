@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.23.2] - 2026-11-15
+
 ### Changed
 
 - Session index schema version 17. The index rebuilds itself on the next session start.

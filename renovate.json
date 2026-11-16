@@ -9,7 +9,7 @@
     "helpers:pinGitHubActionDigests",
     ":enableVulnerabilityAlertsWithAdditionalLabel(security)"
   ],
-  "dependencyDashboard": true,
+  "dependencyDashboard": { "enabled": true },
   "timezone": "America/New_York",
   "labels": ["dependencies"],
   "minimumReleaseAge": "3 days",

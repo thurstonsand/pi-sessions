@@ -4,10 +4,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Session index schema version 17. The index rebuilds itself on the next session start.
+
 ### Fixed
 
 - A session with thousands of child sessions no longer makes indexing each new child hold the index's write lock for 30 seconds or more, which made other sessions fail with `database is locked` ([#70](https://github.com/thurstonsand/pi-sessions/issues/70)). The index no longer stores a row for every pair of related sessions; lineage is worked out from parent links when it is read, so indexing a session costs the same however large its family is.
-- Session index schema version 17. The index rebuilds itself on the next session start.
 
 ## [0.23.1] - 2026-11-12
 

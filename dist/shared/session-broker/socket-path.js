@@ -1,4 +1,3 @@
-import { homedir } from "node:os";
 import { join } from "node:path";
 function sanitizePipeSegment(value) {
     return (value
@@ -6,12 +5,7 @@ function sanitizePipeSegment(value) {
         .replace(/^-+|-+$/g, "")
         .toLowerCase() || "default");
 }
-export function getSessionMessagingDir(homeDir = homedir()) {
-    return (process.env.PI_SESSIONS_MESSAGING_DIR ??
-        join(homeDir, ".pi", "agent", "pi-sessions", "messaging"));
-}
-export function getSessionMessagingSocketPath(platform = process.platform, homeDir = homedir()) {
-    const messagingDir = getSessionMessagingDir(homeDir);
+export function getSessionMessagingSocketPath(messagingDir, platform = process.platform) {
     if (platform === "win32") {
         return `\\\\.\\pipe\\pi-sessions-messaging-${sanitizePipeSegment(messagingDir)}`;
     }

@@ -2,10 +2,7 @@ import { mkdirSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer, type Socket } from "node:net";
 import { join } from "node:path";
 import { readFrames, writeFrame } from "../../shared/session-broker/framing.ts";
-import {
-  getSessionMessagingDir,
-  getSessionMessagingSocketPath,
-} from "../../shared/session-broker/socket-path.ts";
+import { getSessionMessagingSocketPath } from "../../shared/session-broker/socket-path.ts";
 import {
   type BrokerClientFrame,
   type IncomingAckClientFrame,
@@ -18,8 +15,11 @@ const SEND_TIMEOUT_MS = 10_000;
 const EXIT_IDLE_MS = 5_000;
 const KEEPALIVE_DELAY_MS = 5_000;
 
-const messagingDir = getSessionMessagingDir();
-const socketPath = getSessionMessagingSocketPath();
+const messagingDir = process.argv[2];
+if (!messagingDir) {
+  throw new Error("Usage: process.js <messaging-dir>");
+}
+const socketPath = getSessionMessagingSocketPath(messagingDir);
 const pidPath = join(messagingDir, "broker.pid");
 
 interface PendingSend {

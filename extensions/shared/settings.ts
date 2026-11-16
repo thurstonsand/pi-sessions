@@ -143,6 +143,12 @@ export function getDefaultIndexDir(): string {
   return path.join(getAgentDir(), "pi-sessions");
 }
 
+export function getSessionMessagingDir(): string {
+  return (
+    process.env.PI_SESSIONS_MESSAGING_DIR ?? path.join(getAgentDir(), "pi-sessions", "messaging")
+  );
+}
+
 export function getDefaultAgentsDir(): string {
   return path.join(getAgentDir(), "agents");
 }

@@ -4,6 +4,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Session messaging now works when `PI_CODING_AGENT_DIR` points away from `~/.pi/agent`, such as in a container where `~/.pi/agent` is missing or not writable ([#73](https://github.com/thurstonsand/pi-sessions/pull/73)). The broker used to put its socket under `~/.pi/agent` regardless; it now lives under the agent directory Pi reports, alongside the session index.
+
 ## [0.23.2] - 2026-11-15
 
 ### Changed

@@ -53,10 +53,13 @@ test("compiled broker starts with no dependencies installed", async () => {
   // fixture deliberately holds nothing but the package itself.
   expect(readdirSync(join(fixtureDir, "node_modules"))).toEqual(["pi-sessions"]);
 
-  const child = spawn(process.execPath, [join(installedPackageDir, compiledBrokerPath)], {
-    env: { ...process.env, PI_SESSIONS_MESSAGING_DIR: messagingDir },
-    stdio: ["ignore", "ignore", "pipe"],
-  });
+  const child = spawn(
+    process.execPath,
+    [join(installedPackageDir, compiledBrokerPath), messagingDir],
+    {
+      stdio: ["ignore", "ignore", "pipe"],
+    },
+  );
   let stderr = "";
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk: string) => {
@@ -90,6 +93,7 @@ async function waitForBrokerPid(pidPath: string, child: ReturnType<typeof spawn>
 
 test("broker startup preserves the real failure and identifies its log", () => {
   const fixtureDir = mkdtempSync(join(tmpdir(), "pi-broker-failure-"));
+  const messagingDir = join(fixtureDir, "messaging");
   try {
     for (const relative of [
       "extensions/session-messaging/broker/spawn.ts",
@@ -111,11 +115,10 @@ test("broker startup preserves the real failure and identifies its log", () => {
         "--input-type=module",
         "--eval",
         `import { spawnSessionMessagingBrokerIfNeeded } from ${JSON.stringify(spawnUrl)};
-         try { await spawnSessionMessagingBrokerIfNeeded(); process.exitCode = 1; }
+         try { await spawnSessionMessagingBrokerIfNeeded(${JSON.stringify(messagingDir)}); process.exitCode = 1; }
          catch (error) { console.log(error.message); }`,
       ],
       {
-        env: { ...process.env, PI_SESSIONS_MESSAGING_DIR: join(fixtureDir, "messaging") },
         encoding: "utf8",
         timeout: 10_000,
       },

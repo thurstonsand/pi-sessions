@@ -14,7 +14,6 @@ import { getSessionMessagingSocketPath } from "./socket-path.ts";
 export const INCOMING_SESSION_ENVELOPE_EVENT = "session_messaging.incoming";
 
 const REQUEST_TIMEOUT_MS = 10_000;
-const SOCKET_PATH = getSessionMessagingSocketPath();
 
 interface PendingListRequest {
   resolve(sessionIds: string[]): void;
@@ -42,10 +41,16 @@ export interface SendSessionEnvelopeOptions {
 }
 
 export class SessionMessagingClient extends EventEmitter {
+  private readonly socketPath: string;
   private socket: net.Socket | undefined;
   private sessionId: string | undefined;
   private pendingLists = new Map<string, PendingListRequest>();
   private pendingSends = new Map<string, PendingSendRequest>();
+
+  constructor(messagingDir: string) {
+    super();
+    this.socketPath = getSessionMessagingSocketPath(messagingDir);
+  }
 
   get isConnected(): boolean {
     return Boolean(this.socket && !this.socket.destroyed && this.socket.writable && this.sessionId);
@@ -61,7 +66,7 @@ export class SessionMessagingClient extends EventEmitter {
     }
 
     await new Promise<void>((resolve, reject) => {
-      const socket = net.connect(SOCKET_PATH);
+      const socket = net.connect(this.socketPath);
       this.socket = socket;
       let settled = false;
 

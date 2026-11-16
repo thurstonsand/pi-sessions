@@ -11,35 +11,41 @@ import {
 import net from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  getSessionMessagingDir,
-  getSessionMessagingSocketPath,
-} from "../../shared/session-broker/socket-path.ts";
+import { getSessionMessagingSocketPath } from "../../shared/session-broker/socket-path.ts";
 
 const BROKER_START_TIMEOUT_MS = 5_000;
 const BROKER_CONNECT_TIMEOUT_MS = 1_000;
 const BROKER_SPAWN_LOCK_STALE_MS = 10_000;
 
-const brokerDir = getSessionMessagingDir();
-const brokerSocketPath = getSessionMessagingSocketPath();
-const brokerPidPath = join(brokerDir, "broker.pid");
-const brokerSpawnLockPath = join(brokerDir, "broker.spawn.lock");
-const brokerLogPath = join(brokerDir, "broker.log");
+interface BrokerPaths {
+  dir: string;
+  socket: string;
+  pid: string;
+  spawnLock: string;
+  log: string;
+}
 
-export async function spawnSessionMessagingBrokerIfNeeded(): Promise<void> {
-  mkdirSync(brokerDir, { recursive: true, mode: 0o700 });
+export async function spawnSessionMessagingBrokerIfNeeded(messagingDir: string): Promise<void> {
+  const paths: BrokerPaths = {
+    dir: messagingDir,
+    socket: getSessionMessagingSocketPath(messagingDir),
+    pid: join(messagingDir, "broker.pid"),
+    spawnLock: join(messagingDir, "broker.spawn.lock"),
+    log: join(messagingDir, "broker.log"),
+  };
+  mkdirSync(paths.dir, { recursive: true, mode: 0o700 });
 
-  if (await isBrokerRunning()) {
+  if (await isBrokerRunning(paths)) {
     return;
   }
 
-  if (!acquireSpawnLock()) {
-    await waitForBroker();
+  if (!acquireSpawnLock(paths)) {
+    await waitForBroker(paths);
     return;
   }
 
   try {
-    if (await isBrokerRunning()) {
+    if (await isBrokerRunning(paths)) {
       return;
     }
 
@@ -52,9 +58,9 @@ export async function spawnSessionMessagingBrokerIfNeeded(): Promise<void> {
         `Session messaging broker build not found: ${brokerPath}. Run npm install in the pi-sessions package directory.`,
       );
     }
-    const log = openSync(brokerLogPath, "w", 0o600);
+    const log = openSync(paths.log, "w", 0o600);
     try {
-      const child = spawn(process.execPath, [brokerPath], {
+      const child = spawn(process.execPath, [brokerPath, paths.dir], {
         detached: true,
         stdio: ["ignore", log, log],
         windowsHide: process.platform === "win32",
@@ -65,39 +71,39 @@ export async function spawnSessionMessagingBrokerIfNeeded(): Promise<void> {
         child.once("error", reject);
       });
       child.unref();
-      await waitForBroker(child);
+      await waitForBroker(paths, child);
     } finally {
       closeSync(log);
     }
   } finally {
-    releaseSpawnLock();
+    releaseSpawnLock(paths);
   }
 }
 
-async function isBrokerRunning(): Promise<boolean> {
-  if (await canConnectToBroker()) {
+async function isBrokerRunning(paths: BrokerPaths): Promise<boolean> {
+  if (await canConnectToBroker(paths)) {
     return true;
   }
 
-  if (!existsSync(brokerPidPath)) {
+  if (!existsSync(paths.pid)) {
     return false;
   }
 
   try {
-    const pid = Number.parseInt(readFileSync(brokerPidPath, "utf8").trim(), 10);
+    const pid = Number.parseInt(readFileSync(paths.pid, "utf8").trim(), 10);
     if (!Number.isFinite(pid)) {
       return false;
     }
     process.kill(pid, 0);
-    return canConnectToBroker();
+    return canConnectToBroker(paths);
   } catch {
     return false;
   }
 }
 
-function canConnectToBroker(): Promise<boolean> {
+function canConnectToBroker(paths: BrokerPaths): Promise<boolean> {
   return new Promise((resolve) => {
-    const socket = net.connect(brokerSocketPath);
+    const socket = net.connect(paths.socket);
     const finish = (connected: boolean): void => {
       clearTimeout(timeout);
       socket.off("connect", onConnect);
@@ -121,27 +127,27 @@ function canConnectToBroker(): Promise<boolean> {
   });
 }
 
-async function waitForBroker(child?: ChildProcess): Promise<void> {
+async function waitForBroker(paths: BrokerPaths, child?: ChildProcess): Promise<void> {
   const start = Date.now();
   while (Date.now() - start < BROKER_START_TIMEOUT_MS) {
-    if (await canConnectToBroker()) {
+    if (await canConnectToBroker(paths)) {
       return;
     }
     if (child && (child.exitCode !== null || child.signalCode !== null)) {
       throw new Error(
-        `Session messaging broker exited (${child.signalCode ?? child.exitCode}). See ${brokerLogPath}.`,
+        `Session messaging broker exited (${child.signalCode ?? child.exitCode}). See ${paths.log}.`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
 
-  throw new Error(`Session messaging broker failed to start. See ${brokerLogPath}.`);
+  throw new Error(`Session messaging broker failed to start. See ${paths.log}.`);
 }
 
-function acquireSpawnLock(): boolean {
+function acquireSpawnLock(paths: BrokerPaths): boolean {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     try {
-      writeFileSync(brokerSpawnLockPath, `${process.pid}\n${Date.now()}\n`, {
+      writeFileSync(paths.spawnLock, `${process.pid}\n${Date.now()}\n`, {
         flag: "wx",
       });
       return true;
@@ -149,9 +155,9 @@ function acquireSpawnLock(): boolean {
       if (!(error instanceof Error) || (error as NodeJS.ErrnoException).code !== "EEXIST") {
         throw error;
       }
-      if (isSpawnLockStale()) {
+      if (isSpawnLockStale(paths)) {
         try {
-          unlinkSync(brokerSpawnLockPath);
+          unlinkSync(paths.spawnLock);
         } catch {}
         continue;
       }
@@ -162,13 +168,13 @@ function acquireSpawnLock(): boolean {
   return false;
 }
 
-function isSpawnLockStale(): boolean {
-  if (!existsSync(brokerSpawnLockPath)) {
+function isSpawnLockStale(paths: BrokerPaths): boolean {
+  if (!existsSync(paths.spawnLock)) {
     return false;
   }
 
   try {
-    const [pidLine = "", createdAtLine = "0"] = readFileSync(brokerSpawnLockPath, "utf8")
+    const [pidLine = "", createdAtLine = "0"] = readFileSync(paths.spawnLock, "utf8")
       .trim()
       .split("\n");
     const pid = Number.parseInt(pidLine, 10);
@@ -188,9 +194,9 @@ function isSpawnLockStale(): boolean {
   }
 }
 
-function releaseSpawnLock(): void {
+function releaseSpawnLock(paths: BrokerPaths): void {
   try {
-    unlinkSync(brokerSpawnLockPath);
+    unlinkSync(paths.spawnLock);
   } catch {}
 }
 

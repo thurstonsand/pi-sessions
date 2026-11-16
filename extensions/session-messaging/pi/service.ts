@@ -24,6 +24,7 @@ import {
   getSessionById,
   withSessionIndex,
 } from "../../shared/session-index/index.ts";
+import { getSessionMessagingDir } from "../../shared/settings.ts";
 import { spawnSessionMessagingBrokerIfNeeded } from "../broker/spawn.ts";
 import type { ReceivedMessageEndpoint, ReceivedMessageEntry } from "./message-contracts.ts";
 
@@ -468,8 +469,9 @@ class BrokerConnection {
     this.client?.disconnect();
     this.client = undefined;
 
-    await spawnSessionMessagingBrokerIfNeeded();
-    const client = new SessionMessagingClient();
+    const messagingDir = getSessionMessagingDir();
+    await spawnSessionMessagingBrokerIfNeeded(messagingDir);
+    const client = new SessionMessagingClient(messagingDir);
     client.on(INCOMING_SESSION_ENVELOPE_EVENT, (requestId: string, envelope: SessionEnvelope) => {
       void this.acceptIncoming(client, requestId, envelope);
     });

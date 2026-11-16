@@ -1,20 +1,17 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, expect, test, vi } from "vitest";
 
-let cleanupDir: string | undefined;
+const messagingDir = mkdtempSync(join(tmpdir(), "pi-sessions-messaging-"));
 
 beforeAll(() => {
-  cleanupDir = mkdtempSync(join(tmpdir(), "pi-sessions-messaging-"));
-  process.env.PI_SESSIONS_MESSAGING_DIR = cleanupDir;
+  process.env.PI_SESSIONS_MESSAGING_DIR = messagingDir;
 });
 
 afterAll(() => {
   delete process.env.PI_SESSIONS_MESSAGING_DIR;
-  if (cleanupDir) {
-    rmSync(cleanupDir, { recursive: true, force: true });
-  }
+  rmSync(messagingDir, { recursive: true, force: true });
 });
 
 test("broker lists session ids and routes messages after target acknowledgement", async () => {
@@ -25,10 +22,10 @@ test("broker lists session ids and routes messages after target acknowledgement"
     "../extensions/shared/session-broker/client.ts"
   );
 
-  await spawnSessionMessagingBrokerIfNeeded();
+  await spawnSessionMessagingBrokerIfNeeded(messagingDir);
 
-  const source = new SessionMessagingClient();
-  const target = new SessionMessagingClient();
+  const source = new SessionMessagingClient(messagingDir);
+  const target = new SessionMessagingClient(messagingDir);
   try {
     await source.connect("source-session");
     await target.connect("target-session");
@@ -78,9 +75,9 @@ test("broker routes typed subagent reports with stamped identity", async () => {
   const { SessionMessagingService } = await import("../extensions/session-messaging/pi/service.ts");
   const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
 
-  await spawnSessionMessagingBrokerIfNeeded();
-  const parent = new SessionMessagingService(join(cleanupDir ?? tmpdir(), "reports.sqlite"));
-  const child = new SessionMessagingClient();
+  await spawnSessionMessagingBrokerIfNeeded(messagingDir);
+  const parent = new SessionMessagingService(join(messagingDir, "reports.sqlite"));
+  const child = new SessionMessagingClient(messagingDir);
   const handler = vi.fn();
   parent.onIncomingSubagentReport(handler);
   try {
@@ -122,10 +119,10 @@ test("broker stamps envelope identity instead of trusting sender fields", async 
     "../extensions/shared/session-broker/client.ts"
   );
 
-  await spawnSessionMessagingBrokerIfNeeded();
+  await spawnSessionMessagingBrokerIfNeeded(messagingDir);
 
-  const source = new SessionMessagingClient();
-  const target = new SessionMessagingClient();
+  const source = new SessionMessagingClient(messagingDir);
+  const target = new SessionMessagingClient(messagingDir);
   try {
     await source.connect("actual-source");
     await target.connect("actual-target");
@@ -162,16 +159,29 @@ test("broker stamps envelope identity instead of trusting sender fields", async 
   }
 });
 
-test("service acknowledges only after the typed incoming handler accepts", async () => {
-  if (!cleanupDir) {
-    throw new Error("Missing messaging temp directory");
-  }
+test("service starts the broker under pi's configured agent dir", async () => {
+  const { SessionMessagingService } = await import("../extensions/session-messaging/pi/service.ts");
+  const agentDir = join(messagingDir, "agent");
+  vi.stubEnv("PI_SESSIONS_MESSAGING_DIR", undefined);
+  vi.stubEnv("PI_CODING_AGENT_DIR", agentDir);
+  const service = new SessionMessagingService(join(messagingDir, "agent-dir.sqlite"));
 
+  try {
+    await service.start({ sessionManager: { getSessionId: () => "agent-dir-session" } } as never);
+
+    expect(existsSync(join(agentDir, "pi-sessions", "messaging", "broker.pid"))).toBe(true);
+  } finally {
+    service.stop();
+    vi.unstubAllEnvs();
+  }
+});
+
+test("service acknowledges only after the typed incoming handler accepts", async () => {
   const { SessionMessagingService } = await import("../extensions/session-messaging/pi/service.ts");
   const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
 
-  const target = new SessionMessagingService(join(cleanupDir, "acceptance.sqlite"));
-  const source = new SessionMessagingClient();
+  const target = new SessionMessagingService(join(messagingDir, "acceptance.sqlite"));
+  const source = new SessionMessagingClient(messagingDir);
   let accept: (() => void) | undefined;
   const acceptance = new Promise<void>((resolve) => {
     accept = resolve;
@@ -211,17 +221,13 @@ test("service acknowledges only after the typed incoming handler accepts", async
 });
 
 test("service enriches incoming receipts from the session index", async () => {
-  if (!cleanupDir) {
-    throw new Error("Missing messaging temp directory");
-  }
-
   const { SessionMessagingService } = await import("../extensions/session-messaging/pi/service.ts");
   const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
   const { initializeSchema, insertSession, openIndexDatabase } = await import(
     "../extensions/shared/session-index/index.ts"
   );
 
-  const indexPath = join(cleanupDir, "receipt-enrichment.sqlite");
+  const indexPath = join(messagingDir, "receipt-enrichment.sqlite");
   const sourceId = "receipt-source-session";
   const targetId = "receipt-target-session";
   const db = openIndexDatabase(indexPath, { create: true });
@@ -266,7 +272,7 @@ test("service enriches incoming receipts from the session index", async () => {
   service.onIncomingMessage((envelope) => {
     receivedMessages.push(service.buildReceivedMessage(envelope));
   });
-  const source = new SessionMessagingClient();
+  const source = new SessionMessagingClient(messagingDir);
 
   try {
     await service.start({ sessionManager: { getSessionId: () => targetId } } as never);
@@ -312,16 +318,12 @@ test("service enriches incoming receipts from the session index", async () => {
 });
 
 test("service cancels a live target and waits for broker registration", async () => {
-  if (!cleanupDir) {
-    throw new Error("Missing messaging temp directory");
-  }
-
   const { SessionMessagingService } = await import("../extensions/session-messaging/pi/service.ts");
   const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
 
-  const source = new SessionMessagingService(join(cleanupDir, "cancel.sqlite"));
-  const target = new SessionMessagingService(join(cleanupDir, "cancel.sqlite"));
-  const late = new SessionMessagingClient();
+  const source = new SessionMessagingService(join(messagingDir, "cancel.sqlite"));
+  const target = new SessionMessagingService(join(messagingDir, "cancel.sqlite"));
+  const late = new SessionMessagingClient(messagingDir);
   const cancellations: unknown[] = [];
   target.onIncomingCancel((envelope) => {
     cancellations.push(envelope);
@@ -369,10 +371,10 @@ test("broker requires exact target session ids", async () => {
   );
   const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
 
-  await spawnSessionMessagingBrokerIfNeeded();
+  await spawnSessionMessagingBrokerIfNeeded(messagingDir);
 
-  const source = new SessionMessagingClient();
-  const target = new SessionMessagingClient();
+  const source = new SessionMessagingClient(messagingDir);
+  const target = new SessionMessagingClient(messagingDir);
   try {
     await source.connect("exact-source");
     await target.connect("exact-target");
@@ -404,10 +406,10 @@ test("broker rejects duplicate live session registrations", async () => {
   );
   const { SessionMessagingClient } = await import("../extensions/shared/session-broker/client.ts");
 
-  await spawnSessionMessagingBrokerIfNeeded();
+  await spawnSessionMessagingBrokerIfNeeded(messagingDir);
 
-  const first = new SessionMessagingClient();
-  const duplicate = new SessionMessagingClient();
+  const first = new SessionMessagingClient(messagingDir);
+  const duplicate = new SessionMessagingClient(messagingDir);
   try {
     await first.connect("duplicate-session");
 
@@ -426,10 +428,10 @@ test("broker fails pending sends when target disconnects before acknowledgement"
     "../extensions/shared/session-broker/client.ts"
   );
 
-  await spawnSessionMessagingBrokerIfNeeded();
+  await spawnSessionMessagingBrokerIfNeeded(messagingDir);
 
-  const source = new SessionMessagingClient();
-  const target = new SessionMessagingClient();
+  const source = new SessionMessagingClient(messagingDir);
+  const target = new SessionMessagingClient(messagingDir);
   try {
     await source.connect("disconnect-source");
     await target.connect("disconnect-target");

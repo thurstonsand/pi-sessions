@@ -48,7 +48,7 @@ Pi loads extension code directly from TypeScript source. Only the detached messa
 
 ## Project structure
 
-- **Composition root**: `extensions/pi-sessions.ts`; feature-toggle and dependency-wiring logic. Should be the only place where `session_start`/`session_shutdown` subscription exists.
+- **Composition root**: `extensions/pi-sessions.ts`; feature-toggle and dependency-wiring logic. Should be the only place where `session_start`/`session_shutdown` subscription exists; its `resources_discover` subscription marks the session ready once every extension has started.
 - **Shared ports** at `extensions/shared/composition.ts`.
 - **Session search**: `extensions/session-search/install.ts`; result rendering at `extensions/session-search/renderer.ts`; core logic at `extensions/session-search/` and `extensions/shared/session-index/`.
 - **Session recall**: `extensions/session-recall/install.ts`; navigation agent logic at `extensions/session-recall/`; retrieval support at `extensions/shared/session-index/`.

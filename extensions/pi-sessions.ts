@@ -21,11 +21,13 @@ import { installSubagents, type SubagentsHandle } from "./subagents/install.ts";
  * dependency order, and wires them by constructor parameters.
  * It also owns the single `session_start`/`session_shutdown` subscription so lifecycle order
  * is deterministic: broker registration (messaging) resolves before any other feature hook,
- * and incoming messages start turns only once every feature hook has resolved.
+ * and turns (handoff kickoffs, incoming messages) start only once every extension's
+ * session_start has resolved.
  */
 export default function piSessions(pi: ExtensionAPI): void {
   const settings = loadSettings();
   let sessionEpoch = 0;
+  let sessionStarted = false;
   const hosts = new HostRegistry();
   let herdr: HerdrSession | undefined;
 
@@ -149,8 +151,18 @@ export default function piSessions(pi: ExtensionAPI): void {
       await lifecycle.onSessionStart?.(event, ctx);
     }
     directoryTools?.refresh();
+    sessionStarted = true;
+  });
+
+  // Extensions loaded after this one, such as codemode and MCP, are still setting up when this
+  // session_start resolves, and a turn started then is sent without their tools. Pi fires
+  // resources_discover once every session_start handler has resolved, on startup, new, resume,
+  // fork, and reload, before the first prompt.
+  pi.on("resources_discover", (_event, ctx) => {
+    if (!sessionStarted) return;
+    sessionStarted = false;
     for (const lifecycle of lifecycles) {
-      lifecycle.onSessionReady?.(ctx);
+      void lifecycle.onSessionReady?.(ctx);
     }
   });
 

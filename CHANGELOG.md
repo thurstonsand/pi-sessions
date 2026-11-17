@@ -4,6 +4,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Codemode scripts can call `subagent_launch`, so one script can start several subagents. `session_handoff` stays out of scripts, because a peer launched from a script would never appear on the handoff board.
+
+### Fixed
+
+- A handoff or subagent now starts its first turn only after every extension has finished starting, so that turn sees the tools that extensions such as codemode and MCP add at startup. It used to start while those were still being added, and providers that tie thinking to the exact tool list, such as Anthropic, could then reject the conversation.
+- A handoff or subagent launched into a symlinked directory, such as `/tmp` on macOS, now starts with its prepared session. The child Pi resolved the symlink and looked for the session in a different directory, so it started an empty session instead.
+
 ## [0.23.3] - 2026-11-16
 
 ### Fixed

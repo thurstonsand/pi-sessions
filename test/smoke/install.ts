@@ -96,6 +96,26 @@ export default function install(pi: ExtensionAPI): void {
     );
     renameSync(`${readyFile}.tmp`, readyFile);
   });
+  // An extension that finishes its startup only after pi-sessions' session_start resolved, as
+  // codemode and MCP can. The delay gives a kickoff started too early time to send its first
+  // request without this tool.
+  pi.on("resources_discover", async () => {
+    await delay(300);
+    pi.registerTool({
+      name: "smoke_late_tool",
+      label: "smoke_late_tool",
+      description: "Registered at the end of startup.",
+      parameters: Type.Object({}),
+      execute: async () => ({ content: [{ type: "text", text: "late" }], details: {} }),
+    });
+    pi.setActiveTools([...new Set([...pi.getActiveTools(), "smoke_late_tool"])]);
+  });
+  pi.registerCommand("smoke-codemode", {
+    description: "Let the model call codemode.",
+    handler: async () => {
+      pi.setActiveTools([...new Set([...pi.getActiveTools(), "codemode"])]);
+    },
+  });
   pi.on("before_agent_start", (_event, ctx) => {
     writeFileSync(
       join(getAgentDir(), `${ctx.sessionManager.getSessionId()}.tools.json`),

@@ -47,7 +47,7 @@ export class IncomingSessionMessageRuntime {
       throw new Error(SESSION_STARTING_MESSAGE);
     }
     this.actions.appendEntry(MESSAGE_RECEIVED_CUSTOM_TYPE, received);
-    // The broker connects before other features finish session_start, and a turn started now
+    // The broker connects before other extensions finish session_start, and a turn started now
     // would run without the tools they activate. The receipt is durable; open() replays it.
     if (this.ready) {
       this.inject(received);

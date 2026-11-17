@@ -11,8 +11,12 @@ import type {
  */
 export interface SessionLifecycle {
   onSessionStart?(event: SessionStartEvent, ctx: ExtensionContext): Promise<void> | void;
-  /** Runs once every feature's onSessionStart has resolved. */
-  onSessionReady?(ctx: ExtensionContext): void;
+  /**
+   * Runs once every extension's session_start handler has resolved, so the tools and system
+   * prompt other extensions set up at startup are in place. Turns started here see them.
+   * The root does not await it: startup finishes while it runs.
+   */
+  onSessionReady?(ctx: ExtensionContext): Promise<void> | void;
   onSessionShutdown?(event: SessionShutdownEvent, ctx: ExtensionContext): Promise<void> | void;
 }
 

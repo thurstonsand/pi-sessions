@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -327,15 +327,22 @@ describe("session handoff extension", () => {
     const pi = createPiApi(handlers, new Map(), vi.fn());
     installHandoffAndWire(installHandoff, pi, [target]);
 
-    const result = await runTool(pi, handlers, {
-      briefing: "Investigate it",
-      title: "Investigate",
-      launch: "subagent",
-      report_back: true,
-    });
+    const result = await runTool(
+      pi,
+      handlers,
+      {
+        briefing: "Investigate it",
+        title: "Investigate",
+        launch: "subagent",
+        report_back: true,
+      },
+      // A codemode script that already launched one subagent: its ledger entry is now the leaf.
+      { leafEntries: [{ type: "custom", customType: "pi-sessions.subagent_launched", data: {} }] },
+    );
 
     const definition = (pi.registerTool as ReturnType<typeof vi.fn>).mock.calls.at(-1)?.[0];
     expect(definition.name).toBe("subagent_launch");
+    expect(definition.exposure).toBeUndefined();
     expect(definition.parameters.properties).not.toHaveProperty("launch");
     expect(promptGuidelines(definition)).toContain(
       "Use subagent_launch for a concrete, bounded task that can proceed independently while useful work continues in the current session.",
@@ -349,6 +356,7 @@ describe("session handoff extension", () => {
       reportBack: true,
       bootstrapMode: "automatic",
       launch: "subagent",
+      sourceLeafId: "user-1",
     });
     expect(bootstrap.subagent).toEqual({
       childSessionId: "child-session-999",
@@ -558,6 +566,29 @@ describe("session handoff extension", () => {
     });
   });
 
+  it("launches into the real directory behind a symlinked cwd", async () => {
+    // macOS /tmp is a symlink to /private/tmp; the child's Pi derives its session directory
+    // from process.cwd(), which is always the real path.
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "pi-sessions-cwd-")));
+    mkdirSync(join(root, "real"));
+    symlinkSync(join(root, "real"), join(root, "link"));
+    const { installHandoff } = await import("../extensions/session-handoff/install.ts");
+    const handlers = new Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>();
+    const pi = createPiApi(handlers, new Map(), vi.fn());
+    installHandoffAndWire(installHandoff, pi);
+
+    await runTool(pi, handlers, {
+      briefing: "Do it",
+      title: "Do it now",
+      launch: "deferred",
+      cwd: join(root, "link"),
+    });
+
+    expect(mockPrepareHandoffLaunch).toHaveBeenCalledWith(
+      expect.objectContaining({ targetCwd: join(root, "real") }),
+    );
+  });
+
   it("degrades a split launch to deferred when no split backend is available", async () => {
     mockIsGhosttyHandoffAvailable.mockReturnValue(false);
     mockResolveSplitLaunchBackend.mockReturnValue(undefined);
@@ -718,6 +749,9 @@ describe("session handoff extension", () => {
       throw new Error("bootstrap failed");
     });
     await handlers.get("session_start")?.({}, ctx as never);
+    // Other extensions may still be registering tools; the first turn waits for readiness.
+    expect(ctx.ui.custom).not.toHaveBeenCalled();
+    await handlers.get("ready")?.({}, ctx as never);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith("bootstrap failed", "error");
     expect(ctx.shutdown).toHaveBeenCalledOnce();
@@ -737,6 +771,7 @@ describe("session handoff extension", () => {
       throw new Error("bootstrap failed");
     });
     await handlers.get("session_start")?.({}, ctx as never);
+    await handlers.get("ready")?.({}, ctx as never);
 
     expect(ctx.ui.notify).toHaveBeenCalledWith("bootstrap failed", "error");
     expect(ctx.shutdown).not.toHaveBeenCalled();
@@ -803,6 +838,10 @@ function installHandoffAndWire(
   if (lifecycle.onSessionStart) {
     pi.on("session_start", lifecycle.onSessionStart as never);
   }
+  if (lifecycle.onSessionReady) {
+    const onSessionReady = lifecycle.onSessionReady;
+    pi.on("ready", (_event, ctx) => Promise.resolve(onSessionReady(ctx as never)));
+  }
 }
 
 function createPiApi(
@@ -859,7 +898,7 @@ async function runTool(
   pi: ReturnType<typeof createPiApi>,
   handlers: Map<string, (event: unknown, ctx?: unknown) => Promise<unknown>>,
   params: Record<string, unknown>,
-  options?: { availableModels?: unknown[]; scopedModels?: unknown[] },
+  options?: { availableModels?: unknown[]; scopedModels?: unknown[]; leafEntries?: unknown[] },
 ): Promise<{
   content: Array<{ text?: string }>;
   details: Record<string, unknown>;
@@ -880,7 +919,41 @@ async function runTool(
   return definition.execute("call-1", params, undefined, () => {}, ctx) as never;
 }
 
-function createToolExecuteContext(options?: { availableModels?: unknown[] }) {
+function createToolExecuteContext(options?: {
+  availableModels?: unknown[];
+  leafEntries?: unknown[];
+}) {
+  const entries: { id: string; parentId: string | null }[] = [
+    {
+      type: "message",
+      id: "user-1",
+      parentId: null,
+      timestamp: "2026-03-23T00:00:00.000Z",
+      message: {
+        role: "user",
+        content: [{ type: "text", text: "Do the thing." }],
+        timestamp: 1,
+      },
+    },
+    {
+      type: "message",
+      id: "assistant-1",
+      parentId: "user-1",
+      timestamp: "2026-03-23T00:00:01.000Z",
+      message: {
+        role: "assistant",
+        content: [],
+        timestamp: 2,
+      },
+    },
+  ] as never;
+  for (const [index, entry] of (options?.leafEntries ?? []).entries()) {
+    entries.push({
+      ...(entry as object),
+      id: `leaf-${index}`,
+      parentId: entries.at(-1)?.id ?? null,
+    } as never);
+  }
   return {
     cwd: process.cwd(),
     model: { provider: "openai", id: "gpt-5.4" },
@@ -891,40 +964,10 @@ function createToolExecuteContext(options?: { availableModels?: unknown[] }) {
       getSessionId: () => "tool-session",
       getSessionFile: () => "/tmp/parent.jsonl",
       getSessionDir: () => "/tmp/sessions",
-      getLeafId: () => "assistant-1",
-      getEntry: (id: string) => {
-        if (id === "assistant-1") {
-          return { id: "assistant-1", parentId: "user-1" };
-        }
-        if (id === "user-1") {
-          return { id: "user-1", parentId: null };
-        }
-        return undefined;
-      },
-      getEntries: () => [
-        {
-          type: "message",
-          id: "user-1",
-          parentId: null,
-          timestamp: "2026-03-23T00:00:00.000Z",
-          message: {
-            role: "user",
-            content: [{ type: "text", text: "Do the thing." }],
-            timestamp: 1,
-          },
-        },
-        {
-          type: "message",
-          id: "assistant-1",
-          parentId: "user-1",
-          timestamp: "2026-03-23T00:00:01.000Z",
-          message: {
-            role: "assistant",
-            content: [],
-            timestamp: 2,
-          },
-        },
-      ],
+      getLeafId: () => entries.at(-1)?.id,
+      getEntry: (id: string) => entries.find((entry) => entry.id === id),
+      getEntries: () => entries,
+      getBranch: () => entries,
     },
   };
 }

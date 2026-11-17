@@ -10,6 +10,7 @@ import {
   realpathSync,
   rmSync,
   statSync,
+  symlinkSync,
   watch,
   writeFileSync,
 } from "node:fs";
@@ -48,7 +49,15 @@ const READY = Type.Object({
   packageEntry: Type.String(),
   tools: Type.Array(Type.String()),
 });
-const TOOL_RESULT = Type.Object({ details: Type.Optional(Type.Unknown()) });
+const TOOL_RESULT = Type.Object({
+  details: Type.Optional(Type.Unknown()),
+  content: Type.Array(Type.Object({ text: Type.Optional(Type.String()) })),
+});
+const SCRIPTED_LAUNCH = Type.Object({
+  session_id: Type.String(),
+  resume_command: Type.String(),
+  cwd: Type.String(),
+});
 
 async function waitFor<T>(
   label: string,
@@ -140,6 +149,15 @@ class RpcSession {
     return parseTypeBoxValue(TOOL_RESULT, event.result, "Invalid tool result");
   }
 
+  async command(text: string): Promise<void> {
+    const id = randomUUID();
+    this.send({ id, type: "prompt", message: text });
+    await waitFor(text, () => {
+      this.assertRunning();
+      return this.events.find((item) => item.type === "response" && item.id === id);
+    });
+  }
+
   async stop(): Promise<void> {
     if (this.child.exitCode !== null || this.child.signalCode !== null) return;
     // Ending stdin shuts Pi's RPC mode down directly. A command calling ctx.shutdown() can be
@@ -191,6 +209,10 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
   for (const directory of [agentDir, cwd, childCwd, artifacts, join(agentDir, "pi-sessions")]) {
     mkdirSync(directory, { recursive: true });
   }
+  // A symlinked cwd, like macOS /tmp -> /private/tmp: the child's Pi only finds its session
+  // through the real path.
+  const linkedChildCwd = join(root, "linked-project");
+  symlinkSync(childCwd, linkedChildCwd);
   writeFileSync(
     join(agentDir, "settings.json"),
     JSON.stringify({
@@ -322,18 +344,37 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
       expect(sent.details).toMatchObject({ delivered: true });
     }
 
-    const handoff = await parent.tool("subagent_launch", {
+    const launchArgs = {
       briefing: "Report SMOKE_REPORT to the parent.",
       title: "Smoke worker",
-      cwd: childCwd,
+      cwd: linkedChildCwd,
       report_back: true,
       ...(withHost ? {} : { agent: "smoke-reviewer" }),
-    });
-    const receipt = parseTypeBoxValue(
-      HANDOFF_TOOL_DETAILS_SCHEMA,
-      handoff.details,
-      "Invalid handoff",
-    );
+    };
+    let receipt: { sessionId: string; resumeCommand: string; cwd?: string | undefined };
+    if (withHost) {
+      const handoff = await parent.tool("subagent_launch", launchArgs);
+      receipt = parseTypeBoxValue(HANDOFF_TOOL_DETAILS_SCHEMA, handoff.details, "Invalid handoff");
+    } else {
+      // Standalone launches from a codemode script, which receives the tool's text output.
+      await parent.command("/smoke-codemode");
+      const script = await parent.tool("codemode", {
+        code: `return await tools.subagent_launch(${JSON.stringify(launchArgs)});`,
+      });
+      const output = script.content.map((item) => item.text ?? "").join("\n");
+      expect(output, output).toContain("Script completed");
+      const launched = parseTypeBoxValue(
+        SCRIPTED_LAUNCH,
+        JSON.parse(output.slice(output.indexOf("{"), output.lastIndexOf("}") + 1)),
+        "Invalid scripted launch",
+      );
+      receipt = {
+        sessionId: launched.session_id,
+        resumeCommand: launched.resume_command,
+        cwd: launched.cwd,
+      };
+    }
+    expect(receipt.cwd).toBe(childCwd);
     childId = receipt.sessionId;
     if (!withHost) {
       expect(receipt.resumeCommand).toContain(
@@ -406,12 +447,15 @@ test.each(["standalone", "claim", "host-tools"])("real Pi integration (%s)", asy
     expect(messages).toHaveLength(2);
     expect(new Set(messages.map((message) => message.reportId)).size).toBe(2);
     expect(messages.every((message) => message.provenance === "live")).toBe(true);
-    if (!withHost) {
-      const views = readFileSync(join(agentDir, "worker-model-view.jsonl"), "utf8")
-        .trim()
-        .split("\n")
-        .map((line) => JSON.parse(line) as { systemPrompt: string; tools: string[] });
-      expect(views).toHaveLength(2);
+    const views = readFileSync(join(agentDir, "worker-model-view.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as { systemPrompt: string; tools: string[] });
+    expect(views).toHaveLength(2);
+    // The kickoff waits for every extension's startup, so even the first request carries the late
+    // tool. A profiled worker's --tools allowlist keeps it out.
+    if (withHost) for (const view of views) expect(view.tools).toContain("smoke_late_tool");
+    else {
       for (const view of views) {
         expect(view.tools.sort()).toEqual(["read", "submit_task_report"]);
         expect(view.systemPrompt).toMatch(

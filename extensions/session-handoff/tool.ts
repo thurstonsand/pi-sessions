@@ -1,4 +1,4 @@
-import { existsSync, statSync } from "node:fs";
+import { existsSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
@@ -81,12 +81,11 @@ export async function executeSessionHandoffTool(
     throw new Error("Handoff requires a persisted current session.");
   }
 
-  // Tools execute in parallel, so the leaf is still the invoking assistant turn; its parent is the
-  // last settled entry. Anchoring there keeps the launch receipt this handoff produces out of the snapshot.
-  const invocationLeafId = ctx.sessionManager.getLeafId();
-  const sourceLeafId = invocationLeafId
-    ? ctx.sessionManager.getEntry(invocationLeafId)?.parentId
-    : undefined;
+  // The snapshot ends just before the invoking assistant turn. Launches earlier in the same turn,
+  // including earlier calls from one codemode script, have already appended entries after it.
+  const sourceLeafId = ctx.sessionManager
+    .getBranch()
+    .findLast((entry) => entry.type === "message" && entry.message.role === "assistant")?.parentId;
   if (!sourceLeafId) {
     throw new Error("No conversation to hand off.");
   }
@@ -225,7 +224,9 @@ function resolveHandoffCwd(
   if (!statSync(resolvedPath).isDirectory()) {
     return { error: true, message: `Handoff cwd is not a directory: ${resolvedPath}` };
   }
-  return { path: resolvedPath };
+  // The child's Pi derives its session directory from process.cwd(), which resolves symlinks
+  // (macOS /tmp is /private/tmp). A symlinked path here would file the child where it never looks.
+  return { path: realpathSync(resolvedPath) };
 }
 
 function resolveRequestedPath(currentCwd: string, requestedPath: string): string {

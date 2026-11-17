@@ -78,8 +78,9 @@ export function installHandoff(
       name,
       label: "Session Handoff",
       description: "Start a new Pi session with a self-contained task.",
-      // Nested calls write no toolResult entry, so the board would never see the launch receipt.
-      exposure: "model-only",
+      // Nested calls write no toolResult entry, so the board would never see a peer launch
+      // receipt. Subagents reach the board through their ledger entry, so scripts may launch them.
+      ...(name === "session_handoff" ? { exposure: "model-only" as const } : {}),
       promptSnippet: offersSubagent
         ? "Delegate bounded work to a background subagent"
         : "Hand off context to another Pi session",
@@ -277,8 +278,9 @@ export function installHandoff(
       } else {
         pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "subagent_launch"));
       }
-
-      await consumePendingHandoffBootstrap(
+    },
+    onSessionReady(ctx) {
+      return consumePendingHandoffBootstrap(
         pi,
         ctx,
         deps.getModelRuntime,

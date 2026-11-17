@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.23.4] - 2026-11-17
+
 ### Changed
 
 - Codemode scripts can call `subagent_launch`, so one script can start several subagents. `session_handoff` stays out of scripts, because a peer launched from a script would never appear on the handoff board.

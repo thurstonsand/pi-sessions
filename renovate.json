@@ -65,10 +65,10 @@
       "enabled": false
     },
     {
-      "description": "Pi releases land as soon as they ship. Extensions run inside whatever pi the user has installed, so our types and smoke tests must track the newest release rather than wait out the npm release-age gate. Bumping raises the package.json floor too, so the declared range names the pi we actually build against.",
+      "description": "Pi releases land as soon as they ship. Track the newest release in the lockfile for types and smoke tests without raising the supported Pi floor in package.json.",
       "matchPackageNames": ["@earendil-works/**"],
       "minimumReleaseAge": null,
-      "rangeStrategy": "bump"
+      "rangeStrategy": "update-lockfile"
     },
     {
       "description": "Pi's docs/packages.md has a package declare the packages Pi provides as peerDependencies at \"*\", so it loads in whichever Pi hosts it. Renovate leaves those peers alone; the devDependencies carry the Pi the package is built against.",

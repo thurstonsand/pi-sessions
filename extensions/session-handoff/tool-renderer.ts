@@ -1,4 +1,4 @@
-import type { Theme } from "@earendil-works/pi-coding-agent";
+import type { KeybindingHints, Theme } from "@earendil-works/pi-coding-agent";
 import { type Component, Container, Spacer, Text } from "@earendil-works/pi-tui";
 import { ExpandableContentLayout } from "../shared/rendering/expandable-content-layout.ts";
 import type { ClipboardStatus } from "./launch/backend.ts";
@@ -11,8 +11,11 @@ export class HandoffToolComponent implements Component {
   private clipboardStatus: ClipboardStatus | undefined;
   private readonly layout: ExpandableContentLayout;
 
-  constructor(private readonly theme: Theme) {
-    this.layout = new ExpandableContentLayout(theme);
+  constructor(
+    private readonly theme: Theme,
+    keyText: KeybindingHints["keyText"],
+  ) {
+    this.layout = new ExpandableContentLayout(theme, keyText);
   }
 
   update(
@@ -29,7 +32,7 @@ export class HandoffToolComponent implements Component {
     this.layout.invalidate();
   }
 
-  render(width: number): string[] {
+  render(width: number) {
     if (!this.model) {
       return [];
     }

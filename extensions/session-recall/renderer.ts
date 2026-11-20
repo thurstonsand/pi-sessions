@@ -1,5 +1,6 @@
 import type {
   AgentToolResult,
+  KeybindingHints,
   Theme,
   ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
@@ -18,7 +19,7 @@ interface SessionRecallToolRendererState {
   layout?: ExpandableContentLayout | undefined;
 }
 
-interface SessionRecallToolRenderContext {
+interface SessionRecallToolRenderContext extends Pick<KeybindingHints, "keyText"> {
   state: SessionRecallToolRendererState;
   isError: boolean;
 }
@@ -56,7 +57,7 @@ export function renderSessionRecallResult(
     return new Text(content.text, 0, 0);
   }
 
-  const layout = context.state.layout ?? new ExpandableContentLayout(theme);
+  const layout = context.state.layout ?? new ExpandableContentLayout(theme, context.keyText);
   context.state.layout = layout;
   layout.update(
     buildSessionRecallPresentation(buildSessionRecallView(details), theme),

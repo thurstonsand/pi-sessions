@@ -40,7 +40,7 @@ function render(
   expanded: boolean,
   width = 120,
 ): string {
-  const component = new HandoffToolComponent(theme);
+  const component = new HandoffToolComponent(theme, () => "ctrl+o");
   component.update(buildHandoffToolView(renderArgs, result, "session_handoff"), expanded, "copied");
   return component.render(width).join("\n");
 }

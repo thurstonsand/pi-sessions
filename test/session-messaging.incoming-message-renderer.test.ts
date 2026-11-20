@@ -6,6 +6,7 @@ const theme = {
   fg: (_token: string, text: string) => text,
   bg: (_token: string, text: string) => text,
 };
+const keyText = (key: string) => (key === "app.tools.expand" ? "alt+e" : "");
 
 const received = {
   messageId: "msg-1",
@@ -21,13 +22,13 @@ const received = {
 function getRenderer() {
   return renderIncomingSessionMessage as unknown as (
     message: unknown,
-    options: { expanded: boolean; outputPad: number },
+    options: { expanded: boolean; outputPad: number; keyText: typeof keyText },
     rendererTheme: typeof theme,
   ) => { render(width: number): string[] } | undefined;
 }
 
 function renderIncoming(expanded: boolean, outputPad = 1): string {
-  const component = getRenderer()({ details: received }, { expanded, outputPad }, theme);
+  const component = getRenderer()({ details: received }, { expanded, outputPad, keyText }, theme);
   if (!component) {
     throw new Error("Incoming message renderer returned no component.");
   }
@@ -40,7 +41,7 @@ describe("incoming session-message renderer", () => {
 
     expect(rendered).toContain("incoming_message from Source Session (source-1)");
     expect(rendered).toContain("Long incoming row");
-    expect(rendered).toContain("more lines");
+    expect(rendered).toMatch(/\d+ more lines, \d+ total, alt\+e to expand/);
     expect(rendered).not.toContain("...");
     expect(rendered).not.toContain("Second row.");
     expect(rendered).not.toContain("Third row.");
@@ -65,7 +66,7 @@ describe("incoming session-message renderer", () => {
 
   it("returns no component for malformed details", () => {
     expect(
-      getRenderer()({ details: null }, { expanded: false, outputPad: 1 }, theme),
+      getRenderer()({ details: null }, { expanded: false, outputPad: 1, keyText }, theme),
     ).toBeUndefined();
   });
 });

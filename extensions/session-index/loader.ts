@@ -55,8 +55,12 @@ export class ReindexLoader implements Component {
     );
     this.cancelRow = lines.length;
     this.cancelHits = legend.hits;
-    lines.push(` ${legend.text}`, "", this.theme.fg("border", "─".repeat(Math.max(0, width))));
-    return lines;
+    return [
+      ...lines,
+      ` ${legend.text}`,
+      "",
+      this.theme.fg("border", "─".repeat(Math.max(0, width))),
+    ];
   }
 
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {

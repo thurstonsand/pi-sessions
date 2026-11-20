@@ -12,7 +12,7 @@ function createText(): CollapsibleText {
   return new CollapsibleText({
     collapsedRows: 3,
     theme,
-    keybindings: { getKeys: () => ["alt+e"] },
+    keyText: () => "alt+e",
   });
 }
 

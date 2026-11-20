@@ -48,7 +48,7 @@ export function createSessionListTool(
       const details = safeParseTypeBoxValue(SESSION_LIST_TOOL_DETAILS_SCHEMA, result.details);
       if (!details) return new Text(output, 0, 0);
       const state = context.state as SessionListRendererState;
-      const layout = state.layout ?? new ExpandableContentLayout(theme);
+      const layout = state.layout ?? new ExpandableContentLayout(theme, context.keyText);
       state.layout = layout;
       layout.update(
         buildSessionListPresentation(buildSessionListView(details), theme),

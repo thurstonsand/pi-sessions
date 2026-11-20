@@ -141,7 +141,7 @@ export function installHandoff(
       }),
       renderCall(args, theme, context) {
         const state = context.state as HandoffToolRendererState;
-        const component = state.callComponent ?? new HandoffToolComponent(theme);
+        const component = state.callComponent ?? new HandoffToolComponent(theme, context.keyText);
         state.callComponent = component;
         component.update(buildHandoffToolView(args, undefined, name), context.expanded);
         return component;

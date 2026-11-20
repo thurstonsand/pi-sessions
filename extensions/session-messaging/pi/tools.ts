@@ -101,7 +101,7 @@ export function createSessionSendMessageTool(
     parameters: SEND_MESSAGE_PARAMS,
     renderCall(args, theme, context) {
       const state = context.state as SendMessageRendererState;
-      const component = state.callComponent ?? new ExpandableContentLayout(theme);
+      const component = state.callComponent ?? new ExpandableContentLayout(theme, context.keyText);
       state.callComponent = component;
       component.update(
         buildSendMessagePresentation(

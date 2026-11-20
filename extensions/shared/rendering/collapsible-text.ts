@@ -1,19 +1,11 @@
-import {
-  type Component,
-  getKeybindings,
-  visibleWidth,
-  wrapTextWithAnsi,
-} from "@earendil-works/pi-tui";
+import type { KeybindingHints } from "@earendil-works/pi-coding-agent";
+import { type Component, visibleWidth, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import type { RenderTheme } from "./theme.ts";
-
-interface CollapsibleTextKeybindings {
-  getKeys(keybinding: "app.tools.expand"): string[];
-}
 
 export interface CollapsibleTextOptions {
   collapsedRows: number;
   theme: RenderTheme;
-  keybindings?: CollapsibleTextKeybindings | undefined;
+  keyText: KeybindingHints["keyText"];
 }
 
 export class CollapsibleText implements Component {
@@ -23,12 +15,12 @@ export class CollapsibleText implements Component {
   private hiddenSupplementalRows = 0;
   private readonly collapsedRows: number;
   private readonly theme: RenderTheme;
-  private readonly keybindings: CollapsibleTextKeybindings;
+  private readonly keyText: KeybindingHints["keyText"];
 
   constructor(options: CollapsibleTextOptions) {
     this.collapsedRows = Math.max(1, Math.floor(options.collapsedRows));
     this.theme = options.theme;
-    this.keybindings = options.keybindings ?? getKeybindings();
+    this.keyText = options.keyText;
   }
 
   setText(text: string): void {
@@ -69,7 +61,7 @@ export class CollapsibleText implements Component {
   }
 
   private formatExpandHint(remaining: number, total: number): string {
-    const keys = this.keybindings.getKeys("app.tools.expand").join("/");
+    const keys = this.keyText("app.tools.expand");
     const lineLabel = remaining === 1 ? "line" : "lines";
     if (!keys) {
       return this.theme.fg(

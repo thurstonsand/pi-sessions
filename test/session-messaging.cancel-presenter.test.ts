@@ -77,7 +77,7 @@ describe("cancel-session presentation", () => {
         options: unknown,
         theme: unknown,
         context: unknown,
-      ): { render(width: number): string[] };
+      ): { render(width: number): readonly string[] };
     };
     const details = managed("stopped");
     const result = {

@@ -1,10 +1,11 @@
 import path from "node:path";
 import type {
   AgentToolResult,
+  KeybindingHints,
   Theme,
   ToolRenderResultOptions,
 } from "@earendil-works/pi-coding-agent";
-import { type Component, getKeybindings, type Keybinding, Text } from "@earendil-works/pi-tui";
+import { type Component, Text } from "@earendil-works/pi-tui";
 import {
   stripSearchSnippetMarkers,
   transformSearchSnippetMatches,
@@ -18,7 +19,7 @@ import type {
 
 const COLLAPSED_RESULT_PREVIEW_ROWS = 6;
 
-interface SessionSearchRenderContext {
+interface SessionSearchRenderContext extends Pick<KeybindingHints, "keyText"> {
   isError: boolean;
 }
 
@@ -56,7 +57,9 @@ export function renderSessionSearchResult(
   }
 
   if (lines.length > 0) lines.push("");
-  lines.push(...formatSessionSearchPanelResults(details.results, details.params, expanded, theme));
+  lines.push(
+    ...formatSessionSearchPanelResults(details.results, details.params, expanded, theme, context),
+  );
   return new Text(lines.join("\n"), 0, 0);
 }
 
@@ -100,6 +103,7 @@ function formatSessionSearchPanelResults(
   params: SessionSearchToolParams | undefined,
   expanded: boolean,
   theme: Theme,
+  context: SessionSearchRenderContext,
 ): string[] {
   const visibleResults = expanded ? results : results.slice(0, COLLAPSED_RESULT_PREVIEW_ROWS);
   const lines = visibleResults.flatMap((result, index) => {
@@ -113,7 +117,13 @@ function formatSessionSearchPanelResults(
   });
 
   if (!expanded && results.length > visibleResults.length) {
-    lines.push(formatOverflowHint(results.length - visibleResults.length, results.length, theme));
+    const counts = `${results.length - visibleResults.length} more lines, ${results.length} total`;
+    const keys = context.keyText("app.tools.expand");
+    lines.push(
+      keys
+        ? `${theme.fg("muted", `... (${counts}, `)}${theme.fg("dim", keys)}${theme.fg("muted", " to expand)")}`
+        : theme.fg("muted", `... (${counts}, expand key unbound)`),
+    );
   }
 
   return lines;
@@ -150,15 +160,4 @@ function formatSearchSnippetText(snippet: string): string | undefined {
   return transformSearchSnippetMatches(snippet, (match) => `[${match}]`)
     ?.replace(/\s+/g, " ")
     .trim();
-}
-
-function formatOverflowHint(remaining: number, total: number, theme: Theme): string {
-  return `${theme.fg("muted", `... (${remaining} more lines, ${total} total,`)} ${theme.fg(
-    "dim",
-    formatKeyHint("app.tools.expand"),
-  )}${theme.fg("muted", " to expand)")}`;
-}
-
-function formatKeyHint(keybinding: Keybinding): string {
-  return getKeybindings().getKeys(keybinding).join("/");
 }

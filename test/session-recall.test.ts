@@ -193,7 +193,7 @@ describe("session_recall tool", () => {
         bold: (text: string) => text,
         fg: (_token: string, text: string) => text,
       } as never,
-      { isError: false, state: {} } as never,
+      { isError: false, state: {}, keyText: () => "ctrl+o" } as never,
     );
 
     const rows = component?.render(40) ?? [];

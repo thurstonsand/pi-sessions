@@ -11,7 +11,7 @@ export const renderIncomingSessionMessage: MessageRenderer = (message, options, 
     return undefined;
   }
 
-  const layout = new ExpandableContentLayout(theme);
+  const layout = new ExpandableContentLayout(theme, options.keyText);
   layout.update(
     buildIncomingMessagePresentation(buildIncomingMessageView(details), theme),
     options.expanded,

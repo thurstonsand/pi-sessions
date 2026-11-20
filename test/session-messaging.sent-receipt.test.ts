@@ -31,14 +31,14 @@ function getTool() {
       theme: unknown,
       context: unknown,
     ) => {
-      render(width: number): string[];
+      render(width: number): readonly string[];
     };
     renderResult: (
       result: unknown,
       options: unknown,
       theme: unknown,
       context: unknown,
-    ) => { render(width: number): string[] };
+    ) => { render(width: number): readonly string[] };
   };
 }
 
@@ -55,6 +55,7 @@ function renderCompleted(
     expanded,
     isError: false,
     lastComponent: undefined,
+    keyText: (key: string) => (key === "app.tools.expand" ? "alt+e" : ""),
   };
   const call = tool.renderCall(renderArgs, theme, context);
   tool.renderResult({ content: [], details }, { expanded, isPartial: false }, theme, context);
@@ -71,7 +72,7 @@ describe("sent session-message tool receipt", () => {
     expect(rendered).toContain("First line.");
     expect(rendered).toContain("Second line.");
     expect(rendered).toContain("Third line.");
-    expect(rendered).toContain("2 more lines, 5 total");
+    expect(rendered).toContain("2 more lines, 5 total, alt+e to expand");
     expect(rendered).not.toContain("...");
     expect(rendered).not.toContain("Fourth line.");
     expect(rendered).not.toContain("session target-1");

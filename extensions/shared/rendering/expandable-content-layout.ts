@@ -1,3 +1,4 @@
+import type { KeybindingHints } from "@earendil-works/pi-coding-agent";
 import { type Component, Container, Spacer, Text, wrapTextWithAnsi } from "@earendil-works/pi-tui";
 import { CollapsibleText } from "./collapsible-text.ts";
 import type { RenderTheme } from "./theme.ts";
@@ -21,7 +22,10 @@ export class ExpandableContentLayout implements Component {
   private body: CollapsibleText | undefined;
   private bodyRows: number | undefined;
 
-  constructor(private readonly theme: RenderTheme) {}
+  constructor(
+    private readonly theme: RenderTheme,
+    private readonly keyText: KeybindingHints["keyText"],
+  ) {}
 
   update(presentation: ExpandableContentPresentation, expanded: boolean): void {
     this.presentation = presentation;
@@ -37,6 +41,7 @@ export class ExpandableContentLayout implements Component {
       this.body = new CollapsibleText({
         collapsedRows: presentation.body.collapsedRows,
         theme: this.theme,
+        keyText: this.keyText,
       });
       this.bodyRows = presentation.body.collapsedRows;
     }
@@ -48,7 +53,7 @@ export class ExpandableContentLayout implements Component {
     this.body?.invalidate();
   }
 
-  render(width: number): string[] {
+  render(width: number) {
     if (!this.presentation) {
       return [];
     }

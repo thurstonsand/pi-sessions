@@ -19,7 +19,7 @@ const presentation = {
 
 describe("ExpandableContentLayout", () => {
   it("lays out compact metadata and collapsed body content", () => {
-    const layout = new ExpandableContentLayout(theme);
+    const layout = new ExpandableContentLayout(theme, () => "ctrl+o");
     layout.update(presentation, false);
 
     const rendered = layout.render(20).join("\n");
@@ -32,7 +32,7 @@ describe("ExpandableContentLayout", () => {
   });
 
   it("includes hidden metadata in collapsed line counts", () => {
-    const layout = new ExpandableContentLayout(theme);
+    const layout = new ExpandableContentLayout(theme, () => "ctrl+o");
     layout.update(
       {
         header: "header",
@@ -51,7 +51,7 @@ describe("ExpandableContentLayout", () => {
   });
 
   it("adds expanded metadata and the complete body", () => {
-    const layout = new ExpandableContentLayout(theme);
+    const layout = new ExpandableContentLayout(theme, () => "ctrl+o");
     layout.update(presentation, true);
 
     const rendered = layout.render(20).join("\n");
@@ -62,7 +62,7 @@ describe("ExpandableContentLayout", () => {
   });
 
   it("can be reused with a replacement presentation", () => {
-    const layout = new ExpandableContentLayout(theme);
+    const layout = new ExpandableContentLayout(theme, () => "ctrl+o");
     layout.update(presentation, false);
     layout.update({ header: "replacement" }, false);
 

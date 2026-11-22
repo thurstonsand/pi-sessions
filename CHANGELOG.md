@@ -13,6 +13,7 @@
 
 - The session index rebuild panel's cancel hint redraws and stays clickable on Pi 1.6.0.
 - Collapsed search results and session receipts show the host Pi's configured expand shortcut, even when the extension has a separate copy of Pi installed.
+- Automatic retitling counts user turns that a compaction summarized, so it no longer waits extra turns after every compaction. ([#78](https://github.com/thurstonsand/pi-sessions/issues/78))
 
 ## [0.23.4] - 2026-11-17
 

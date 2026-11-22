@@ -1,4 +1,4 @@
-import { buildSessionContext, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, SessionEntry } from "@earendil-works/pi-coding-agent";
 import type { AutoTitleSettings } from "../shared/settings.ts";
 import type { AutoTitleFailure } from "./generate.ts";
 import {
@@ -71,10 +71,7 @@ export function createSessionAutoTitleController(
       state.ensureAttached(ctx);
       pauseForManualOverrideIfNeeded(state, ctx);
 
-      const userTurnCount = countUserTurns(
-        buildSessionContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getLeafId())
-          .messages,
-      );
+      const userTurnCount = countUserTurns(ctx.sessionManager.getBranch());
       if (state.persistedState.mode === "paused_manual") {
         return {
           mode: state.persistedState.mode,
@@ -113,11 +110,7 @@ export function createSessionAutoTitleController(
         return { plan: undefined, persistedState };
       }
 
-      const sessionContext = buildSessionContext(
-        ctx.sessionManager.getEntries(),
-        ctx.sessionManager.getLeafId(),
-      );
-      const userTurnCount = countUserTurns(sessionContext.messages);
+      const userTurnCount = countUserTurns(ctx.sessionManager.getBranch());
       const status = resolveAutoRetitleStatus(
         settings.refreshTurns,
         userTurnCount,
@@ -135,14 +128,7 @@ export function createSessionAutoTitleController(
     },
     handleManualRetitle(ctx) {
       state.ensureAttached(ctx);
-      return buildTriggerPlan(
-        ctx,
-        "manual",
-        countUserTurns(
-          buildSessionContext(ctx.sessionManager.getEntries(), ctx.sessionManager.getLeafId())
-            .messages,
-        ),
-      );
+      return buildTriggerPlan(ctx, "manual", countUserTurns(ctx.sessionManager.getBranch()));
     },
     handleTitleApplied(title, plan) {
       state.lastFailure = undefined;
@@ -276,8 +262,8 @@ function buildTriggerPlan(
   };
 }
 
-function countUserTurns(messages: Array<{ role: string }>): number {
-  return messages.filter((message) => message.role === "user").length;
+export function countUserTurns(branch: SessionEntry[]): number {
+  return branch.filter((entry) => entry.type === "message" && entry.message.role === "user").length;
 }
 
 function formatFailureKey(failure: AutoTitleFailure): string {

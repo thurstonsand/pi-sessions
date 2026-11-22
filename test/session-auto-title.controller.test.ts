@@ -1,3 +1,4 @@
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 import {
   createSessionAutoTitleController,
@@ -282,5 +283,63 @@ describe("session auto-title controller", () => {
     expect(controller.getLastFailure(ctx)).toBeUndefined();
 
     expect(controller.handleTitleFailed(ctx, failure)).toBe(true);
+  });
+
+  it("counts user turns summarized by a compaction toward the next periodic retitle", () => {
+    const controller = createController(4);
+    const sessionManager = SessionManager.inMemory("/tmp");
+    const appendTurn = (turn: number): string => {
+      const userId = sessionManager.appendMessage({
+        role: "user",
+        content: [{ type: "text", text: `task ${turn}` }],
+        timestamp: turn,
+      } as never);
+      sessionManager.appendMessage({
+        role: "assistant",
+        content: [{ type: "text", text: "done" }],
+        api: "openai-completions",
+        provider: "test",
+        model: "test",
+        usage: {
+          input: 0,
+          output: 0,
+          cacheRead: 0,
+          cacheWrite: 0,
+          totalTokens: 0,
+          cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+        },
+        stopReason: "stop",
+        timestamp: turn,
+      } as never);
+      return userId;
+    };
+
+    let lastUserId = "";
+    for (let turn = 1; turn <= 9; turn += 1) {
+      lastUserId = appendTurn(turn);
+    }
+    sessionManager.appendSessionInfo("Current Title");
+    sessionManager.appendCustomEntry(
+      AUTO_TITLE_STATE_CUSTOM_TYPE,
+      createAutoTitleState({
+        mode: "active",
+        lastAutoTitle: "Current Title",
+        lastAppliedUserTurnCount: 9,
+        lastTrigger: "periodic",
+      }),
+    );
+    const ctx = { sessionManager } as never;
+    controller.handleSessionStart(ctx);
+
+    sessionManager.appendCompaction("summary of the first eight turns", lastUserId, 1000);
+    for (let turn = 10; turn <= 13; turn += 1) {
+      appendTurn(turn);
+    }
+
+    expect(controller.handleTurnEnd(ctx).plan).toEqual({
+      reason: "periodic",
+      userTurnCount: 13,
+      currentTitle: "Current Title",
+    });
   });
 });

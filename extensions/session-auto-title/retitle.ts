@@ -9,7 +9,11 @@ import { SessionManager } from "@earendil-works/pi-coding-agent";
 import type { ExactModelReference } from "../shared/model.ts";
 import type { RetitleMode, RetitleScope } from "./command.ts";
 import { buildAutoTitleContext } from "./context.ts";
-import type { AutoTitleTriggerPlan, SessionAutoTitleController } from "./controller.ts";
+import {
+  type AutoTitleTriggerPlan,
+  countUserTurns,
+  type SessionAutoTitleController,
+} from "./controller.ts";
 import {
   type AutoTitleGeneration,
   type AutoTitleGenerationResult,
@@ -284,7 +288,7 @@ async function retitleStoredSession(
   );
   const plan: AutoTitleTriggerPlan = {
     reason: "manual",
-    userTurnCount: titleContext.userTurnCount,
+    userTurnCount: countUserTurns(sessionManager.getBranch()),
     currentTitle,
   };
   const generatedTitle = await generateAutoTitle(

@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-11-22
+
 ### Changed
 
 - Raised the minimum supported Pi version to `1.6.0`. Older versions are no longer supported.

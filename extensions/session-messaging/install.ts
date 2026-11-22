@@ -61,6 +61,14 @@ export function installMessaging(
 
   pi.registerMessageRenderer(SESSION_MESSAGE_CUSTOM_TYPE, renderIncomingSessionMessage);
 
+  // Only interactive pi clears its steering queue on abort, dropping messages steered into the
+  // run. Elsewhere the queue survives and the next run delivers them, so replaying would repeat them.
+  pi.on("agent_settled", (event, ctx) => {
+    if (event.aborted && ctx.mode === "tui" && !turnDelivery.hasHeld()) {
+      incomingRuntime.replayUndelivered();
+    }
+  });
+
   return {
     sendMessage: (request) => service.sendMessage(request),
     sendSubagentReport: (request) => service.sendSubagentReport(request),

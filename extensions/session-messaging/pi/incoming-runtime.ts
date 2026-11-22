@@ -33,6 +33,13 @@ export class IncomingSessionMessageRuntime {
     this.ready = true;
   }
 
+  /** Re-delivers receipts the session never consumed, such as messages an aborted run dropped. */
+  replayUndelivered(): void {
+    if (this.ready) {
+      this.replayPending(this.requireContext());
+    }
+  }
+
   clearContext(): void {
     this.context = undefined;
     this.ready = false;

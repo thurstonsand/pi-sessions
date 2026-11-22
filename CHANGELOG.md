@@ -13,6 +13,7 @@
 
 - The session index rebuild panel's cancel hint redraws and stays clickable on Pi 1.6.0.
 - Collapsed search results and session receipts show the host Pi's configured expand shortcut, even when the extension has a separate copy of Pi installed.
+- A peer message that arrives while an interactive session is mid-turn is no longer lost when that turn is aborted with Escape or `session_cancel_turn`. Pi drops it from the steering queue on abort; pi-sessions now delivers it again as soon as the aborted run settles, instead of at the next session start. ([#77](https://github.com/thurstonsand/pi-sessions/issues/77))
 - Automatic retitling counts user turns that a compaction summarized, so it no longer waits extra turns after every compaction. ([#78](https://github.com/thurstonsand/pi-sessions/issues/78))
 
 ## [0.23.4] - 2026-11-17

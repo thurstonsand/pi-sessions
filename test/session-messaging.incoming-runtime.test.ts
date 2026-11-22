@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test, vi } from "vitest";
 import { buildHandoffKickoffMessage } from "../extensions/session-handoff/kickoff.ts";
 import {
@@ -5,7 +8,12 @@ import {
   HANDOFF_BOOTSTRAP_PENDING_CUSTOM_TYPE,
   SESSION_STARTING_MESSAGE,
 } from "../extensions/session-handoff/metadata.ts";
-import { IncomingSessionMessageRuntime } from "../extensions/session-messaging/pi/incoming-runtime.ts";
+import { installMessaging } from "../extensions/session-messaging/install.ts";
+import {
+  IncomingSessionMessageRuntime,
+  MESSAGE_RECEIVED_CUSTOM_TYPE,
+  SESSION_MESSAGE_CUSTOM_TYPE,
+} from "../extensions/session-messaging/pi/incoming-runtime.ts";
 import { createSessionCancelTool } from "../extensions/session-messaging/pi/tools.ts";
 
 function pendingBootstrapEntry() {
@@ -242,4 +250,95 @@ test("incoming cancellation is rejected until the target runtime is bound", () =
   const runtime = new IncomingSessionMessageRuntime({ appendEntry: vi.fn() } as never, vi.fn());
 
   expect(() => runtime.cancel()).toThrow("Target session is not ready.");
+});
+
+async function startMessagingAfterSteeredReceipt(mode: "tui" | "rpc") {
+  const root = mkdtempSync(join(tmpdir(), "pi-sessions-messaging-"));
+  vi.stubEnv("PI_CODING_AGENT_DIR", root);
+  const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+  const entries: unknown[] = [];
+  const sendMessage = vi.fn();
+  const pi = {
+    on: (name: string, handler: (event: unknown, ctx: unknown) => unknown) =>
+      handlers.set(name, handler),
+    registerMessageRenderer: () => {},
+    sendMessage,
+    appendEntry: (customType: string, data: unknown) =>
+      entries.push({ type: "custom", customType, data }),
+  };
+  const ctx = {
+    mode,
+    isIdle: () => true,
+    signal: undefined,
+    abort: () => {},
+    sessionManager: {
+      getEntries: () => entries,
+      getBranch: () => entries,
+      getSessionId: () => "target-1",
+      getSessionFile: () => undefined,
+      getCwd: () => root,
+    },
+  };
+  const messaging = installMessaging(pi as never, {
+    settings: {} as never,
+    index: { path: join(root, "index.db") },
+  });
+  await messaging.onSessionStart?.(
+    { type: "session_start", reason: "startup" } as never,
+    ctx as never,
+  );
+  await messaging.onSessionReady?.(ctx as never);
+  // The receipt was written and its message steered into the running turn; pi then dropped it.
+  const received = {
+    messageId: "m-1",
+    body: "hello",
+    source: { sessionId: "peer-1" },
+    target: { sessionId: "target-1" },
+    sentAt: "2026-11-19T03:00:00.000Z",
+    receivedAt: "2026-11-19T03:00:00.100Z",
+  };
+  entries.push({ type: "custom", customType: MESSAGE_RECEIVED_CUSTOM_TYPE, data: received });
+  const settle = async (aborted: boolean) =>
+    await handlers.get("agent_settled")?.({ type: "agent_settled", aborted }, ctx);
+  const stop = async () => {
+    await messaging.onSessionShutdown?.({} as never, ctx as never);
+    vi.unstubAllEnvs();
+    rmSync(root, { recursive: true, force: true });
+  };
+  return { entries, received, sendMessage, settle, stop };
+}
+
+test("an interactive abort re-delivers a message its run dropped, once", async () => {
+  const session = await startMessagingAfterSteeredReceipt("tui");
+  try {
+    await session.settle(false);
+    expect(session.sendMessage).not.toHaveBeenCalled();
+
+    await session.settle(true);
+    expect(session.sendMessage).toHaveBeenCalledTimes(1);
+    expect(session.sendMessage.mock.calls[0]?.[0]).toMatchObject({
+      customType: SESSION_MESSAGE_CUSTOM_TYPE,
+      details: { messageId: "m-1" },
+    });
+
+    session.entries.push({
+      type: "custom_message",
+      customType: SESSION_MESSAGE_CUSTOM_TYPE,
+      details: session.received,
+    });
+    await session.settle(true);
+    expect(session.sendMessage).toHaveBeenCalledTimes(1);
+  } finally {
+    await session.stop();
+  }
+});
+
+test("an RPC abort leaves pi's queue to deliver the message, so nothing is re-sent", async () => {
+  const session = await startMessagingAfterSteeredReceipt("rpc");
+  try {
+    await session.settle(true);
+    expect(session.sendMessage).not.toHaveBeenCalled();
+  } finally {
+    await session.stop();
+  }
 });

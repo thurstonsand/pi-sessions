@@ -4,6 +4,11 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Raised the minimum supported Pi version to `1.6.0`. Older versions are no longer supported.
+- Message, handoff, recall, and session-list cards in the transcript reuse their rendered lines while they are unchanged, instead of re-wrapping the whole message body on every frame. While Pi streams a reply, pi-sessions' share of each frame drops by about 98% in sessions with long messages. A card still redraws when its content, expansion, width, or theme changes.
+
 ### Fixed
 
 - The session index rebuild panel's cancel hint redraws and stays clickable on Pi 1.6.0.

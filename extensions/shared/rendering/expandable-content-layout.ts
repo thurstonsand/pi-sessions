@@ -21,6 +21,7 @@ export class ExpandableContentLayout implements Component {
   private expanded = false;
   private body: CollapsibleText | undefined;
   private bodyRows: number | undefined;
+  private rendered: { width: number; lines: readonly string[] } | undefined;
 
   constructor(
     private readonly theme: RenderTheme,
@@ -30,6 +31,7 @@ export class ExpandableContentLayout implements Component {
   update(presentation: ExpandableContentPresentation, expanded: boolean): void {
     this.presentation = presentation;
     this.expanded = expanded;
+    this.rendered = undefined;
 
     if (!presentation.body) {
       this.body = undefined;
@@ -50,12 +52,16 @@ export class ExpandableContentLayout implements Component {
   }
 
   invalidate(): void {
+    this.rendered = undefined;
     this.body?.invalidate();
   }
 
-  render(width: number) {
+  render(width: number): readonly string[] {
     if (!this.presentation) {
       return [];
+    }
+    if (this.rendered?.width === width) {
+      return this.rendered.lines;
     }
 
     const container = new Container();
@@ -79,7 +85,9 @@ export class ExpandableContentLayout implements Component {
       }
       container.addChild(this.body);
     }
-    return container.render(width);
+    const lines = container.render(width);
+    this.rendered = { width, lines };
+    return lines;
   }
 }
 

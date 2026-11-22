@@ -97,6 +97,17 @@ describe("session_handoff tool renderer", () => {
     expect(rendered).not.toContain("...");
   });
 
+  it("shows the arriving result on a call card that already rendered", () => {
+    const component = new HandoffToolComponent(theme, () => "ctrl+o");
+    component.update(buildHandoffToolView(args, undefined, "session_handoff"), false);
+    expect(component.render(120).join("\n")).not.toContain("pi --session-id 'child-1'");
+
+    component.update(buildHandoffToolView(args, details, "session_handoff"), false, "copied");
+    const rendered = component.render(120).join("\n");
+    expect(rendered).toContain("resume command · copied to clipboard");
+    expect(rendered).toContain("pi --session-id 'child-1'");
+  });
+
   it("adds full briefing and result metadata when expanded", () => {
     const rendered = render(args, details, true);
     expect(rendered).toContain("session child-1");

@@ -10,6 +10,7 @@ export class HandoffToolComponent implements Component {
   private model: HandoffToolViewModel | undefined;
   private clipboardStatus: ClipboardStatus | undefined;
   private readonly layout: ExpandableContentLayout;
+  private rendered: { width: number; lines: readonly string[] } | undefined;
 
   constructor(
     private readonly theme: Theme,
@@ -25,50 +26,51 @@ export class HandoffToolComponent implements Component {
   ): void {
     this.model = model;
     this.clipboardStatus = clipboardStatus;
+    this.rendered = undefined;
     this.layout.update(buildHandoffToolPresentation(model, this.theme), expanded);
   }
 
   invalidate(): void {
+    this.rendered = undefined;
     this.layout.invalidate();
   }
 
-  render(width: number) {
+  render(width: number): readonly string[] {
     if (!this.model) {
       return [];
+    }
+    if (this.rendered?.width === width) {
+      return this.rendered.lines;
     }
 
     const container = new Container();
     container.addChild(this.layout);
-    if (!this.model.result) {
-      return container.render(width);
-    }
-
+    const result = this.model.result;
     // Only a deferred handoff needs its command in the transcript, because the
     // user is the one who has to run it. A launched child is already running;
     // the board is where its command belongs.
-    if (this.model.result.launch === "deferred") {
+    if (result?.launch === "deferred") {
       container.addChild(new Spacer(1));
       container.addChild(
         createLaunchCommandComponent(
-          this.model.result.resumeCommand,
+          result.resumeCommand,
           formatDeferredCommandLabel(this.clipboardStatus),
           this.theme,
         ),
       );
     }
-    if (this.model.result.degradedFrom) {
+    if (result?.degradedFrom) {
       container.addChild(new Spacer(1));
       container.addChild(
         new Text(
-          this.theme.fg(
-            "muted",
-            `(requested ${this.model.result.degradedFrom}; split backend unavailable)`,
-          ),
+          this.theme.fg("muted", `(requested ${result.degradedFrom}; split backend unavailable)`),
           0,
           0,
         ),
       );
     }
-    return container.render(width);
+    const lines = container.render(width);
+    this.rendered = { width, lines };
+    return lines;
   }
 }

@@ -34,7 +34,7 @@
 
 ## Install
 
-Requires Pi `0.99.1` or newer and Node `>=24`.
+Requires Pi `1.6.0` or newer and Node `>=24`.
 
 **From npm** (recommended):
 

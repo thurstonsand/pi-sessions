@@ -61,6 +61,43 @@ describe("ExpandableContentLayout", () => {
     expect(rendered).not.toContain("more lines");
   });
 
+  it("re-renders a reused layout when its content, expansion, width, or theme changes", () => {
+    let mark = "~";
+    const switchableTheme = { ...theme, fg: (_token: string, text: string) => `${mark}${text}` };
+    const layout = new ExpandableContentLayout(switchableTheme, () => "ctrl+o");
+    const body = (text: string) => ({ header: "header", body: { text, collapsedRows: 1 } });
+    const visible = (width: number) => layout.render(width).map((line) => line.trimEnd());
+    const long = "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu";
+
+    layout.update(body("alpha beta gamma"), false);
+    expect(visible(80)).toEqual(["header", "", "alpha beta gamma"]);
+    expect(visible(80)).toEqual(["header", "", "alpha beta gamma"]);
+
+    layout.update(body(long), false);
+    expect(visible(80)).toEqual(["header", "", long]);
+
+    expect(visible(50)).toEqual([
+      "header",
+      "",
+      "alpha beta gamma delta epsilon zeta eta theta iota",
+      "~(1 more line, 2 total, ~ctrl+o~ to expand)",
+    ]);
+
+    layout.update(body(long), true);
+    expect(visible(50)).toEqual([
+      "header",
+      "",
+      "alpha beta gamma delta epsilon zeta eta theta iota",
+      "kappa lambda mu",
+    ]);
+
+    layout.update(body(long), false);
+    expect(visible(50)).toContain("~(1 more line, 2 total, ~ctrl+o~ to expand)");
+    mark = "#";
+    layout.invalidate();
+    expect(visible(50)).toContain("#(1 more line, 2 total, #ctrl+o# to expand)");
+  });
+
   it("can be reused with a replacement presentation", () => {
     const layout = new ExpandableContentLayout(theme, () => "ctrl+o");
     layout.update(presentation, false);

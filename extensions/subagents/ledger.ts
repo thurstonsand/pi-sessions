@@ -11,6 +11,7 @@ export const SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE = "pi-sessions.subagent_report_
 export const SUBAGENT_CLOSED_CUSTOM_TYPE = "pi-sessions.subagent_closed";
 export const SUBAGENT_REPORT_REMINDER_MESSAGE_CUSTOM_TYPE = "pi-sessions.report_reminder_message";
 export const SUBAGENT_DISOWNED_MESSAGE_CUSTOM_TYPE = "pi-sessions.subagent_disowned_message";
+export const SUBAGENT_EXITED_MESSAGE_CUSTOM_TYPE = "pi-sessions.subagent_exited_message";
 export const SUBAGENT_CANCELLED_CUSTOM_TYPE = "pi-sessions.subagent_cancelled";
 export const SUBAGENT_SUSPENDED_CUSTOM_TYPE = "pi-sessions.subagent_suspended";
 

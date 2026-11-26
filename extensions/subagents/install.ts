@@ -20,6 +20,7 @@ import { createSubagentLaunchTarget, type SubagentLaunchState } from "./launch-t
 import {
   hasSubagentLaunchEntries,
   parseSubagentReportMessage,
+  SUBAGENT_EXITED_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_LAUNCHED_CUSTOM_TYPE,
   SUBAGENT_REPORT_MESSAGE_CUSTOM_TYPE,
   SUBAGENT_REPORT_RECEIVED_CUSTOM_TYPE,
@@ -40,6 +41,7 @@ import {
   type SubagentChildSessionState,
 } from "./settle.ts";
 import { shouldMessageSubagent } from "./should-message.ts";
+import { checkWorkerStartup, formatWorkerExitedMessage } from "./startup-check.ts";
 import { SubagentWaker } from "./wake.ts";
 import {
   createHerdrWorkerRuntime,
@@ -270,7 +272,30 @@ export function installSubagents(
       ) {
         return [];
       }
-      return [createSubagentLaunchTarget(pi, parent.launchState, parent.runtime, isCurrentSession)];
+      return [
+        createSubagentLaunchTarget(
+          pi,
+          parent.launchState,
+          parent.runtime,
+          isCurrentSession,
+          (launch) =>
+            checkWorkerStartup({
+              runtime: parent.runtime,
+              ownerSessionId: parent.sessionId,
+              launch,
+              isCurrent: () => isCurrentSession(parent.epoch),
+              readChildBranch: (sessionFile) => openReconcileSession(sessionFile).getBranch(),
+              onExited: (failure) =>
+                deps.messaging.deliverTurnMessage({
+                  customType: SUBAGENT_EXITED_MESSAGE_CUSTOM_TYPE,
+                  content: formatWorkerExitedMessage(launch, failure),
+                  display: true,
+                  details: { childSessionId: launch.childSessionId },
+                }),
+              onError: parent.reportError,
+            }),
+        ),
+      ];
     },
     hasWorkerBackend: () => current?.parent.canLaunchWorkers ?? false,
     async onSessionStart(_event, ctx) {

@@ -9,6 +9,7 @@ describe("subagent launch target", () => {
   it("records ownership before creating a stamped tmux window", async () => {
     const order: string[] = [];
     const appendEntry = vi.fn(() => order.push("ledger"));
+    const onWorkerCreated = vi.fn();
     const exec = vi.fn(async (_command: string, args: string[]) => {
       order.push(args[0] ?? "exec");
       if (args[0] === "list-windows") {
@@ -27,6 +28,7 @@ describe("subagent launch target", () => {
       { sessionId: parentId, depth: 0, epoch: 3 },
       createTmuxWorkerRuntime({ exec } as never),
       (epoch) => epoch === 3,
+      onWorkerCreated,
     );
     expect(
       target.describeSubagentChild?.({
@@ -64,6 +66,9 @@ describe("subagent launch target", () => {
         cwd: "/repo",
       }),
     ).resolves.toEqual({ success: true, backend: "tmux" });
+    expect(onWorkerCreated).toHaveBeenCalledWith(
+      expect.objectContaining({ childSessionId: "child-session" }),
+    );
 
     expect(appendEntry).toHaveBeenCalledWith(
       SUBAGENT_LAUNCHED_CUSTOM_TYPE,
@@ -90,6 +95,7 @@ describe("subagent launch target", () => {
       { sessionId: parentId, depth: 0, epoch: 1 },
       createTmuxWorkerRuntime({ exec: vi.fn() }),
       () => false,
+      vi.fn(),
     );
 
     await expect(

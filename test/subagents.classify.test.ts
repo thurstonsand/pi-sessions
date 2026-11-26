@@ -38,6 +38,11 @@ describe("subagent classification", () => {
     ).toBe("starting");
   });
 
+  it("marks a child whose worker died before kickoff as interrupted, not starting", () => {
+    expect(classifySubagent({ ...base, awaitingKickoff: true })).toBe("interrupted");
+    expect(classifySubagent({ ...base, awaitingKickoff: true, suspended: true })).toBe("suspended");
+  });
+
   it("classifies registered children normally after kickoff", () => {
     expect(classifySubagent({ ...base, hasWindow: true, hasRegistered: true })).toBe("busy");
     expect(classifySubagent({ ...base, brokerLive: true, hasRegistered: true })).toBe("active");

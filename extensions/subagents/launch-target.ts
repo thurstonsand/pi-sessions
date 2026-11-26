@@ -15,6 +15,7 @@ export function createSubagentLaunchTarget(
   state: SubagentLaunchState,
   runtime: WorkerRuntime,
   isCurrent: (epoch: number) => boolean,
+  onWorkerCreated: (launched: SubagentLaunched) => void,
 ): HandoffLaunchTarget {
   return {
     value: SUBAGENT_LAUNCH,
@@ -57,6 +58,7 @@ export function createSubagentLaunchTarget(
           command: input.prepared.resumeCommand,
           piSessionId: input.prepared.sessionId,
         });
+        onWorkerCreated(launched);
         return { success: true, backend: runtime.name };
       } catch (error) {
         return { success: false, error: formatError(error) };

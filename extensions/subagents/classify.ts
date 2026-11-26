@@ -33,7 +33,8 @@ export function classifySubagent(evidence: SubagentEvidence): SubagentState {
   if (evidence.hasWindow && evidence.cancelled) {
     return "stopping";
   }
-  if (evidence.awaitingKickoff) {
+  // A child whose worker died before kickoff stays unstarted on disk, so the window decides.
+  if (evidence.awaitingKickoff && (evidence.hasWindow || evidence.brokerLive)) {
     return "starting";
   }
   if (evidence.hasWindow && !evidence.hasRegistered) {

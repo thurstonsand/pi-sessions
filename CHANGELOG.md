@@ -13,6 +13,7 @@
 - In RPC mode, `/title folder` and `/title pi` ask which sessions to retitle before titling any, like the terminal wizard. They used to start retitling at once.
 - A handoff session opened by an RPC host generates its draft and asks to start, edit, or put it in the editor. It used to report "Cancelled" at once and drop the handoff, because RPC mode never shows the loader it waited on.
 - `/handoff` in RPC mode now says that the board needs Pi's terminal UI, instead of asking for interactive mode.
+- A subagent whose worker exits as it starts, such as one whose `pi` command fails in the worker's shell, no longer leaves its parent waiting for a report that never comes. About two seconds after launch, without delaying the launch, the parent gets a message that the subagent exited before it started its task. `subagent_list` and the handoff board show it as interrupted instead of starting forever.
 
 ## [0.24.0] - 2026-11-22
 

@@ -19,7 +19,7 @@ install_mise() {
     return
   fi
 
-  curl -fsSL https://mise.run | MISE_INSTALL_HELP=0 sh
+  curl -fsSL https://mise.run | MISE_INSTALL_HELP=0 MISE_SELF_UPDATE_MINIMUM_RELEASE_AGE=3d sh
 }
 
 configure_mise_path() {

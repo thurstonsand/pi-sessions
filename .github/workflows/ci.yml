@@ -29,6 +29,7 @@ jobs:
         uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
           minimum_release_age: 3d
+          auto_update: true
           install: true
           cache: true
 
@@ -67,6 +68,7 @@ jobs:
         uses: jdx/mise-action@924e7c586e33d7d4bae9c14e26c5d22e2beb6e78 # v5.3.0
         with:
           minimum_release_age: 3d
+          auto_update: true
           install_args: node
           cache: true
 

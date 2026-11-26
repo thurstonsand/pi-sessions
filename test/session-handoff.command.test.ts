@@ -33,13 +33,16 @@ describe("/handoff", () => {
     expect(mockOpenHandoffBoard).not.toHaveBeenCalled();
   });
 
-  it("requires interactive mode", async () => {
+  it("explains that the board needs Pi's TUI when an RPC host runs it", async () => {
     const command = await installCommand();
-    const ctx = commandContext({ mode: "rpc", hasUI: false });
+    const ctx = commandContext({ mode: "rpc", hasUI: true });
 
     await command.handler("", ctx);
 
-    expect(ctx.ui.notify).toHaveBeenCalledWith("handoff requires interactive mode", "error");
+    expect(ctx.ui.notify).toHaveBeenCalledWith(
+      "/handoff opens a terminal board and needs Pi's TUI.",
+      "error",
+    );
     expect(mockOpenHandoffBoard).not.toHaveBeenCalled();
   });
 });

@@ -13,6 +13,15 @@ import type { SessionIndexStatus } from "../shared/session-index/index.ts";
 
 export type SessionIndexAction = "reindex" | undefined;
 
+export function describeSessionIndexStatus(status: SessionIndexStatus): string[] {
+  return [
+    `Path: ${status.exists ? status.dbPath : "<no index found>"}`,
+    `Schema version: ${status.schemaVersion !== undefined ? String(status.schemaVersion) : "n/a"}`,
+    `Session count: ${status.sessionCount !== undefined ? String(status.sessionCount) : "n/a"}`,
+    `Last full reindex: ${status.lastFullReindexAt ?? "n/a"}`,
+  ];
+}
+
 export class SessionIndexPanel implements Focusable {
   focused = false;
   private actionRows = new Map<number, LegendHit[]>();
@@ -53,27 +62,9 @@ export class SessionIndexPanel implements Focusable {
       this.renderRow(innerWidth, ` ${this.theme.bold(this.theme.fg("accent", "Session Index"))}`),
     );
     lines.push(this.renderRow(innerWidth, ""));
-    lines.push(
-      this.renderRow(
-        innerWidth,
-        ` Path: ${this.status.exists ? this.status.dbPath : "<no index found>"}`,
-      ),
-    );
-    lines.push(
-      this.renderRow(
-        innerWidth,
-        ` Schema version: ${this.status.schemaVersion !== undefined ? String(this.status.schemaVersion) : "n/a"}`,
-      ),
-    );
-    lines.push(
-      this.renderRow(
-        innerWidth,
-        ` Session count: ${this.status.sessionCount !== undefined ? String(this.status.sessionCount) : "n/a"}`,
-      ),
-    );
-    lines.push(
-      this.renderRow(innerWidth, ` Last full reindex: ${this.status.lastFullReindexAt ?? "n/a"}`),
-    );
+    for (const line of describeSessionIndexStatus(this.status)) {
+      lines.push(this.renderRow(innerWidth, ` ${line}`));
+    }
     if (this.status.recoveryMessage) {
       for (const line of wrapTextWithAnsi(
         this.status.recoveryMessage,

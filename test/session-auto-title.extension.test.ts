@@ -425,6 +425,71 @@ describe("session auto-title extension", () => {
   });
 });
 
+describe("session auto-title over RPC", () => {
+  it("asks which sessions to retitle before titling a folder", async () => {
+    process.env.PI_CODING_AGENT_DIR = testFs.createTempDir();
+    const cwd = testFs.createTempDir();
+    const model = { provider: "openai", id: "gpt-5.4-mini" };
+    writeStoredSession(cwd, model, "Tune the local model");
+    const { installAutoTitle } = await import("../extensions/session-auto-title/install.ts");
+    const { commands, pi } = createExtensionApi();
+    installAutoTitle(pi as never, buildDeps());
+    const select = vi.fn<(title: string, options: string[]) => Promise<string | undefined>>();
+    const ctx = {
+      ...createRetitleContext({ availableModels: [model], currentModel: model, hasUI: true }),
+      cwd,
+      mode: "rpc",
+      ui: { notify: vi.fn(), select, custom: vi.fn(async () => undefined) },
+    };
+    completeSimpleMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "Folder Title" }],
+    });
+
+    select.mockResolvedValueOnce(undefined);
+    await commands.get("title")?.("folder", ctx as never);
+    expect(completeSimpleMock).not.toHaveBeenCalled();
+
+    select.mockResolvedValueOnce("Generate missing titles (1)");
+    await commands.get("title")?.("folder", ctx as never);
+    expect(select.mock.calls[1]?.[1]).toEqual([
+      "Generate missing titles (1)",
+      "Regenerate all sessions, even ones that already have titles (1)",
+    ]);
+    expect(completeSimpleMock).toHaveBeenCalledOnce();
+    expect(ctx.ui.notify).toHaveBeenCalledWith("Retitled 1/1 sessions in this folder", "info");
+
+    await commands.get("title")?.("folder", ctx as never);
+    expect(select).toHaveBeenCalledTimes(2);
+    expect(ctx.ui.notify).toHaveBeenLastCalledWith(
+      "No untitled sessions found in this folder.",
+      "info",
+    );
+  });
+
+  it("opens the scope choice for a bare /title and retitles this session from it", async () => {
+    const { installAutoTitle } = await import("../extensions/session-auto-title/install.ts");
+    const { commands, pi } = createExtensionApi();
+    installAutoTitle(pi as never, buildDeps());
+    const model = { provider: "openai", id: "gpt-5.4-mini" };
+    const select = vi.fn(async (_title: string, options: string[]) => options[0]);
+    const ctx = {
+      ...createRetitleContext({ availableModels: [model], currentModel: model, hasUI: true }),
+      mode: "rpc",
+      ui: { notify: vi.fn(), select, custom: vi.fn(async () => undefined) },
+    };
+    completeSimpleMock.mockResolvedValue({
+      stopReason: "stop",
+      content: [{ type: "text", text: "Dialog Title" }],
+    });
+
+    await commands.get("title")?.("", ctx as never);
+
+    expect(select.mock.calls[0]?.[0]).toContain("This session: (untitled)");
+    expect(pi.setSessionName).toHaveBeenCalledWith("Dialog Title");
+  });
+});
+
 function writeStoredSession(cwd: string, model: { provider: string; id: string }, prompt: string) {
   const sessionManager = SessionManager.create(cwd);
   sessionManager.appendModelChange(model.provider, model.id);

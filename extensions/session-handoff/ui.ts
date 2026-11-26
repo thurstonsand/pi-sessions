@@ -1,4 +1,4 @@
-import type { ExtensionUIContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
   Key,
   matchesKey,
@@ -6,13 +6,25 @@ import {
   type TuiMouseEventResult,
 } from "@earendil-works/pi-tui";
 import { type LegendHit, LegendPointer, layoutLegend, legendHitAt } from "../shared/legend.ts";
+import { isTuiMode } from "../shared/pi-mode.ts";
 import { renderStrongModal } from "./strong-modal.ts";
 
+const HANDOFF_STATUS_KEY = "pi-sessions-handoff";
+
 export async function runHandoffTaskWithLoader<T>(
-  ctx: { ui: ExtensionUIContext },
+  ctx: Pick<ExtensionContext, "ui" | "mode">,
   label: string,
   task: (signal: AbortSignal) => Promise<T>,
 ): Promise<T | undefined> {
+  if (!isTuiMode(ctx)) {
+    ctx.ui.setStatus(HANDOFF_STATUS_KEY, label);
+    try {
+      return await task(new AbortController().signal);
+    } finally {
+      ctx.ui.setStatus(HANDOFF_STATUS_KEY, undefined);
+    }
+  }
+
   let taskError: unknown;
 
   const result = await ctx.ui.custom<T | undefined>(

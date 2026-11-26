@@ -4,6 +4,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- `/title` and `/session-index` work in Pi's RPC mode, such as Pi inside T3 Code. They ask through the host's select and confirm dialogs instead of the terminal panels, which RPC hosts cannot show. `/title` shows the last auto-title error in its first dialog, since there is no clipboard to copy it to.
+
+### Fixed
+
+- In RPC mode, `/title folder` and `/title pi` ask which sessions to retitle before titling any, like the terminal wizard. They used to start retitling at once.
+- A handoff session opened by an RPC host generates its draft and asks to start, edit, or put it in the editor. It used to report "Cancelled" at once and drop the handoff, because RPC mode never shows the loader it waited on.
+- `/handoff` in RPC mode now says that the board needs Pi's terminal UI, instead of asking for interactive mode.
+
 ## [0.24.0] - 2026-11-22
 
 ### Changed

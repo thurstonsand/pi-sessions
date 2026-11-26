@@ -17,6 +17,7 @@ import {
   type RetitleCommandOutcome,
 } from "./command.ts";
 import { createSessionAutoTitleController, type SessionAutoTitleController } from "./controller.ts";
+import { showRetitleDialog } from "./dialog.ts";
 import type { AutoTitleGeneration } from "./generate.ts";
 import { type AutoTitleModelResolution, resolveAutoTitleModel } from "./model.ts";
 import {
@@ -178,12 +179,14 @@ async function handleTitleInvocation(
     return "failed";
   };
 
+  const showRetitle = isTuiMode(ctx) ? showRetitleWizard : showRetitleDialog;
+
   if (invocation.kind === "open-pane") {
-    if (!isTuiMode(ctx)) {
+    if (!ctx.hasUI) {
       return retitleCurrentSession();
     }
 
-    return showRetitleWizard(
+    return showRetitle(
       pi,
       state.controller,
       ctx,
@@ -198,8 +201,8 @@ async function handleTitleInvocation(
     return runWithInFlightTracking(state, retitleCurrentSession);
   }
 
-  if (isTuiMode(ctx) && !invocation.force) {
-    return showRetitleWizard(
+  if (ctx.hasUI && !invocation.force) {
+    return showRetitle(
       pi,
       state.controller,
       ctx,

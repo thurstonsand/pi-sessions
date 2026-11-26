@@ -1000,6 +1000,7 @@ function createSessionStartContext(options: {
 }) {
   return {
     hasUI: true,
+    mode: "tui",
     scopedModels: options.scopedModels ?? [],
     ui: {
       notify: vi.fn(),

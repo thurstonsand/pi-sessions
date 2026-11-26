@@ -51,10 +51,14 @@ function setup() {
         );
       }),
   } as unknown as ExtensionUIContext;
-  const result = runHandoffTaskWithLoader({ ui }, "Generating handoff", (abortSignal) => {
-    signal = abortSignal;
-    return new Promise<string>(() => {});
-  });
+  const result = runHandoffTaskWithLoader(
+    { ui, mode: "tui" },
+    "Generating handoff",
+    (abortSignal) => {
+      signal = abortSignal;
+      return new Promise<string>(() => {});
+    },
+  );
   if (!panel || !signal) throw new Error("Loader factory did not run");
   return { panel, signal, result };
 }

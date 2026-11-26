@@ -24,7 +24,7 @@ import {
   type StoredSessionTitleModel,
 } from "./retitle.ts";
 
-interface RetitleWizardOptions {
+export interface RetitleWizardOptions {
   initialInvocation?: {
     scope: Exclude<RetitleScope, "this">;
     mode: RetitleMode;
@@ -579,19 +579,23 @@ function formatCurrentSessionTitleLines(
 }
 
 function formatAutoRetitleStatusLine(theme: Theme, status: AutoRetitleStatus): string {
+  return ` ${theme.fg("dim", describeAutoRetitleStatus(status))}`;
+}
+
+export function describeAutoRetitleStatus(status: AutoRetitleStatus): string {
   if (status.mode === "paused_manual") {
-    return ` ${theme.fg("dim", "(Auto-update disabled)")}`;
+    return "(Auto-update disabled)";
   }
 
   if (status.turnsUntilAutoRetitle === 0) {
-    return ` ${theme.fg("dim", "(Auto-update due now)")}`;
+    return "(Auto-update due now)";
   }
 
   const turnLabel = status.turnsUntilAutoRetitle === 1 ? "turn" : "turns";
-  return ` ${theme.fg("dim", `(Auto-update in ${status.turnsUntilAutoRetitle} ${turnLabel})`)}`;
+  return `(Auto-update in ${status.turnsUntilAutoRetitle} ${turnLabel})`;
 }
 
-function formatFailureClipboardText(failure: AutoTitleFailure): string {
+export function formatFailureClipboardText(failure: AutoTitleFailure): string {
   const lines = [
     `model: ${failure.model}`,
     `trigger: ${failure.trigger}`,

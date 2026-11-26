@@ -131,7 +131,7 @@ async function startChildGeneratedHandoff(
 
     let prompt = generatedDraft.draft;
     if (bootstrap.bootstrapMode === "review") {
-      const review = await reviewHandoffDraftForSend(ctx.ui, generatedDraft.draft);
+      const review = await reviewHandoffDraftForSend(ctx, generatedDraft.draft);
       if (review.action === "prefill") {
         consumeBootstrap("prefilled");
         ctx.ui.setEditorText(review.prompt);
@@ -144,6 +144,14 @@ async function startChildGeneratedHandoff(
         return;
       }
       prompt = review.prompt;
+    }
+
+    // Outside the TUI nothing blocks the prompt while the draft is generated and
+    // reviewed, so the user may have started the conversation in the meantime.
+    if (hasStartedConversation(ctx.sessionManager.getEntries())) {
+      consumeBootstrap("stale");
+      ctx.ui.notify(HANDOFF_STALE_SESSION_MESSAGE, "error");
+      return;
     }
 
     // The tool-provided bootstrap title is authoritative; extraction does not

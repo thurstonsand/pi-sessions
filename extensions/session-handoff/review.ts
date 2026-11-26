@@ -1,4 +1,4 @@
-import type { ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext, ExtensionUIContext, Theme } from "@earendil-works/pi-coding-agent";
 import type { Component, TuiMouseEvent, TuiMouseEventResult } from "@earendil-works/pi-tui";
 import {
   Key,
@@ -14,6 +14,7 @@ import {
   layoutLegend,
   legendHitAt,
 } from "../shared/legend.ts";
+import { isTuiMode } from "../shared/pi-mode.ts";
 import { renderStrongModal } from "./strong-modal.ts";
 
 const PREVIEW_TIMEOUT_MS = 8_000;
@@ -271,10 +272,13 @@ function renderPromptSection(lines: string[], width: number, _theme: Theme): str
 }
 
 export async function reviewHandoffDraftForSend(
-  ui: ExtensionUIContext,
+  ctx: Pick<ExtensionContext, "ui" | "mode">,
   draft: string,
 ): Promise<HandoffReviewResult> {
-  const action = await runPreviewGate(ui, draft);
+  const { ui } = ctx;
+  const action = isTuiMode(ctx)
+    ? await runPreviewGate(ui, draft)
+    : await selectPreviewAction(ui, draft);
   if (action === "cancel") {
     return { action: "prefill", prompt: draft };
   }
@@ -289,6 +293,35 @@ export async function reviewHandoffDraftForSend(
   }
 
   return { action: "send", prompt: editedDraft };
+}
+
+const PREVIEW_OPTIONS = {
+  accept: "Start session",
+  edit: "Edit prompt",
+  cancel: "Put prompt in editor",
+} as const satisfies Record<ReviewAction, string>;
+
+// Pi resolves an expired dialog the same way as a dismissed one, so a deadline owned
+// here tells the TUI-style autostart apart from an early dismissal.
+async function selectPreviewAction(ui: ExtensionUIContext, draft: string): Promise<ReviewAction> {
+  let expired = false;
+  const deadline = setTimeout(() => {
+    expired = true;
+  }, PREVIEW_TIMEOUT_MS);
+  const title = [
+    "**Handoff preview**",
+    "",
+    `Starts automatically in ${PREVIEW_TIMEOUT_MS / 1_000}s.`,
+    "",
+    draft,
+  ].join("\n");
+  const choice = await ui
+    .select(title, Object.values(PREVIEW_OPTIONS), { timeout: PREVIEW_TIMEOUT_MS })
+    .finally(() => clearTimeout(deadline));
+  const action = (Object.keys(PREVIEW_OPTIONS) as ReviewAction[]).find(
+    (key) => PREVIEW_OPTIONS[key] === choice,
+  );
+  return action ?? (expired ? "accept" : "cancel");
 }
 
 async function runPreviewGate(ui: ExtensionUIContext, draft: string): Promise<ReviewAction> {

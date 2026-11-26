@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import type { IndexHandle, SessionLifecycle } from "../shared/composition.ts";
 import { isTuiMode } from "../shared/pi-mode.ts";
-import { getIndexStatus } from "../shared/session-index/index.ts";
+import { getIndexStatus, type SessionIndexStatus } from "../shared/session-index/index.ts";
 import {
   getIndexRecoveryMessage,
   observeIndexRecovery,
@@ -11,7 +11,7 @@ import {
 import type { SessionSettings } from "../shared/settings.ts";
 
 import { ReindexLoader } from "./loader.ts";
-import { type SessionIndexAction, SessionIndexPanel } from "./panel.ts";
+import { describeSessionIndexStatus, type SessionIndexAction, SessionIndexPanel } from "./panel.ts";
 
 export function installIndex(
   pi: ExtensionAPI,
@@ -24,25 +24,27 @@ export function installIndex(
   pi.registerCommand("session-index", {
     description: "Open the session index control panel",
     handler: async (_args, ctx) => {
-      if (!isTuiMode(ctx)) {
+      if (!ctx.hasUI) {
         ctx.ui.notify("/session-index requires interactive mode.", "warning");
         return;
       }
 
       const status = getIndexStatus(indexPath);
       status.recoveryMessage = getIndexRecoveryMessage(indexPath);
-      const action = await ctx.ui.custom<SessionIndexAction>(
-        (tui, theme, _keybindings, done) =>
-          new SessionIndexPanel(theme, status, done, () => tui.requestRender()),
-        {
-          overlay: true,
-          overlayOptions: {
-            anchor: "center",
-            width: 72,
-            margin: 1,
-          },
-        },
-      );
+      const action = isTuiMode(ctx)
+        ? await ctx.ui.custom<SessionIndexAction>(
+            (tui, theme, _keybindings, done) =>
+              new SessionIndexPanel(theme, status, done, () => tui.requestRender()),
+            {
+              overlay: true,
+              overlayOptions: {
+                anchor: "center",
+                width: 72,
+                margin: 1,
+              },
+            },
+          )
+        : await selectSessionIndexAction(ctx, status);
 
       if (action !== "reindex") {
         return;
@@ -57,16 +59,23 @@ export function installIndex(
         return;
       }
 
+      if (!isTuiMode(ctx)) {
+        ctx.ui.notify("Rebuilding session index...", "info");
+        try {
+          notifyReindexed(ctx, await rebuildSessionIndex({ indexPath }));
+        } catch (error) {
+          ctx.ui.notify(`Reindex failed: ${String(error)}`, "error");
+        }
+        return;
+      }
+
       const result = await runReindexWithLoader(ctx, indexPath);
       if (!result) {
         ctx.ui.notify("Reindex cancelled.", "info");
         return;
       }
 
-      ctx.ui.notify(
-        `Indexed ${result.sessionCount} sessions and ${result.chunkCount} text chunks.`,
-        "info",
-      );
+      notifyReindexed(ctx, result);
     },
   });
 
@@ -86,6 +95,28 @@ export function installIndex(
       stopObserving = undefined;
     },
   };
+}
+
+const REBUILD_INDEX_OPTION = "Rebuild from disk";
+
+async function selectSessionIndexAction(
+  ctx: ExtensionCommandContext,
+  status: SessionIndexStatus,
+): Promise<SessionIndexAction> {
+  const lines = describeSessionIndexStatus(status).map((line) => `- ${line}`);
+  if (status.recoveryMessage) lines.push("", status.recoveryMessage);
+  const choice = await ctx.ui.select(["**Session Index**", "", ...lines].join("\n"), [
+    REBUILD_INDEX_OPTION,
+    "Close",
+  ]);
+  return choice === REBUILD_INDEX_OPTION ? "reindex" : undefined;
+}
+
+function notifyReindexed(ctx: ExtensionCommandContext, result: ReindexResult): void {
+  ctx.ui.notify(
+    `Indexed ${result.sessionCount} sessions and ${result.chunkCount} text chunks.`,
+    "info",
+  );
 }
 
 async function runReindexWithLoader(

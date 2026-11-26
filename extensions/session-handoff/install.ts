@@ -194,7 +194,7 @@ export function installHandoff(
     description: "Open the handoff board",
     handler: async (args, ctx): Promise<void> => {
       if (!isTuiMode(ctx)) {
-        ctx.ui.notify("handoff requires interactive mode", "error");
+        ctx.ui.notify("/handoff opens a terminal board and needs Pi's TUI.", "error");
         return;
       }
       if (args.trim()) {

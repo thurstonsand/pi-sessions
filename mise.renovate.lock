@@ -32,14 +32,11 @@ checksum = "sha256:e2edda75bfb089654705cf65a13b58933bfd5f57148e8ebda916f58a2474f
 url = "https://nodejs.org/dist/v26.13.1/node-v26.13.1-win-x64.zip"
 
 [[tools."npm:renovate"]]
-version = "44.257.9"
-aube = { path = ".mise/locks/mise.renovate/npm-renovate/44.257.9~026f02c4", digest = "sha256:22e8291c4f9058305aae1a4289d8103095a0ff3319d50626bb586fde538d3ecd" }
+version = "44.262.2"
+aube = { path = ".mise/locks/mise.renovate/npm-renovate/44.262.2~026f02c4", digest = "sha256:ae7189f6a024749e11b37c72c727502bcc3ab6ce8a9771ec1277fccbc8a2af97" }
 backend = "npm:renovate"
-specifiers = ["44.257.9"]
+specifiers = ["44.262.2"]
 
 [tools."npm:renovate".options]
 allow_builds = '["re2"]'
 trust_policy_excludes = '["@yarnpkg/libzip@3.2.2"]'
-
-[tools."npm:renovate".provenance]
-repository = "github.com/renovatebot/renovate"
